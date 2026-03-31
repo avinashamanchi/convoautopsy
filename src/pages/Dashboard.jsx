@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   getConversations, saveConversation, deleteConversation,
   clearSession, hasOnboarded
@@ -39,6 +39,8 @@ export default function Dashboard({ user, onLogout }) {
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [deleteConfirm, setDeleteConfirm] = useState(null)
+  const [dragOver, setDragOver] = useState(false)
+  const fileInputRef = useRef(null)
 
   useEffect(() => {
     setConversations(getConversations(user.username))
@@ -87,6 +89,30 @@ export default function Dashboard({ user, onLogout }) {
   }
 
   const handleLogout = () => { clearSession(); onLogout() }
+
+  const handleFile = (file) => {
+    if (!file) return
+    const name = file.name.toLowerCase()
+    if (!name.endsWith('.txt') && !name.endsWith('.log') && !name.endsWith('.csv')) {
+      setError('Upload a .txt file (WhatsApp export, Discord log, etc.)')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const text = e.target.result
+      setInputText(text)
+      setError('')
+      setActiveConvo(null)
+    }
+    reader.readAsText(file)
+  }
+
+  const handleDrop = (e) => {
+    e.preventDefault()
+    setDragOver(false)
+    const file = e.dataTransfer.files[0]
+    handleFile(file)
+  }
 
   return (
     <div className="dash-root">
@@ -172,17 +198,50 @@ export default function Dashboard({ user, onLogout }) {
             <div className="dash-input-view">
               <div className="dash-input-header">
                 <h2>New Autopsy</h2>
-                <p>Paste any conversation below. Use <code>Name: Message</code> format, one per line.</p>
+                <p>Paste a conversation or <strong>upload a .txt file</strong>. Use <code>Name: Message</code> format.</p>
               </div>
 
-              <textarea
-                className="dash-textarea"
-                value={inputText}
-                onChange={e => { setInputText(e.target.value); setError('') }}
-                placeholder={`Alex: I told you I'd be there by 7.\nJordan: You never listen to anything I say.\nAlex: That's not what I said.\nJordan: Whatever. I'm done.`}
-                rows={12}
-                disabled={analyzing}
-              />
+              {/* Drop zone wrapper */}
+              <div
+                className={`dash-dropzone ${dragOver ? 'drag-over' : ''}`}
+                onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={handleDrop}
+              >
+                <textarea
+                  className="dash-textarea"
+                  value={inputText}
+                  onChange={e => { setInputText(e.target.value); setError('') }}
+                  placeholder={`Alex: I told you I'd be there by 7.\nJordan: You never listen to anything I say.\nAlex: That's not what I said.\nJordan: Whatever. I'm done.`}
+                  rows={12}
+                  disabled={analyzing}
+                />
+                {dragOver && (
+                  <div className="dash-drop-overlay">
+                    <span className="dash-drop-icon">📂</span>
+                    <span>Drop your chat file here</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="dash-upload-row">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".txt,.log,.csv"
+                  style={{ display: 'none' }}
+                  onChange={e => handleFile(e.target.files[0])}
+                />
+                <button
+                  className="dash-upload-btn"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={analyzing}
+                  title="Upload WhatsApp export, Discord log, or any .txt file"
+                >
+                  ↑ Upload file
+                </button>
+                <span className="dash-upload-hint">WhatsApp .txt, Discord, or any chat export</span>
+              </div>
 
               {error && <div className="dash-error">{error}</div>}
 
