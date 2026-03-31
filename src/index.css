@@ -31,6 +31,17 @@ body {
   font-size: 16px;
   line-height: 1.6;
   overflow-x: hidden;
+  /* iOS safe areas for notch/Dynamic Island/home indicator */
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* Dashboard needs independent safe area handling */
+.dash-root {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 ::-webkit-scrollbar { width: 4px; }
@@ -177,7 +188,7 @@ body {
 .auth-switch-btn:hover { text-decoration: underline; }
 
 /* ── Dashboard ───────────────────────────────────────────── */
-.dash-root { display: flex; flex-direction: column; height: 100vh; overflow: hidden; background: var(--bg); }
+.dash-root { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; background: var(--bg); }
 
 .dash-nav {
   height: 56px;
