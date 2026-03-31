@@ -6,6 +6,7 @@ import {
 import { analyzeConversation, DEMO_TEXT, DEMO_RESULT } from '../utils/analyzeConversation'
 import AnalysisResult from '../components/AnalysisResult'
 import Onboarding from '../components/Onboarding'
+import ResponseCrafter from '../components/ResponseCrafter'
 
 function formatDate(ts) {
   const d = new Date(ts)
@@ -157,11 +158,16 @@ export default function Dashboard({ user, onLogout }) {
         {/* ── Main content ── */}
         <main className="dash-main">
           {activeConvo ? (
-            <AnalysisResult
-              result={activeConvo.result}
-              timestamp={activeConvo.timestamp}
-              onBack={() => setActiveConvo(null)}
-            />
+            <div className="dash-result-view">
+              <AnalysisResult
+                result={activeConvo.result}
+                timestamp={activeConvo.timestamp}
+                onBack={() => setActiveConvo(null)}
+              />
+              <div className="dash-crafter-wrap">
+                <ResponseCrafter result={activeConvo.result} conversationText={activeConvo.text} />
+              </div>
+            </div>
           ) : (
             <div className="dash-input-view">
               <div className="dash-input-header">
