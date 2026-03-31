@@ -4,7 +4,7 @@ import { gsap } from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import PhoneScene from '../components/PhoneScene'
 import DiagnosisPanel from '../components/DiagnosisPanel'
-import { analyzeConversation, DEMO_TEXT } from '../utils/analyzeConversation'
+import { analyzeConversation, DEMO_TEXT, DEMO_RESULT } from '../utils/analyzeConversation'
 import './LandingPage.css'
 
 gsap.registerPlugin(ScrollTrigger)
@@ -173,104 +173,195 @@ function LiveDemoSection({ onGetStarted }) {
   const [result, setResult] = useState(null)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
-  const resultRef = useRef()
+  const [visibleCount, setVisibleCount] = useState(0)
+  const [scoreDisplay, setScoreDisplay] = useState(0)
+  const [showBar, setShowBar] = useState(false)
+  const sectionRef = useRef()
+  const hasRunRef = useRef(false)
+  const runningRef = useRef(false)
 
-  const analyze = async () => {
-    if (!text.trim()) return
-    setLoading(true); setErr(''); setResult(null)
-    try {
-      const r = await analyzeConversation(text)
-      if (!r || !r.messages?.length) { setErr("Couldn't parse — use Name: Message format."); setLoading(false); return }
-      setResult(r)
-      setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 80)
-    } catch { setErr('Analysis failed. Try again.') }
+  const runDemo = async (inputText = text, preResult = null) => {
+    if (runningRef.current) return
+    runningRef.current = true
+    setLoading(true)
+    setResult(null)
+    setVisibleCount(0)
+    setScoreDisplay(0)
+    setShowBar(false)
+    setErr('')
+
+    let analysisResult = preResult
+    if (!analysisResult) {
+      await new Promise(r => setTimeout(r, 1100))
+      try {
+        const r = await analyzeConversation(inputText)
+        if (!r || !r.messages?.length) {
+          setErr("Couldn't parse — use Name: Message format.")
+          setLoading(false)
+          runningRef.current = false
+          return
+        }
+        analysisResult = r
+      } catch {
+        setErr('Analysis failed.')
+        setLoading(false)
+        runningRef.current = false
+        return
+      }
+    }
+
     setLoading(false)
+    setResult(analysisResult)
+
+    // Animate score
+    let cur = 0
+    const target = analysisResult.overall_tension_score
+    const tick = () => {
+      cur = Math.min(cur + 2, target)
+      setScoreDisplay(cur)
+      if (cur < target) requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+    setTimeout(() => setShowBar(true), 80)
+
+    // Stream messages
+    for (let i = 0; i < analysisResult.messages.length; i++) {
+      await new Promise(r => setTimeout(r, 160))
+      setVisibleCount(i + 1)
+    }
+    runningRef.current = false
   }
+
+  // Auto-trigger on scroll into view (first time only)
+  useEffect(() => {
+    if (!sectionRef.current) return
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && !hasRunRef.current) {
+          hasRunRef.current = true
+          runDemo(DEMO_TEXT, DEMO_RESULT)
+        }
+      },
+      { threshold: 0.25 }
+    )
+    observer.observe(sectionRef.current)
+    return () => observer.disconnect()
+  }, [])
 
   const sc = result ? scoreColor(result.overall_tension_score) : '#9ca3af'
 
   return (
-    <section className="lp-section lp-section-alt">
+    <section className="lp-section lp-section-alt lp-demo-section" ref={sectionRef}>
       <div className="lp-container">
         <div className="lp-section-header">
-          <span className="lp-eyebrow">live demo</span>
-          <h2 className="lp-h2">Try it right now</h2>
-          <p className="lp-section-sub">No account needed. Paste any conversation and see the full AI analysis instantly.</p>
+          <span className="lp-eyebrow">
+            <span className="lp-eyebrow-dot" />
+            live demo
+          </span>
+          <h2 className="lp-h2">See it work in real time.</h2>
+          <p className="lp-section-sub">Watch the AI analyze a real conversation — or paste your own.</p>
         </div>
 
         <div className="demo-grid">
-          <div>
-            <div className="demo-col-label">Your conversation</div>
+          <div className="demo-input-col">
+            <div className="demo-col-label">conversation input</div>
             <textarea
               className="demo-textarea"
               value={text}
-              onChange={e => { setText(e.target.value); setResult(null); setErr('') }}
+              onChange={e => {
+                setText(e.target.value)
+                setResult(null)
+                setErr('')
+                hasRunRef.current = false
+              }}
               rows={12}
               placeholder={"Alex: I told you I'd be there by 7.\nJordan: You never listen…"}
             />
             {err && <div className="demo-err">{err}</div>}
             <div className="demo-row">
-              <button className="demo-reset-btn" onClick={() => { setText(DEMO_TEXT); setResult(null) }}>Reset example</button>
+              <button className="demo-reset-btn" onClick={() => {
+                setText(DEMO_TEXT)
+                setResult(null)
+                setErr('')
+                hasRunRef.current = false
+              }}>Reset example</button>
               <button
-                className="lp-btn-primary"
-                onClick={analyze}
+                className="lp-btn-primary demo-analyze-btn"
+                onClick={() => { hasRunRef.current = true; runDemo(text) }}
                 disabled={loading || !text.trim()}
-                style={{ flex: 1 }}
               >
                 {loading
-                  ? <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                      <span className="demo-loading-dots"><span/><span/><span/></span>Analyzing…
-                    </span>
+                  ? <span className="demo-btn-loading"><span/><span/><span/>Analyzing…</span>
                   : 'Analyze →'}
               </button>
             </div>
           </div>
 
-          <div className="demo-result-pane" ref={resultRef}>
+          <div className="demo-result-pane">
             {!result && !loading && (
               <div className="demo-empty-state">
                 <div className="demo-empty-icon">🔬</div>
-                <p>Your clinical analysis will appear here.<br />Paste a conversation and click Analyze.</p>
+                <p>Clinical analysis appears here.<br />Scroll down slightly to trigger the live demo.</p>
               </div>
             )}
             {loading && (
               <div className="demo-loading-state">
-                <div className="demo-loading-dots"><span/><span/><span/></div>
-                <p>Analyzing conversation patterns…</p>
+                <div className="demo-ai-brain">
+                  <div className="demo-brain-ring" />
+                  <div className="demo-brain-ring demo-brain-ring-2" />
+                  <span className="demo-brain-icon">🧠</span>
+                </div>
+                <p className="demo-loading-text">Analyzing conversation patterns…</p>
+                <div className="demo-loading-steps">
+                  <span className="demo-step-active">Parsing messages</span>
+                  <span className="demo-step-sep">→</span>
+                  <span>Gottman flags</span>
+                  <span className="demo-step-sep">→</span>
+                  <span>Ego states</span>
+                  <span className="demo-step-sep">→</span>
+                  <span>Tension score</span>
+                </div>
               </div>
             )}
             {result && (
               <>
                 <div className="demo-result-inner">
-                  <div className="demo-result-tag">autopsy report</div>
+                  <div className="demo-result-header">
+                    <span className="demo-result-tag">autopsy report</span>
+                    <span className="demo-live-badge">● LIVE</span>
+                  </div>
                   <div className="demo-score-row">
                     <div>
                       <div className="demo-score-label">tension score</div>
-                      <div className="demo-score-big" style={{ color: sc }}>{result.overall_tension_score}</div>
+                      <div className="demo-score-big" style={{ color: sc }}>{scoreDisplay}</div>
                     </div>
-                    <div className="demo-conflict">{result.conflict_mode}</div>
+                    <div className="demo-right-meta">
+                      <div className="demo-conflict">{result.conflict_mode}</div>
+                    </div>
                   </div>
                   <div className="demo-score-bar-wrap">
-                    <div className="demo-score-bar-fill" style={{ width: `${result.overall_tension_score}%`, background: `linear-gradient(90deg, ${sc}80, ${sc})` }} />
+                    <div className="demo-score-bar-fill" style={{
+                      width: showBar ? `${result.overall_tension_score}%` : '0%',
+                      background: `linear-gradient(90deg, ${sc}80, ${sc})`
+                    }} />
                   </div>
                   <div className="demo-msgs">
-                    {result.messages.slice(0, 5).map((m, i) => (
-                      <div key={i} className="demo-msg">
+                    {result.messages.slice(0, 6).map((m, i) => (
+                      <div key={i} className={`demo-msg ${i < visibleCount ? 'visible' : ''}`} style={{ transitionDelay: `${i * 40}ms` }}>
                         <span className="demo-msg-sender">{m.sender}</span>
-                        <span className="demo-msg-text">"{m.text.slice(0, 42)}{m.text.length > 42 ? '…' : ''}"</span>
+                        <span className="demo-msg-text">"{m.text.slice(0, 44)}{m.text.length > 44 ? '…' : ''}"</span>
                         <span className="demo-msg-tag" style={{
                           color: TAG_COLORS[m.gottman_flag] || '#9ca3af',
                           background: `${TAG_COLORS[m.gottman_flag] || '#9ca3af'}1a`,
-                          border: `1px solid ${TAG_COLORS[m.gottman_flag] || '#9ca3af'}30`
+                          border: `1px solid ${TAG_COLORS[m.gottman_flag] || '#9ca3af'}35`
                         }}>{m.gottman_flag}</span>
                       </div>
                     ))}
-                    {result.messages.length > 5 && <div className="demo-more">+{result.messages.length - 5} more messages</div>}
                   </div>
                 </div>
                 <div className="demo-signup-strip">
-                  <p>Sign up to save and revisit this analysis</p>
-                  <button className="demo-signup-btn" onClick={onGetStarted}>Save analysis →</button>
+                  <p>Save this analysis and access the Response Crafter</p>
+                  <button className="demo-signup-btn" onClick={onGetStarted}>Get started free →</button>
                 </div>
               </>
             )}
