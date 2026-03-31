@@ -1,7 +1,5 @@
-/* ── Layout ── */
-#scroll-container {
-  position: relative;
-}
+/* ── Landing Layout ── */
+#scroll-container { position: relative; }
 
 .canvas-sticky {
   position: fixed;
@@ -59,10 +57,7 @@
   opacity: 0;
 }
 
-.hero-title .accent {
-  color: var(--accent);
-  font-style: italic;
-}
+.hero-title .accent { color: var(--accent); font-style: italic; }
 
 .hero-sub {
   font-size: clamp(16px, 1.8vw, 20px);
@@ -74,17 +69,8 @@
   opacity: 0;
 }
 
-.cta-group {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  opacity: 0;
-}
-
-.cta-hint {
-  font-size: 13px;
-  color: var(--text-faint);
-}
+.cta-group { display: flex; align-items: center; gap: 20px; opacity: 0; }
+.cta-hint { font-size: 13px; color: var(--text-faint); }
 
 /* ── Buttons ── */
 .btn-primary {
@@ -100,17 +86,8 @@
   transition: transform 0.2s, box-shadow 0.2s, background 0.2s;
   letter-spacing: 0.01em;
 }
-
-.btn-primary:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 40px rgba(167,139,250,0.4);
-  background: #c4b5fd;
-}
-
-.btn-primary.btn-large {
-  padding: 18px 48px;
-  font-size: 18px;
-}
+.btn-primary:hover { transform: translateY(-2px); box-shadow: 0 12px 40px rgba(167,139,250,0.4); background: #c4b5fd; }
+.btn-primary.btn-large { padding: 18px 48px; font-size: 18px; }
 
 .btn-secondary {
   background: transparent;
@@ -124,17 +101,10 @@
   cursor: pointer;
   transition: border-color 0.2s, color 0.2s;
 }
-
-.btn-secondary:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
+.btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
 
 /* ── Section text ── */
-.section-text {
-  max-width: 520px;
-}
-
+.section-text { max-width: 520px; }
 .section-text h2 {
   font-family: var(--font-display);
   font-size: clamp(36px, 5vw, 64px);
@@ -144,26 +114,13 @@
   margin-bottom: 20px;
   margin-top: 12px;
 }
-
-.section-text p {
-  font-size: 17px;
-  color: var(--text-muted);
-  font-weight: 300;
-  line-height: 1.75;
-  margin-bottom: 28px;
-}
-
+.section-text p { font-size: 17px; color: var(--text-muted); font-weight: 300; line-height: 1.75; margin-bottom: 28px; }
 .right-aligned { margin-left: auto; }
 .left-aligned { margin-right: auto; }
 .centered { margin: 0 auto; text-align: center; }
 
 /* ── Framework pills ── */
-.framework-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
+.framework-pills { display: flex; flex-wrap: wrap; gap: 10px; }
 .pill {
   background: var(--accent-dim);
   border: 1px solid rgba(167,139,250,0.2);
@@ -176,26 +133,13 @@
 }
 
 /* ── Psychology section ── */
-.psychology-section {
-  background: linear-gradient(180deg, transparent 0%, rgba(167,139,250,0.03) 50%, transparent 100%);
-}
+.psychology-section { background: linear-gradient(180deg, transparent 0%, rgba(167,139,250,0.03) 50%, transparent 100%); }
 
 /* ── Diagnosis section ── */
-.diagnosis-section {
-  justify-content: center;
-  align-items: center;
-  min-height: 100vh;
-}
-
-/* ── Share section ── */
-.share-section { background: transparent; }
+.diagnosis-section { justify-content: center; align-items: center; min-height: 100vh; }
 
 /* ── Final CTA ── */
-.final-cta {
-  justify-content: center;
-  border-top: 1px solid var(--border);
-}
-
+.final-cta { justify-content: center; border-top: 1px solid var(--border); }
 .final-headline {
   font-family: var(--font-display);
   font-size: clamp(28px, 4vw, 52px);
@@ -206,25 +150,5 @@
   letter-spacing: -0.01em;
 }
 
-/* ── Noise overlay ── */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='1'/%3E%3C/svg%3E");
-  opacity: 0.025;
-  pointer-events: none;
-  z-index: 9999;
-}
-
 /* ── Reveal animation ── */
-.reveal-section {
-  opacity: 0;
-}
-
-/* ── Scrollbar glow ── */
-@media (prefers-reduced-motion: no-preference) {
-  .btn-primary {
-    animation: none;
-  }
-}
+.reveal-section { opacity: 0; }
