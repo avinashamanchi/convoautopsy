@@ -1,0 +1,37 @@
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #070708;
+  --bg2: #0e0e10;
+  --surface: #131316;
+  --border: rgba(255,255,255,0.07);
+  --text: #f0eff4;
+  --text-muted: rgba(240,239,244,0.5);
+  --text-faint: rgba(240,239,244,0.25);
+  --accent: #a78bfa;
+  --accent2: #f472b6;
+  --accent-dim: rgba(167,139,250,0.15);
+  --red: #f87171;
+  --amber: #fbbf24;
+  --teal: #34d399;
+  --font-display: 'Instrument Serif', Georgia, serif;
+  --font-body: 'DM Sans', sans-serif;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: rgba(167,139,250,0.3); border-radius: 2px; }

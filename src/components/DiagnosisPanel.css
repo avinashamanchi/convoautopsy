@@ -1,0 +1,215 @@
+.diagnosis-panel {
+  background: rgba(10, 8, 20, 0.88);
+  border: 1px solid rgba(167,139,250,0.18);
+  border-radius: 20px;
+  padding: 28px;
+  width: 100%;
+  max-width: 560px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 0 60px rgba(124,58,237,0.15), 0 40px 80px rgba(0,0,0,0.5);
+}
+
+.dp-header { margin-bottom: 24px; }
+
+.dp-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.dp-label {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(167,139,250,0.7);
+}
+
+.dp-timestamp {
+  font-size: 11px;
+  color: rgba(240,239,244,0.2);
+}
+
+.dp-scores {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.dp-score-card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+
+.dp-score-num {
+  font-family: 'Instrument Serif', Georgia, serif;
+  font-size: 42px;
+  font-weight: 400;
+  color: #f87171;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.dp-score-label {
+  font-size: 11px;
+  color: rgba(240,239,244,0.35);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+.dp-score-bar {
+  height: 3px;
+  background: rgba(248,113,113,0.15);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.dp-score-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ef4444, #f87171);
+  border-radius: 2px;
+  transition: width 1.4s cubic-bezier(0.16,1,0.3,1);
+}
+
+.dp-mode-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+
+.dp-mode-pill {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 10px;
+  border-radius: 100px;
+}
+
+.dp-mode-pill.competing {
+  background: rgba(248,113,113,0.12);
+  color: #fca5a5;
+  border: 1px solid rgba(248,113,113,0.25);
+}
+
+.dp-mode-pill.avoiding {
+  background: rgba(167,139,250,0.12);
+  color: #c4b5fd;
+  border: 1px solid rgba(167,139,250,0.25);
+}
+
+.dp-mode-vs {
+  font-size: 10px;
+  color: rgba(240,239,244,0.25);
+}
+
+/* Timeline */
+.dp-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+
+.dp-message { display: flex; flex-direction: column; gap: 4px; }
+
+.dp-msg-sender {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(240,239,244,0.3);
+  padding-left: 4px;
+}
+
+.dp-msg-bubble {
+  border: 1px solid;
+  border-radius: 12px;
+  padding: 12px 14px;
+  transition: border-color 0.2s;
+}
+
+.dp-msg-bubble:hover { border-color: rgba(167,139,250,0.4) !important; }
+
+.dp-msg-text {
+  font-size: 13px;
+  color: rgba(240,239,244,0.85);
+  font-style: italic;
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+
+.dp-msg-meta {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.dp-tag {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
+.dp-ego {
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.dp-hidden {
+  border-top: 1px solid rgba(255,255,255,0.05);
+  padding-top: 8px;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.dp-hidden-label {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(240,239,244,0.2);
+  white-space: nowrap;
+}
+
+.dp-hidden-text {
+  font-size: 12px;
+  color: rgba(240,239,244,0.5);
+  font-style: italic;
+}
+
+/* Footer */
+.dp-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.dp-share-btn {
+  background: rgba(167,139,250,0.15);
+  border: 1px solid rgba(167,139,250,0.3);
+  color: #c4b5fd;
+  border-radius: 100px;
+  padding: 10px 22px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.dp-share-btn:hover {
+  background: rgba(167,139,250,0.25);
+  border-color: rgba(167,139,250,0.5);
+}
+
+.dp-powered {
+  font-size: 10px;
+  color: rgba(240,239,244,0.18);
+  letter-spacing: 0.06em;
+}

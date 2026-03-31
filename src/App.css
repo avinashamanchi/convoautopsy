@@ -1,0 +1,230 @@
+/* ── Layout ── */
+#scroll-container {
+  position: relative;
+}
+
+.canvas-sticky {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100vw; height: 100vh;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.section {
+  position: relative;
+  z-index: 10;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  padding: 0 8vw;
+}
+
+.scroll-spacer {
+  position: relative;
+  z-index: 10;
+  height: 200vh;
+}
+
+/* ── Hero ── */
+.hero-section {
+  min-height: 100vh;
+  justify-content: flex-start;
+  padding-top: 0;
+}
+
+.hero-content {
+  max-width: 640px;
+  padding-top: 22vh;
+}
+
+.eyebrow {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 20px;
+}
+
+.hero-title {
+  font-family: var(--font-display);
+  font-size: clamp(52px, 8vw, 96px);
+  font-weight: 400;
+  line-height: 1.0;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  margin-bottom: 24px;
+  opacity: 0;
+}
+
+.hero-title .accent {
+  color: var(--accent);
+  font-style: italic;
+}
+
+.hero-sub {
+  font-size: clamp(16px, 1.8vw, 20px);
+  color: var(--text-muted);
+  font-weight: 300;
+  line-height: 1.7;
+  max-width: 480px;
+  margin-bottom: 40px;
+  opacity: 0;
+}
+
+.cta-group {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  opacity: 0;
+}
+
+.cta-hint {
+  font-size: 13px;
+  color: var(--text-faint);
+}
+
+/* ── Buttons ── */
+.btn-primary {
+  background: var(--accent);
+  color: #0a0010;
+  border: none;
+  border-radius: 100px;
+  padding: 14px 32px;
+  font-family: var(--font-body);
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s, background 0.2s;
+  letter-spacing: 0.01em;
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 40px rgba(167,139,250,0.4);
+  background: #c4b5fd;
+}
+
+.btn-primary.btn-large {
+  padding: 18px 48px;
+  font-size: 18px;
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 100px;
+  padding: 14px 32px;
+  font-family: var(--font-body);
+  font-size: 15px;
+  font-weight: 400;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.btn-secondary:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ── Section text ── */
+.section-text {
+  max-width: 520px;
+}
+
+.section-text h2 {
+  font-family: var(--font-display);
+  font-size: clamp(36px, 5vw, 64px);
+  font-weight: 400;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  margin-bottom: 20px;
+  margin-top: 12px;
+}
+
+.section-text p {
+  font-size: 17px;
+  color: var(--text-muted);
+  font-weight: 300;
+  line-height: 1.75;
+  margin-bottom: 28px;
+}
+
+.right-aligned { margin-left: auto; }
+.left-aligned { margin-right: auto; }
+.centered { margin: 0 auto; text-align: center; }
+
+/* ── Framework pills ── */
+.framework-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.pill {
+  background: var(--accent-dim);
+  border: 1px solid rgba(167,139,250,0.2);
+  color: var(--accent);
+  border-radius: 100px;
+  padding: 6px 16px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
+/* ── Psychology section ── */
+.psychology-section {
+  background: linear-gradient(180deg, transparent 0%, rgba(167,139,250,0.03) 50%, transparent 100%);
+}
+
+/* ── Diagnosis section ── */
+.diagnosis-section {
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+}
+
+/* ── Share section ── */
+.share-section { background: transparent; }
+
+/* ── Final CTA ── */
+.final-cta {
+  justify-content: center;
+  border-top: 1px solid var(--border);
+}
+
+.final-headline {
+  font-family: var(--font-display);
+  font-size: clamp(28px, 4vw, 52px);
+  font-weight: 400;
+  font-style: italic;
+  color: var(--text-muted);
+  margin-bottom: 40px;
+  letter-spacing: -0.01em;
+}
+
+/* ── Noise overlay ── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='1'/%3E%3C/svg%3E");
+  opacity: 0.025;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ── Reveal animation ── */
+.reveal-section {
+  opacity: 0;
+}
+
+/* ── Scrollbar glow ── */
+@media (prefers-reduced-motion: no-preference) {
+  .btn-primary {
+    animation: none;
+  }
+}
