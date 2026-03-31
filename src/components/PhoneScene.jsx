@@ -153,7 +153,7 @@ function IntactPhone({ progress }) {
         { y: -0.75, color: '#1f1635', right: true },
       ].map((b, i) => (
         <mesh key={i} position={[b.right ? 0.25 : -0.25, b.y, 0.09]}>
-          <roundedBoxGeometry args={[0.7, 0.2, 0.01]} radius={0.06} />
+          <boxGeometry args={[0.7, 0.2, 0.01]} />
           <meshStandardMaterial color={b.color} transparent opacity={0.9} />
         </mesh>
       ))}
