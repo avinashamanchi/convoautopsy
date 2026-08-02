@@ -12,6 +12,9 @@
     "ios": "npm run build:app && npx cap sync ios && npx cap open ios",
     "sync": "npm run build:app && npx cap sync"
   },
+  "engines": {
+    "node": "22.x"
+  },
   "dependencies": {
     "@capacitor/app": "^8.1.0",
     "@capacitor/cli": "^8.3.0",
