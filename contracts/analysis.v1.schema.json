@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://convoautopsy.app/contracts/analysis.v1.schema.json",
+  "title": "ConvoAutopsy Analysis Result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "mode",
+    "intensityScore",
+    "conflictMode",
+    "messages"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "mode": {
+      "enum": ["local", "ai"]
+    },
+    "intensityScore": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "conflictMode": {
+      "enum": [
+        "Competing",
+        "Avoiding",
+        "Compromising",
+        "Collaborating",
+        "Accommodating",
+        "Competing vs Avoiding"
+      ]
+    },
+    "messages": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sender",
+          "text",
+          "pattern",
+          "egoState",
+          "possibleInterpretation"
+        ],
+        "properties": {
+          "sender": {
+            "type": "string",
+            "pattern": "^Person [A-Z]+$"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "pattern": {
+            "enum": [
+              "Criticism",
+              "Contempt",
+              "Defensiveness",
+              "Stonewalling",
+              "Neutral"
+            ]
+          },
+          "egoState": {
+            "enum": ["Parent", "Adult", "Child"]
+          },
+          "possibleInterpretation": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          }
+        }
+      }
+    }
+  }
+}

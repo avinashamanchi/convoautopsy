@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "mode": "local",
+  "intensityScore": 22,
+  "conflictMode": "Competing",
+  "messages": [
+    {
+      "sender": "Person A",
+      "text": "Why do you always do this?",
+      "pattern": "Criticism",
+      "egoState": "Parent",
+      "possibleInterpretation": "This wording may reflect feeling unheard and expressing it through blame."
+    }
+  ]
+}
