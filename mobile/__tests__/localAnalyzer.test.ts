@@ -19,3 +19,9 @@ it('is deterministic for identical parsed input', () => {
   const messages = parseConversation('A: Can we talk?\nB: I understand.').messages;
   expect(analyzeLocally(messages)).toEqual(analyzeLocally(messages));
 });
+
+it('resolves equal Child and Adult signals to Child using the source ordering', () => {
+  const messages = parseConversation('A: I understand. Whatever.').messages;
+
+  expect(analyzeLocally(messages).messages[0].egoState).toBe('Child');
+});

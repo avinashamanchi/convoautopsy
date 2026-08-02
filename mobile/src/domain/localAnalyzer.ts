@@ -100,7 +100,7 @@ function classifyPattern(text: string): PatternLabel {
 }
 
 function classifyEgoState(text: string): EgoState {
-  const states: EgoState[] = ['Parent', 'Adult', 'Child'];
+  const states: EgoState[] = ['Parent', 'Child', 'Adult'];
   let egoState: EgoState = 'Adult';
   let bestScore = 0;
 
