@@ -27,11 +27,13 @@ export function AnalysisSessionProvider({ children }: PropsWithChildren) {
   const [status, setStatus] = useState<AnalysisSessionValue['status']>('idle');
   const [requestId, setRequestId] = useState(0);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const activeRemoteRequestIdRef = useRef<number | null>(null);
   const requestIdRef = useRef(0);
 
   const invalidateRemoteRequest = () => {
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
+    activeRemoteRequestIdRef.current = null;
     requestIdRef.current += 1;
     setRequestId(requestIdRef.current);
   };
@@ -50,6 +52,7 @@ export function AnalysisSessionProvider({ children }: PropsWithChildren) {
       setStatus('idle');
     },
     preparePreview() {
+      invalidateRemoteRequest();
       const nextParsed = parseConversation(draft);
       setParsed(nextParsed);
       setActiveResult(null);
@@ -57,6 +60,7 @@ export function AnalysisSessionProvider({ children }: PropsWithChildren) {
       return nextParsed;
     },
     runLocal() {
+      invalidateRemoteRequest();
       const nextParsed = parsed ?? parseConversation(draft);
       const result = analyzeLocally(nextParsed.messages);
       setParsed(nextParsed);
@@ -66,10 +70,16 @@ export function AnalysisSessionProvider({ children }: PropsWithChildren) {
       return result;
     },
     setRemoteResult(result, resultRequestId) {
-      if (resultRequestId !== requestIdRef.current) {
+      if (
+        resultRequestId !== requestIdRef.current ||
+        resultRequestId !== activeRemoteRequestIdRef.current ||
+        !abortControllerRef.current ||
+        abortControllerRef.current.signal.aborted
+      ) {
         return;
       }
       abortControllerRef.current = null;
+      activeRemoteRequestIdRef.current = null;
       setActiveResult(result);
       setStatus('result');
     },
@@ -78,6 +88,7 @@ export function AnalysisSessionProvider({ children }: PropsWithChildren) {
       const controller = new AbortController();
       abortControllerRef.current = controller;
       requestIdRef.current += 1;
+      activeRemoteRequestIdRef.current = requestIdRef.current;
       setRequestId(requestIdRef.current);
       setStatus('analyzing-ai');
       return { requestId: requestIdRef.current, signal: controller.signal };
