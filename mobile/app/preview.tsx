@@ -6,6 +6,7 @@ import { ParsedMessageList } from '../src/components/ParsedMessageList';
 import { PrimaryButton } from '../src/components/PrimaryButton';
 import { Screen } from '../src/components/Screen';
 import type { ParseResult } from '../src/domain/analysis';
+import { parserErrorMessage } from '../src/domain/parserErrors';
 import { useAnalysisSession } from '../src/state/AnalysisSession';
 import { tokens } from '../src/theme/tokens';
 
@@ -23,7 +24,11 @@ export default function PreviewScreen() {
       return;
     }
     preparedDraft.current = draft;
-    setPreview(preparePreview());
+    try {
+      setPreview(preparePreview());
+    } catch (error) {
+      router.replace({ pathname: '/', params: { error: parserErrorMessage(error) } });
+    }
   }, [draft, preparePreview]);
 
   useEffect(() => {

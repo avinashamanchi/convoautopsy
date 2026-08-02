@@ -40,6 +40,20 @@ it('returns to the editor with an actionable error when no messages are accepted
   expect(screen.getByLabelText('Conversation text').props.value).toBe('not a message');
 });
 
+it('recovers an over-limit pasted draft at the editor without losing it', async () => {
+  renderRouter('./app', { initialUrl: '/' });
+  const overLimitDraft = `Alex: ${'x'.repeat(100_000)}`;
+
+  fireEvent.changeText(screen.getByLabelText('Conversation text'), overLimitDraft);
+  fireEvent.press(screen.getByRole('button', { name: 'Review conversation' }));
+
+  expect(
+    await screen.findByText('Conversation is over 100,000 characters. Shorten it and try again.'),
+  ).toBeOnTheScreen();
+  expect(screen.getByRole('alert')).toBeOnTheScreen();
+  expect(screen.getByLabelText('Conversation text').props.value).toBe(overLimitDraft);
+});
+
 it('keeps the draft available for editing from the preview', async () => {
   renderRouter('./app', { initialUrl: '/' });
 
