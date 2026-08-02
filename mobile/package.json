@@ -61,7 +61,10 @@
     "node": "22.x"
   },
   "jest": {
-    "preset": "jest-expo"
+    "preset": "jest-expo",
+    "moduleNameMapper": {
+      "^expo-sqlite$": "<rootDir>/__mocks__/expo-sqlite.ts"
+    }
   },
   "private": true
 }

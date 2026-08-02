@@ -4,7 +4,7 @@ import { renderRouter } from 'expo-router/testing-library';
 it('previews parsed messages before running local analysis', async () => {
   renderRouter('./app', { initialUrl: '/' });
 
-  fireEvent.changeText(screen.getByLabelText('Conversation text'), 'Alex: Hello\nJordan: Hi');
+  fireEvent.changeText(await screen.findByLabelText('Conversation text'), 'Alex: Hello\nJordan: Hi');
   fireEvent.press(screen.getByRole('button', { name: 'Review conversation' }));
 
   expect(await screen.findByText('Person A')).toBeOnTheScreen();
@@ -19,7 +19,7 @@ it('shows rejected lines in the preview', async () => {
   renderRouter('./app', { initialUrl: '/' });
 
   fireEvent.changeText(
-    screen.getByLabelText('Conversation text'),
+    await screen.findByLabelText('Conversation text'),
     'Alex: Hello\nnot a message\nJordan: Hi',
   );
   fireEvent.press(screen.getByRole('button', { name: 'Review conversation' }));
@@ -31,7 +31,7 @@ it('shows rejected lines in the preview', async () => {
 it('returns to the editor with an actionable error when no messages are accepted', async () => {
   renderRouter('./app', { initialUrl: '/' });
 
-  fireEvent.changeText(screen.getByLabelText('Conversation text'), 'not a message');
+  fireEvent.changeText(await screen.findByLabelText('Conversation text'), 'not a message');
   fireEvent.press(screen.getByRole('button', { name: 'Review conversation' }));
 
   expect(
@@ -44,7 +44,7 @@ it('recovers an over-limit pasted draft at the editor without losing it', async 
   renderRouter('./app', { initialUrl: '/' });
   const overLimitDraft = `Alex: ${'x'.repeat(100_000)}`;
 
-  fireEvent.changeText(screen.getByLabelText('Conversation text'), overLimitDraft);
+  fireEvent.changeText(await screen.findByLabelText('Conversation text'), overLimitDraft);
   fireEvent.press(screen.getByRole('button', { name: 'Review conversation' }));
 
   expect(
@@ -57,7 +57,7 @@ it('recovers an over-limit pasted draft at the editor without losing it', async 
 it('keeps the draft available for editing from the preview', async () => {
   renderRouter('./app', { initialUrl: '/' });
 
-  fireEvent.changeText(screen.getByLabelText('Conversation text'), 'Alex: Hello\nnot a message');
+  fireEvent.changeText(await screen.findByLabelText('Conversation text'), 'Alex: Hello\nnot a message');
   fireEvent.press(screen.getByRole('button', { name: 'Review conversation' }));
   await screen.findByText('Person A');
 
@@ -73,7 +73,7 @@ it('keeps the draft available for editing from the preview', async () => {
 it('keeps AI-assisted analysis inert until the secure service is configured', async () => {
   renderRouter('./app', { initialUrl: '/' });
 
-  fireEvent.changeText(screen.getByLabelText('Conversation text'), 'Alex: Hello\nJordan: Hi');
+  fireEvent.changeText(await screen.findByLabelText('Conversation text'), 'Alex: Hello\nJordan: Hi');
   fireEvent.press(screen.getByRole('button', { name: 'Review conversation' }));
   await screen.findByText('Person A');
 
