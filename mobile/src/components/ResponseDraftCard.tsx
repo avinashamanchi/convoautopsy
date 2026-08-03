@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import type { ResponseDraft } from '../domain/analysis';
+import type { DraftShareOutcome } from '../services/exportReport';
 import { tokens } from '../theme/tokens';
 import { PrimaryButton } from './PrimaryButton';
 
 type ResponseDraftCardProps = {
   draft: ResponseDraft;
   onCopy(text: string): Promise<boolean | void>;
-  onShare(text: string): Promise<void>;
+  onShare(text: string): Promise<DraftShareOutcome>;
 };
 
 export function ResponseDraftCard({ draft, onCopy, onShare }: ResponseDraftCardProps) {
@@ -19,7 +20,10 @@ export function ResponseDraftCard({ draft, onCopy, onShare }: ResponseDraftCardP
     setMessage(null);
     try {
       if (action === 'copy') await onCopy(draft.text);
-      else await onShare(draft.text);
+      else {
+        const outcome = await onShare(draft.text);
+        if (!outcome.ok) throw new Error(outcome.code);
+      }
       setMessage(action === 'copy' ? 'Copied to clipboard. Review before sending.' : 'Share sheet opened. Review before sending.');
     } catch {
       setMessage(action === 'copy' ? 'Could not copy this draft. Please try again.' : 'Could not share this draft. Please try again.');

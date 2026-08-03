@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import * as Clipboard from 'expo-clipboard';
-import { File, Paths } from 'expo-file-system';
-import * as Sharing from 'expo-sharing';
 import { useLocalSearchParams } from 'expo-router';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { ResponseDraft } from '../../src/domain/analysis';
@@ -11,6 +9,7 @@ import { PrimaryButton } from '../../src/components/PrimaryButton';
 import { Screen } from '../../src/components/Screen';
 import type { SavedReport } from '../../src/services/reportRepository';
 import { useReportRepository } from '../../src/services/reportRepositoryContext';
+import { shareDraftText } from '../../src/services/exportReport';
 import { tokens } from '../../src/theme/tokens';
 
 const goals: readonly { id: ResponseGoal; label: string }[] = [
@@ -29,12 +28,6 @@ const tones: readonly { id: ResponseTone; label: string }[] = [
   { id: 'direct', label: 'Direct & clear' },
   { id: 'diplomatic', label: 'Diplomatic & balanced' },
 ];
-
-async function shareDraftText(text: string) {
-  const file = new File(Paths.cache, `convoautopsy-response-${Date.now()}.txt`);
-  file.write(text);
-  await Sharing.shareAsync(file.uri, { mimeType: 'text/plain', dialogTitle: 'Share response draft' });
-}
 
 export default function ResponseScreen() {
   const { reportId } = useLocalSearchParams<{ reportId: string }>();

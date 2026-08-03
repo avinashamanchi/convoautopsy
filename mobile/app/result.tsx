@@ -1,9 +1,11 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { PrimaryButton } from '../src/components/PrimaryButton';
 import { ResultSummary } from '../src/components/ResultSummary';
 import { Screen } from '../src/components/Screen';
+import { ShareableReportCard } from '../src/components/ShareableReportCard';
+import { captureAndShareReport, reportExportFailureMessage, type ExportOutcome } from '../src/services/exportReport';
 import { useReportRepository } from '../src/services/reportRepositoryContext';
 import { useAnalysisSession } from '../src/state/AnalysisSession';
 import { tokens } from '../src/theme/tokens';
@@ -15,6 +17,10 @@ export default function ResultScreen() {
   const [retainSourceText, setRetainSourceText] = useState(false);
   const [title, setTitle] = useState('Saved analysis');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle');
+  const [shareStatus, setShareStatus] = useState<'idle' | 'sharing'>('idle');
+  const [shareOutcome, setShareOutcome] = useState<ExportOutcome | null>(null);
+  const reportRef = useRef<View>(null);
+  const [reportGeneratedAt] = useState(() => new Date().toISOString());
 
   if (!activeResult) {
     return (
@@ -45,10 +51,21 @@ export default function ResultScreen() {
     }
   };
 
+  const shareReport = async () => {
+    setShareStatus('sharing');
+    setShareOutcome(null);
+    const outcome = await captureAndShareReport(reportRef.current);
+    setShareOutcome(outcome);
+    setShareStatus('idle');
+  };
+
   return (
     <Screen>
       <ScrollView contentContainerStyle={styles.content}>
         <ResultSummary result={activeResult} />
+        <PrimaryButton label={shareStatus === 'sharing' ? 'Preparing report…' : 'Share report image'} disabled={shareStatus === 'sharing'} onPress={() => { void shareReport(); }} />
+        {shareOutcome?.ok ? <Text accessibilityLiveRegion="polite" style={styles.success}>Share sheet opened. This does not confirm completion.</Text> : null}
+        {shareOutcome && !shareOutcome.ok ? <Text accessibilityRole="alert" style={styles.error}>{reportExportFailureMessage(shareOutcome)}</Text> : null}
         {saveStatus === 'saved' ? <Text accessibilityLiveRegion="polite" style={styles.success}>Analysis saved on this device.</Text> : null}
         {saveStatus === 'failed' ? <Text accessibilityRole="alert" style={styles.error}>Could not save this analysis. Please try again.</Text> : null}
         {saveOptionsVisible ? (
@@ -80,6 +97,9 @@ export default function ResultScreen() {
             router.replace('/');
           }}
         />
+        <View pointerEvents="none" style={styles.captureContainer}>
+          <ShareableReportCard generatedAt={reportGeneratedAt} ref={reportRef} result={activeResult} />
+        </View>
       </ScrollView>
     </Screen>
   );
@@ -94,4 +114,5 @@ const styles = StyleSheet.create({
   titleInput: { borderColor: tokens.colors.textSecondary, borderRadius: tokens.radius.sm, borderWidth: 1, color: tokens.colors.textPrimary, minHeight: tokens.minTouchTarget, paddingHorizontal: tokens.spacing.sm },
   privacyTitle: { color: tokens.colors.textPrimary, fontSize: 16, fontWeight: '700' },
   privacyCopy: { color: tokens.colors.textSecondary, fontSize: 14, lineHeight: 20 },
+  captureContainer: { left: -10000, position: 'absolute', top: 0 },
 });

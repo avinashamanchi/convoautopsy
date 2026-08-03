@@ -1,0 +1,140 @@
+import { createRef } from 'react';
+import { View } from 'react-native';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import ResultScreen from '../app/result';
+import ReportScreen from '../app/report/[id]';
+import type { AnalysisResult } from '../src/domain/analysis';
+import { ReportRepositoryProvider } from '../src/services/reportRepositoryContext';
+import type { PreferenceStore, ReportRepository, SavedReport } from '../src/services/reportRepository';
+import { captureAndShareReport } from '../src/services/exportReport';
+import { ShareableReportCard } from '../src/components/ShareableReportCard';
+
+jest.mock('expo-router', () => ({
+  router: { replace: jest.fn() },
+  useLocalSearchParams: () => ({ id: 'saved-report' }),
+}));
+
+jest.mock('../src/state/AnalysisSession', () => ({
+  useAnalysisSession: () => ({
+    activeResult: {
+      schemaVersion: 1,
+      mode: 'local',
+      intensityScore: 42,
+      conflictMode: 'Collaborating',
+      messages: [
+        { sender: 'Person A', text: 'private draft source', pattern: 'Neutral', egoState: 'Adult', possibleInterpretation: 'A neutral message.' },
+      ],
+    },
+    draft: 'Ava: unsaved original conversation',
+    reset: jest.fn(),
+  }),
+}));
+
+jest.mock('../src/services/exportReport', () => ({
+  captureAndShareReport: jest.fn(),
+  reportExportFailureMessage: (outcome: { code: string }) => {
+    if (outcome.code === 'SHARING_UNAVAILABLE') return 'Sharing is unavailable on this device. Please try again later.';
+    if (outcome.code === 'CAPTURE_FAILED') return 'Could not prepare the private report image. Please try again.';
+    return 'Could not open the share sheet. Please try again.';
+  },
+}));
+
+const mockedCaptureAndShare = captureAndShareReport as jest.MockedFunction<typeof captureAndShareReport>;
+
+const result: AnalysisResult = {
+  schemaVersion: 1,
+  mode: 'local',
+  intensityScore: 42,
+  conflictMode: 'Collaborating',
+  messages: [
+    { sender: 'Person A', text: 'private draft source', pattern: 'Neutral', egoState: 'Adult', possibleInterpretation: 'A neutral message.' },
+  ],
+};
+
+class MemoryRepository implements ReportRepository {
+  constructor(private readonly report: SavedReport | null) {}
+  async initialize() {}
+  async list() { return this.report ? [this.report] : []; }
+  async get() { return this.report; }
+  async save() {}
+  async delete() {}
+  async deleteAll() {}
+}
+
+const preferences: PreferenceStore = {
+  get: async () => null,
+  set: async () => {},
+  delete: async () => {},
+  deleteAll: async () => {},
+};
+
+function renderWithRepository(component: React.ReactElement, report: SavedReport | null = null) {
+  return render(
+    <ReportRepositoryProvider repository={new MemoryRepository(report)} preferenceStore={preferences}>
+      {component}
+    </ReportRepositoryProvider>,
+  );
+}
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  mockedCaptureAndShare.mockResolvedValue({ ok: true });
+});
+
+it('opens a report share sheet only after the current-result user presses share', async () => {
+  renderWithRepository(<ResultScreen />);
+
+  await screen.findByText('Intensity score (estimate): 42/100');
+  expect(mockedCaptureAndShare).not.toHaveBeenCalled();
+  fireEvent.press(await screen.findByRole('button', { name: 'Share report image' }));
+
+  await waitFor(() => expect(mockedCaptureAndShare).toHaveBeenCalledTimes(1));
+  expect(await screen.findByText('Share sheet opened. This does not confirm completion.')).toBeOnTheScreen();
+});
+
+it('opens a report share sheet from a saved result and gives a recoverable failure', async () => {
+  mockedCaptureAndShare.mockResolvedValueOnce({ ok: false, code: 'SHARE_FAILED' });
+  renderWithRepository(<ReportScreen />, {
+    id: 'saved-report',
+    title: 'Saved report',
+    createdAt: '2026-08-02T12:00:00.000Z',
+    updatedAt: '2026-08-02T12:00:00.000Z',
+    sourceText: 'Ava: original private text',
+    result,
+    responseDrafts: [],
+  });
+
+  fireEvent.press(await screen.findByRole('button', { name: 'Share report image' }));
+
+  await waitFor(() => expect(mockedCaptureAndShare).toHaveBeenCalledTimes(1));
+  expect(await screen.findByText('Could not open the share sheet. Please try again.')).toBeOnTheScreen();
+});
+
+it('distinguishes an unavailable sharing service without revealing report content', async () => {
+  mockedCaptureAndShare.mockResolvedValueOnce({ ok: false, code: 'SHARING_UNAVAILABLE' });
+  renderWithRepository(<ReportScreen />, {
+    id: 'saved-report',
+    title: 'Saved report',
+    createdAt: '2026-08-02T12:00:00.000Z',
+    updatedAt: '2026-08-02T12:00:00.000Z',
+    sourceText: 'Ava: original private text',
+    result,
+    responseDrafts: [],
+  });
+
+  fireEvent.press(await screen.findByRole('button', { name: 'Share report image' }));
+
+  expect(await screen.findByText('Sharing is unavailable on this device. Please try again later.')).toBeOnTheScreen();
+  expect(screen.queryByText('Ava: original private text')).toBeNull();
+});
+
+it('exposes a native capture root while redacting message contents and original names', () => {
+  const ref = createRef<View>();
+  render(<ShareableReportCard generatedAt="2026-08-02T12:00:00.000Z" ref={ref} result={result} />);
+
+  expect(ref.current).toBeTruthy();
+  expect(screen.getByText('Participant 1', { includeHiddenElements: true })).toBeOnTheScreen();
+  expect(screen.getByText('[Message content redacted]', { includeHiddenElements: true })).toBeOnTheScreen();
+  expect(screen.queryByText('Person A', { includeHiddenElements: true })).toBeNull();
+  expect(screen.queryByText('private draft source', { includeHiddenElements: true })).toBeNull();
+});

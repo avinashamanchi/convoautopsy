@@ -14,7 +14,7 @@ jest.mock('expo-router', () => ({
 }));
 
 jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn() }));
-jest.mock('expo-sharing', () => ({ shareAsync: jest.fn() }));
+jest.mock('expo-sharing', () => ({ isAvailableAsync: jest.fn(), shareAsync: jest.fn() }));
 jest.mock('expo-file-system', () => ({
   Paths: { cache: '/cache' },
   File: class {
@@ -99,6 +99,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockFiles.splice(0, mockFiles.length);
   (jest.requireMock('expo-clipboard') as { setStringAsync: jest.Mock }).setStringAsync.mockResolvedValue(true);
+  (jest.requireMock('expo-sharing') as { isAvailableAsync: jest.Mock }).isAvailableAsync.mockResolvedValue(true);
   (jest.requireMock('expo-sharing') as { shareAsync: jest.Mock }).shareAsync.mockResolvedValue(undefined);
 });
 
