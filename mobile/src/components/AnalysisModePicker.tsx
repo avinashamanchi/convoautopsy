@@ -12,7 +12,7 @@ export function AnalysisModePicker({ onRunLocal, onStartAi, aiNotice }: Analysis
   return (
     <View style={styles.container}>
       <Text style={styles.description}>Run an on-device estimate, or choose AI-assisted analysis when it is configured.</Text>
-      <PrimaryButton label="Run on-device analysis" onPress={onRunLocal} />
+      <PrimaryButton label="Run on-device analysis" onPress={onRunLocal} testID="run-local-analysis" />
       <PrimaryButton label="Use AI-assisted analysis" onPress={onStartAi} />
       {aiNotice ? <Text accessibilityRole="alert" style={styles.notice}>{aiNotice}</Text> : null}
     </View>

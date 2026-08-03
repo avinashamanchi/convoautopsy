@@ -9,9 +9,10 @@ type ResponseDraftCardProps = {
   draft: ResponseDraft;
   onCopy(text: string): Promise<boolean | void>;
   onShare(text: string): Promise<DraftShareOutcome>;
+  shareTestID?: string;
 };
 
-export function ResponseDraftCard({ draft, onCopy, onShare }: ResponseDraftCardProps) {
+export function ResponseDraftCard({ draft, onCopy, onShare, shareTestID }: ResponseDraftCardProps) {
   const { fontScale } = useWindowDimensions();
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState<'copy' | 'share' | null>(null);
@@ -41,7 +42,7 @@ export function ResponseDraftCard({ draft, onCopy, onShare }: ResponseDraftCardP
       {message ? <Text accessibilityRole={message.startsWith('Could not') ? 'alert' : undefined} style={styles.message}>{message}</Text> : null}
       <View testID="draft-actions" style={[styles.actions, fontScale >= 2 && styles.stackedActions]}>
         <PrimaryButton label="Copy draft" disabled={busy !== null} onPress={() => { void runAction('copy'); }} />
-        <PrimaryButton label="Share draft" disabled={busy !== null} onPress={() => { void runAction('share'); }} />
+        <PrimaryButton label="Share draft" disabled={busy !== null} onPress={() => { void runAction('share'); }} testID={shareTestID} />
       </View>
     </View>
   );

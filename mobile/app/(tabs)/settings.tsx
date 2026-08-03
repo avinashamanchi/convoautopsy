@@ -3,7 +3,7 @@ import { router } from 'expo-router';
 import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { PrimaryButton } from '../../src/components/PrimaryButton';
 import { Screen } from '../../src/components/Screen';
-import { createConsentStore } from '../../src/services/consentStore';
+import { ConsentPreferenceUnavailableError, createConsentStore } from '../../src/services/consentStore';
 import { deleteAllAppData, nativeCacheArtifactStore, type DeleteAllOutcome } from '../../src/services/deleteAllAppData';
 import { useReportRepository } from '../../src/services/reportRepositoryContext';
 import { useAnalysisSession } from '../../src/state/AnalysisSession';
@@ -18,7 +18,7 @@ export default function SettingsScreen({ onDeleteStatusCommit }: SettingsScreenP
   const consent = useMemo(() => createConsentStore({ preferences }), [preferences]);
   const [phrase, setPhrase] = useState('');
   const [deleteStatus, setDeleteStatus] = useState<DeleteStatus>('idle');
-  const [consentStatus, setConsentStatus] = useState<'idle' | 'revoked' | 'failed'>('idle');
+  const [consentStatus, setConsentStatus] = useState<'idle' | 'revoked' | 'failed' | 'preference-failed'>('idle');
   const deletingRef = useRef(false);
   const mountedRef = useRef(true);
   useEffect(() => () => { mountedRef.current = false; }, []);
@@ -47,8 +47,8 @@ export default function SettingsScreen({ onDeleteStatusCommit }: SettingsScreenP
     try {
       await consent.revokeConsent();
       setConsentStatus('revoked');
-    } catch {
-      setConsentStatus('failed');
+    } catch (error) {
+      setConsentStatus(error instanceof ConsentPreferenceUnavailableError ? 'preference-failed' : 'failed');
     }
   };
 
@@ -66,6 +66,7 @@ export default function SettingsScreen({ onDeleteStatusCommit }: SettingsScreenP
           <PrimaryButton label="Revoke AI consent" onPress={() => { void revokeConsent(); }} />
           {consentStatus === 'revoked' ? <Text accessibilityLiveRegion="polite" style={styles.status}>AI consent was revoked. Future AI-assisted analysis will ask again.</Text> : null}
           {consentStatus === 'failed' ? <Text accessibilityRole="alert" style={styles.error}>Could not revoke AI consent. Please try again.</Text> : null}
+          {consentStatus === 'preference-failed' ? <Text accessibilityRole="alert" style={styles.error}>Could not remove your AI consent preference. Please try again.</Text> : null}
         </View>
 
         <View style={[styles.section, styles.dangerSection]}>

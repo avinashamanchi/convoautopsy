@@ -87,9 +87,9 @@ export default function ResultScreen() {
               trackColor={{ false: tokens.colors.textSecondary, true: tokens.colors.accent }}
               value={retainSourceText}
             />
-            <PrimaryButton label={saveStatus === 'saving' ? 'Saving…' : 'Save privately'} disabled={saveStatus === 'saving'} onPress={() => { void save(); }} />
+            <PrimaryButton label={saveStatus === 'saving' ? 'Saving…' : 'Save privately'} disabled={saveStatus === 'saving'} onPress={() => { void save(); }} testID="save-without-source" />
           </View>
-        ) : <PrimaryButton label="Save analysis" onPress={() => { setSaveStatus('idle'); setSaveOptionsVisible(true); }} />}
+        ) : <PrimaryButton label="Save analysis" onPress={() => { setSaveStatus('idle'); setSaveOptionsVisible(true); }} testID="save-report" />}
         <PrimaryButton
           label="Analyze another conversation"
           onPress={() => {

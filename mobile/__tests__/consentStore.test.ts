@@ -7,6 +7,7 @@ jest.mock('expo-secure-store', () => ({
 import * as SecureStore from 'expo-secure-store';
 import {
   CONSENT_VERSION,
+  ConsentPreferenceUnavailableError,
   SecureStorageUnavailableError,
   createConsentStore,
 } from '../src/services/consentStore';
@@ -65,7 +66,7 @@ it('attempts token deletion when consent preference deletion fails and a later r
   secureStore.setItemAsync.mockImplementation(async (_key, value) => { token = value; });
   const store = createConsentStore({ preferences, createToken: () => 'new-token' });
 
-  await expect(store.revokeConsent()).rejects.toEqual(new SecureStorageUnavailableError());
+  await expect(store.revokeConsent()).rejects.toEqual(new ConsentPreferenceUnavailableError());
   expect(secureStore.deleteItemAsync).toHaveBeenCalled();
   expect(await store.getInstallationToken()).toBe('new-token');
 });

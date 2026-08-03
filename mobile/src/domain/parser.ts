@@ -10,7 +10,7 @@ const INVALID_LINE_REASON = 'Use Name: Message format.';
 type Speaker = { original: string; label: string };
 
 export function parseConversation(raw: string): ParseResult {
-  if (raw.length > MAX_INPUT_CHARS) {
+  if (codePointCount(raw) > MAX_INPUT_CHARS) {
     throw new Error('INPUT_TOO_LARGE');
   }
 
@@ -36,7 +36,7 @@ export function parseConversation(raw: string): ParseResult {
       rejected.push({ sourceLine, text: line, reason: INVALID_LINE_REASON });
       return;
     }
-    if (text.length > MAX_MESSAGE_CHARS) {
+    if (codePointCount(text) > MAX_MESSAGE_CHARS) {
       throw new Error('MESSAGE_TOO_LARGE');
     }
     if (messages.length >= MAX_MESSAGES) {
@@ -65,6 +65,11 @@ export function parseConversation(raw: string): ParseResult {
     messages: anonymizeParticipantMentions(messages, Array.from(senderMap.values())),
     rejected,
   };
+}
+
+/** JavaScript string length counts UTF-16 code units; product limits are characters. */
+function codePointCount(value: string): number {
+  return Array.from(value).length;
 }
 
 function anonymizeParticipantMentions(messages: ParsedMessage[], speakers: Speaker[]): ParsedMessage[] {

@@ -119,12 +119,15 @@ it('requires sender, goal, and tone before generating exactly three drafts and s
   const { repository } = renderResponse();
 
   expect(await screen.findByText('Step 2 of 4: Sender')).toBeOnTheScreen();
+  expect(screen.getByTestId('sender-person-a')).toBeOnTheScreen();
   expect(screen.getByRole('button', { name: 'Generate drafts' }).props.accessibilityState.disabled).toBe(true);
 
   fireEvent.press(screen.getByRole('button', { name: 'Person A' }));
   expect(screen.getByText('Step 3 of 4: Goal')).toBeOnTheScreen();
+  expect(screen.getByTestId('goal-resolve')).toBeOnTheScreen();
   fireEvent.press(screen.getByRole('button', { name: 'Resolve the conflict' }));
   expect(screen.getByText('Step 4 of 4: Tone')).toBeOnTheScreen();
+  expect(screen.getByTestId('tone-deescalating')).toBeOnTheScreen();
   fireEvent.press(screen.getByRole('button', { name: 'Direct & clear' }));
   expect(screen.getByText('Ready to generate')).toBeOnTheScreen();
   expect(screen.getByRole('button', { name: 'Generate drafts' }).props.accessibilityState.disabled).toBe(false);
@@ -132,6 +135,7 @@ it('requires sender, goal, and tone before generating exactly three drafts and s
   fireEvent.press(screen.getByRole('button', { name: 'Generate drafts' }));
 
   expect(await screen.findAllByText('Draft—review before sending')).toHaveLength(3);
+  expect(screen.getByTestId('share-response-0')).toBeOnTheScreen();
   await waitFor(() => expect(repository.reports[0].responseDrafts).toHaveLength(3));
   expect(repository.reports[0].responseDrafts.map((draft) => draft.id)).toEqual([
     'resolve-direct-1', 'resolve-direct-2', 'resolve-direct-3',

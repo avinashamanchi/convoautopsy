@@ -22,6 +22,13 @@ export class SecureStorageUnavailableError extends Error {
   }
 }
 
+export class ConsentPreferenceUnavailableError extends Error {
+  constructor() {
+    super('Consent preference storage is unavailable. Please try again.');
+    this.name = 'ConsentPreferenceUnavailableError';
+  }
+}
+
 export type ConsentStore = {
   getConsent(): Promise<ConsentRecord | null>;
   grantConsent(): Promise<ConsentRecord>;
@@ -76,7 +83,11 @@ export function createConsentStore({
         preferences.delete(CONSENT_KEY),
         secureStore.deleteItemAsync(INSTALLATION_TOKEN_KEY),
       ]);
-      if (results.some((result) => result.status === 'rejected')) throw new SecureStorageUnavailableError();
+      const [preferenceResult, secureStoreResult] = results;
+      if (preferenceResult.status === 'rejected' && secureStoreResult.status === 'fulfilled') {
+        throw new ConsentPreferenceUnavailableError();
+      }
+      if (secureStoreResult.status === 'rejected') throw new SecureStorageUnavailableError();
     },
     async clearInstallationToken() {
       try { await secureStore.deleteItemAsync(INSTALLATION_TOKEN_KEY); }

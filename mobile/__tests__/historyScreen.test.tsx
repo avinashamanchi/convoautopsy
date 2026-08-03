@@ -123,6 +123,16 @@ it('filters saved report titles as the user searches', async () => {
   expect(screen.queryByText('Friday conversation')).toBeNull();
 });
 
+it('distinguishes no search matches from an empty history', async () => {
+  renderHistory(new MemoryReportRepository([savedReport()]));
+  await screen.findByText('Friday conversation');
+
+  fireEvent.changeText(screen.getByLabelText('Search saved analyses'), 'missing');
+
+  expect(await screen.findByText('No saved analyses match your search.')).toBeOnTheScreen();
+  expect(screen.queryByText('No saved analyses yet.')).toBeNull();
+});
+
 it('saves a result without original text unless the user opts in', async () => {
   const repository = new MemoryReportRepository();
   render(

@@ -119,6 +119,7 @@ export default function ResponseScreen() {
               selected={sender === person}
               disabled={saving}
               onPress={() => { setSender(person); setGoal(null); setTone(null); }}
+              testID={`sender-${person.toLowerCase().replaceAll(' ', '-')}`}
             />
           ))}
         </View>
@@ -133,6 +134,7 @@ export default function ResponseScreen() {
                 selected={goal === option.id}
                 disabled={saving}
                 onPress={() => { setGoal(option.id); setTone(null); }}
+                testID={`goal-${option.id}`}
               />
             ))}
           </View>
@@ -142,12 +144,12 @@ export default function ResponseScreen() {
             <Text style={styles.sectionTitle}>4. What tone fits?</Text>
             {tone ? <Text style={styles.message}>Selected tone: {tones.find((option) => option.id === tone)?.label}</Text> : null}
             {tones.map((option) => (
-              <PrimaryButton key={option.id} label={option.label} selected={tone === option.id} disabled={saving} onPress={() => setTone(option.id)} />
+              <PrimaryButton key={option.id} label={option.label} selected={tone === option.id} disabled={saving} onPress={() => setTone(option.id)} testID={`tone-${option.id}`} />
             ))}
           </View>
         ) : null}
 
-        <PrimaryButton label="Generate drafts" disabled={!sender || !goal || !tone || saving} onPress={generate} />
+        <PrimaryButton label="Generate drafts" disabled={!sender || !goal || !tone || saving} onPress={generate} testID="generate-responses" />
         <PrimaryButton label="Reset draft choices" disabled={saving} onPress={() => { setSender(null); setGoal(null); setTone(null); setDrafts([]); setRetryDrafts(null); setSaveError(false); }} />
         {saveError ? (
           <View style={styles.section}>
@@ -161,6 +163,7 @@ export default function ResponseScreen() {
             draft={draft}
             onCopy={Clipboard.setStringAsync}
             onShare={shareDraftText}
+            shareTestID={`share-response-${drafts.indexOf(draft)}`}
           />
         ))}
       </ScrollView>

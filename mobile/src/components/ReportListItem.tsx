@@ -6,12 +6,13 @@ type ReportListItemProps = {
   report: SavedReport;
   onDelete(): void;
   onOpen(): void;
+  testID?: string;
 };
 
-export function ReportListItem({ report, onDelete, onOpen }: ReportListItemProps) {
+export function ReportListItem({ report, onDelete, onOpen, testID }: ReportListItemProps) {
   return (
     <View style={styles.card}>
-      <Pressable accessibilityRole="button" accessibilityLabel={`Open ${report.title}`} onPress={onOpen} style={styles.open}>
+      <Pressable accessibilityRole="button" accessibilityLabel={`Open ${report.title}`} onPress={onOpen} style={styles.open} testID={testID}>
         <Text style={styles.title}>{report.title}</Text>
         <Text style={styles.meta}>Saved {new Date(report.updatedAt).toLocaleDateString()}</Text>
       </Pressable>

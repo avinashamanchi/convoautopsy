@@ -8,7 +8,7 @@ import { PrimaryButton } from '../src/components/PrimaryButton';
 import { Screen } from '../src/components/Screen';
 import type { ParseResult } from '../src/domain/analysis';
 import { parserErrorMessage } from '../src/domain/parserErrors';
-import { createAiClient } from '../src/services/aiClient';
+import { AiClientError, createAiClient } from '../src/services/aiClient';
 import { SECURE_STORAGE_UNAVAILABLE_MESSAGE, createConsentStore } from '../src/services/consentStore';
 import { useReportRepository } from '../src/services/reportRepositoryContext';
 import { useAnalysisSession } from '../src/state/AnalysisSession';
@@ -126,9 +126,7 @@ export default function PreviewScreen() {
       cancel();
       if (!isCurrentRun(run)) return;
       setConsentVisible(false);
-      setAiNotice(error instanceof Error && error.message === SECURE_STORAGE_UNAVAILABLE_MESSAGE
-        ? SECURE_STORAGE_UNAVAILABLE_MESSAGE
-        : AI_FAILURE);
+      setAiNotice(aiFailureMessage(error));
     } finally {
       finishRemoteRun(run);
     }
@@ -180,6 +178,13 @@ export default function PreviewScreen() {
       </ScrollView>
     </Screen>
   );
+}
+
+function aiFailureMessage(error: unknown): string {
+  if (error instanceof Error && error.message === SECURE_STORAGE_UNAVAILABLE_MESSAGE) return SECURE_STORAGE_UNAVAILABLE_MESSAGE;
+  if (error instanceof AiClientError && error.code === 'NOT_CONFIGURED') return 'AI-assisted analysis is not configured. On-device analysis is available.';
+  if (error instanceof AiClientError && (error.code === 'SERVICE_UNAVAILABLE' || error.code === 'OFFLINE' || error.code === 'TIMEOUT')) return 'AI-assisted analysis is temporarily unavailable. Your conversation is still available.';
+  return AI_FAILURE;
 }
 
 const styles = StyleSheet.create({

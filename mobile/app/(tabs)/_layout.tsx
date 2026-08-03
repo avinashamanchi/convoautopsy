@@ -28,11 +28,11 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="history"
-        options={{ title: 'History', tabBarIcon: TabIcon }}
+        options={{ title: 'History', tabBarButtonTestID: 'tab-history', tabBarIcon: TabIcon }}
       />
       <Tabs.Screen
         name="responses"
-        options={{ title: 'Responses', tabBarIcon: TabIcon }}
+        options={{ title: 'Responses', tabBarButtonTestID: 'tab-responses', tabBarIcon: TabIcon }}
       />
       <Tabs.Screen
         name="settings"

@@ -67,13 +67,14 @@ export default function HistoryScreen() {
             <PrimaryButton label={`Retry deleting ${failedDelete.title}`} onPress={() => { void deleteReport(failedDelete); }} />
           </>
         ) : null}
-        {loadError === 'none' && reports.length === 0 ? <Text style={styles.empty}>No saved analyses yet.</Text> : null}
-        {reports.map((report) => (
+        {loadError === 'none' && reports.length === 0 ? <Text style={styles.empty}>{query ? 'No saved analyses match your search.' : 'No saved analyses yet.'}</Text> : null}
+        {reports.map((report, index) => (
           <ReportListItem
             key={report.id}
             onDelete={() => setPendingDelete(report)}
             onOpen={() => router.push(`/report/${report.id}`)}
             report={report}
+            testID={`report-row-${index}`}
           />
         ))}
       </View>

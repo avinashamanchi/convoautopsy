@@ -73,35 +73,23 @@ npm run build:app    # Mobile/Capacitor build (base: ./)
 
 ---
 
-## Mobile Development (Expo — live preview on your phone)
+## Mobile Development (Expo)
 
-See the app live on your phone with instant hot reload while you develop.
-
-### Setup
+The current native app is in `mobile/` and requires Node 22.
 
 ```bash
-cd native
-npm install
+cd mobile
+npm ci
+npm test
+npm run typecheck
+npm run lint
+npx expo-doctor
+npm run export:ios
 ```
 
-### Run
+For a bounded Expo Go smoke test on the same network, run `npx expo start --lan --clear`, scan the generated QR code with Expo Go, and stop the server when finished. Expo Go does not compile the local Swift Vision OCR module; its screenshot import fallback is expected there. Physical-device navigation, input, history, accessibility, offline, and share observations remain a user-run release checkpoint.
 
-In two terminals:
-
-**Terminal 1 — web dev server (exposed to network):**
-```bash
-npm run dev -- --host 0.0.0.0
-```
-
-**Terminal 2 — Expo:**
-```bash
-cd native
-npx expo start --lan
-```
-
-Scan the QR code with **Expo Go** (free on the App Store). Your phone must be on the same WiFi as your Mac.
-
-> **Note:** Update the IP address in `native/App.js` if your local IP changes (`ipconfig getifaddr en0` to check).
+The repeatable Maestro flow is [`mobile/e2e/analyze-flow.yaml`](mobile/e2e/analyze-flow.yaml). It uses production-control semantic IDs and ends when the user opens the system share sheet; it never treats an external share as completed.
 
 ---
 

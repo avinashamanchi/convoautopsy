@@ -48,11 +48,12 @@ export default function ResponsesScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         <Text accessibilityRole="header" style={styles.title}>Choose an analysis</Text>
         <Text style={styles.message}>Drafts stay on this device until you manually copy or share one.</Text>
-        {reports.map((report) => (
+        {reports.map((report, index) => (
           <PrimaryButton
             key={report.id}
             label={`Draft responses for ${report.title}`}
             onPress={() => router.push(`/response/${report.id}`)}
+            testID={`response-report-row-${index}`}
           />
         ))}
       </ScrollView>

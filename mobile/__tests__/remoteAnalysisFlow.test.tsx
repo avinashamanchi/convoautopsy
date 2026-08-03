@@ -4,11 +4,15 @@ jest.mock('../src/services/consentStore', () => ({
   createConsentStore: jest.fn(),
 }));
 
-jest.mock('../src/services/aiClient', () => ({ createAiClient: jest.fn() }));
+jest.mock('../src/services/aiClient', () => ({
+  ...jest.requireActual('../src/services/aiClient'),
+  createAiClient: jest.fn(),
+}));
 
 import { fireEvent, screen } from '@testing-library/react-native';
 import { renderRouter } from 'expo-router/testing-library';
 import { createAiClient } from '../src/services/aiClient';
+import { AiClientError } from '../src/services/aiClient';
 import { createConsentStore } from '../src/services/consentStore';
 import type { AnalysisResult } from '../src/domain/analysis';
 
@@ -181,4 +185,18 @@ it('keeps the draft and offers a manual on-device alternative after an AI failur
   fireEvent.press(screen.getByRole('button', { name: 'Run on-device analysis instead' }));
 
   expect(await screen.findByText('On-device estimate')).toBeOnTheScreen();
+});
+
+it.each([
+  ['NOT_CONFIGURED', 'AI-assisted analysis is not configured. On-device analysis is available.'],
+  ['SERVICE_UNAVAILABLE', 'AI-assisted analysis is temporarily unavailable. Your conversation is still available.'],
+] as const)('distinguishes %s from a generic remote failure', async (code, expectedMessage) => {
+  remoteAnalysis.mockRejectedValue(new AiClientError(code));
+  await renderPreview();
+  await screen.findByText('Person A');
+  fireEvent.press(screen.getByRole('button', { name: 'Use AI-assisted analysis' }));
+  await screen.findByText(/Names are replaced with Person labels/);
+  fireEvent.press(screen.getByRole('button', { name: 'Agree and continue' }));
+
+  expect(await screen.findByText(expectedMessage)).toBeOnTheScreen();
 });

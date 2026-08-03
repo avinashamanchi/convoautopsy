@@ -14,6 +14,20 @@ internal final class OcrRecognitionFailedException: Exception {
 }
 
 public final class ConvoOcrModule: Module {
+  private static let sameLineVerticalTolerance: CGFloat = 0.02
+
+  private static func isBeforeInReadingOrder(_ left: VNRecognizedTextObservation, _ right: VNRecognizedTextObservation) -> Bool {
+    let verticalDelta = left.boundingBox.midY - right.boundingBox.midY
+    if abs(verticalDelta) > sameLineVerticalTolerance {
+      return verticalDelta > 0
+    }
+    let horizontalDelta = left.boundingBox.minX - right.boundingBox.minX
+    if horizontalDelta != 0 {
+      return horizontalDelta < 0
+    }
+    return left.uuid.uuidString < right.uuid.uuidString
+  }
+
   private func visionOrientation(_ value: UIImage.Orientation) -> CGImagePropertyOrientation {
     switch value {
     case .up: return .up
@@ -50,7 +64,7 @@ public final class ConvoOcrModule: Module {
       }
 
       return (request.results ?? [])
-        .sorted { $0.boundingBox.maxY > $1.boundingBox.maxY }
+        .sorted(by: ConvoOcrModule.isBeforeInReadingOrder)
         .compactMap { $0.topCandidates(1).first?.string }
         .joined(separator: "\n")
     }

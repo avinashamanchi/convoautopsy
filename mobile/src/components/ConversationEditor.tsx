@@ -34,6 +34,7 @@ export function ConversationEditor({
         placeholder="Alex: Can we talk?\nJordan: Yes."
         placeholderTextColor={tokens.colors.textSecondary}
         style={styles.input}
+        testID="analyze-input"
         textAlignVertical="top"
         value={value}
       />
@@ -43,6 +44,7 @@ export function ConversationEditor({
         disabled={disabled || !value.trim()}
         label="Review conversation"
         onPress={onReview}
+        testID="review-conversation"
       />
       <View testID="editor-import-actions" style={[styles.imports, fontScale >= 2 && styles.stackedActions]}>
         <Pressable accessibilityLabel="Import conversation file" accessibilityRole="button" disabled={disabled} onPress={onImportFile} style={styles.importButton}>
