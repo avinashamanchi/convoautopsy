@@ -22,7 +22,7 @@ const templates: TemplateMatrix = {
       { text: "I feel unheard, and I want to explain my side carefully. Would you be willing to share your side without interruptions if I go second?", hint: 'Proposes a structured reset' },
     ],
     assertive: [
-      { text: "I want to address this directly — not to escalate, but because going in circles isn't working. Can we talk about what happened?", hint: 'Direct but not aggressive' },
+      { text: "I want to address this directly — not to escalate. I feel like we may be going in circles, and that is not working for me. Can we talk about what happened?", hint: 'Direct but not aggressive' },
       { text: "Here's where I stand: I'm open to your perspective, but I need mine to be heard too. Can we have that honest conversation?", hint: 'Holds ground while staying open' },
       { text: "I'd like to work toward resolving this. Are you open to talking about what would help us move forward?", hint: 'Invites shared participation' },
     ],

@@ -44,6 +44,7 @@ describe('craftLocalResponses', () => {
       /\bneither of us\b/i,
       /\bI (?:know|think|believe)\s+(?:that )?(?:you|they|we)\b/i,
       /\b(?:a|the)\s+(?:good|better)\s+outcome\s+for\s+both\s+of\s+us\b/i,
+      /\b(?:because )?going in circles (?:isn't|is not) working\b/i,
     ];
 
     for (const claim of unsupportedClaims) expect(allDraftText).not.toMatch(claim);
