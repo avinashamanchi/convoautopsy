@@ -73,7 +73,7 @@
 - Create: `server/ai-proxy/src/index.ts` — Worker request router and response envelope.
 - Create: `server/ai-proxy/src/contract.ts` — request/response schemas and bounded parsing.
 - Create: `server/ai-proxy/src/provider.ts` — `AiProvider` interface and Groq adapter.
-- Create: `server/ai-proxy/src/rateLimit.ts` — HMAC-derived KV rate-limit keys and counters.
+- Create: `server/ai-proxy/src/rateLimit.ts` — HMAC-derived per-digest Durable Object IDs with SQLite counters and expiry alarms.
 - Create: `server/ai-proxy/src/errors.ts` — stable public error codes.
 - Create: `server/ai-proxy/test/*` — Worker, contract, rate-limit, logging, and provider tests.
 
@@ -1113,7 +1113,7 @@ Return `{ error: { code, requestId, retryAfterSeconds? } }`. Never return provid
 
 - [ ] **Step 5: Implement HMAC-derived rate limits**
 
-Derive the KV key from installation token plus `CF-Connecting-IP` using HMAC-SHA-256 and `RATE_LIMIT_HMAC_SECRET`. Store only the digest and an integer counter with a 60-second TTL. Allow 10 analysis requests and 20 response requests per 60 seconds. Return `429` with `Retry-After`.
+Derive a per-digest `RATE_LIMITER` Durable Object ID from the installation token plus `CF-Connecting-IP`, route, and `RATE_LIMIT_HMAC_SECRET` using HMAC-SHA-256. Its SQLite state stores only the digest-scoped counter/window for 60 seconds and removes it with an alarm. Allow 10 analysis requests and 20 response requests per 60 seconds. Return `429` with `Retry-After`; do not provision or bind KV.
 
 - [ ] **Step 6: Implement the provider adapter**
 

@@ -14,7 +14,9 @@
 
 ## Automated verification record
 
-The ignored task scratch report is supplemental only and is not release evidence. Recorded from a clean local clone at `2c797813611ddb8277566da8422f9a6e3f5a3482`: root `npm ci`, 12 web tests, lint, and build passed; mobile `npm ci`, 182 tests, typecheck, 18/18 Expo lint checks, Expo doctor, and iOS export passed; Worker `npm ci`, 24 tests, typecheck, and lint passed. The Worker test runtime fell back from compatibility date `2026-08-02` to `2025-09-06`; no deployment occurred. Root full and production audits found 0 vulnerabilities; the mobile audit reported 15 vulnerabilities (1 high) whose offered fix is the deferred breaking Expo 57 upgrade.
+The ignored task scratch report is supplemental only and is not release evidence. Historical clean-clone evidence is limited to `2c797813611ddb8277566da8422f9a6e3f5a3482`: root `npm ci`, 12 web tests, lint, and build passed; mobile `npm ci`, 182 tests, typecheck, 18/18 Expo lint checks, Expo doctor, and iOS export passed; Worker `npm ci`, 24 tests, typecheck, and lint passed. It does not validate later commits. The Worker test runtime fell back from compatibility date `2026-08-02` to `2025-09-06`; no deployment occurred. Root full and production audits found 0 vulnerabilities; the mobile audit reported 15 vulnerabilities (1 high) whose offered fix is the deferred breaking Expo 57 upgrade.
+
+Latest working-tree verification (not a clean clone) passed root test (4 files / 15 tests), lint, and build; mobile test (26 suites / 183 tests), typecheck, lint, and iOS export; and Worker test (5 files / 24 tests), typecheck, and lint. This does not establish clean-checkout evidence for a later commit.
 
 ## Physical-device checkpoint (user observation required)
 

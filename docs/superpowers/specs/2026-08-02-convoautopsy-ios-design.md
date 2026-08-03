@@ -185,7 +185,7 @@ No plaintext password or AI key is persisted. Deleting a report removes its asso
 
 ## 8. AI Proxy Contract and Abuse Controls
 
-The repository will include a TypeScript Cloudflare Worker with a narrow API rather than direct provider access from the app. Wrangler will run it locally and deploy it. The AI-provider key will be configured with Worker secrets, never a checked-in or public `VITE_` variable. Cloudflare KV will hold short-lived, hashed rate-limit counters; conversation content will not be stored in KV.
+The repository will include a TypeScript Cloudflare Worker with a narrow API rather than direct provider access from the app. Wrangler will run it locally and deploy it. The AI-provider key will be configured with Worker secrets, never a checked-in or public `VITE_` variable. A per-digest `RATE_LIMITER` Durable Object holds only SQLite rate-limit counter/window state and removes it after expiry; conversation content is not stored there. No KV namespace or binding is used.
 
 - `POST /v1/analyses` accepts a schema-versioned, anonymized message array.
 - Body size, message count, per-message length, timeout, and response size are bounded.

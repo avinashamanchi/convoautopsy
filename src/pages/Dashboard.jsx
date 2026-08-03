@@ -124,7 +124,7 @@ export default function Dashboard({ user, onLogout }) {
     setPendingText('')
     await runAnalysis(txt, consent
       ? { allowRemote: true, consentVersion: consent.version, installationToken: consent.installationToken }
-      : { allowRemote: false })
+      : { allowRemote: false, localReason: 'CONSENT_STORAGE_UNAVAILABLE' })
     consentBusy.current = false
   }
 
