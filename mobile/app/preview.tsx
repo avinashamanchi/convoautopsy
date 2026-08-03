@@ -27,6 +27,10 @@ export default function PreviewScreen() {
   const preparedDraft = useRef<string | null>(null);
   const activeRemoteRunRef = useRef<number | null>(null);
   const remoteRunCounterRef = useRef(0);
+  const consentCheckCounterRef = useRef(0);
+  const mountedRef = useRef(false);
+  const cancelRef = useRef(cancel);
+  cancelRef.current = cancel;
   const consentStore = useMemo(() => createConsentStore({ preferences }), [preferences]);
   const analyzeRemotely = useMemo(
     () => createAiClient({
@@ -54,6 +58,16 @@ export default function PreviewScreen() {
     }
   }, [preview]);
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      activeRemoteRunRef.current = null;
+      consentCheckCounterRef.current += 1;
+      cancelRef.current();
+    };
+  }, []);
+
   const activePreview = preview ?? parsed;
 
   if (!activePreview || activePreview.messages.length === 0) {
@@ -67,14 +81,18 @@ export default function PreviewScreen() {
   }
 
   function finishRemoteRun(run: number) {
-    if (activeRemoteRunRef.current === run) {
+    if (mountedRef.current && activeRemoteRunRef.current === run) {
       activeRemoteRunRef.current = null;
       setAiRunning(false);
     }
   }
 
+  function isCurrentRun(run: number) {
+    return mountedRef.current && activeRemoteRunRef.current === run;
+  }
+
   async function runAiAnalysis(grantConsent: boolean) {
-    if (activeRemoteRunRef.current !== null) return;
+    if (!mountedRef.current || activeRemoteRunRef.current !== null) return;
     const run = ++remoteRunCounterRef.current;
     activeRemoteRunRef.current = run;
     setAiRunning(true);
@@ -82,15 +100,18 @@ export default function PreviewScreen() {
 
     try {
       if (grantConsent) await consentStore.grantConsent();
+      if (!isCurrentRun(run)) return;
       const attempt = startRemote();
       const result = await analyzeRemotely(messagesForAi, attempt.signal);
-      if (attempt.signal.aborted || activeRemoteRunRef.current !== run) return;
+      if (attempt.signal.aborted || !isCurrentRun(run)) return;
       setRemoteResult(result, attempt.requestId);
+      if (!isCurrentRun(run)) return;
       setConsentVisible(false);
       router.replace('/result');
     } catch (error) {
-      if (activeRemoteRunRef.current !== run) return;
+      if (!isCurrentRun(run)) return;
       cancel();
+      if (!isCurrentRun(run)) return;
       setConsentVisible(false);
       setAiNotice(error instanceof Error && error.message === SECURE_STORAGE_UNAVAILABLE_MESSAGE
         ? SECURE_STORAGE_UNAVAILABLE_MESSAGE
@@ -101,19 +122,25 @@ export default function PreviewScreen() {
   }
 
   async function startConsentFlow() {
+    if (!mountedRef.current || activeRemoteRunRef.current !== null) return;
+    const consentCheck = ++consentCheckCounterRef.current;
     setAiNotice(null);
     try {
-      if (await consentStore.getConsent()) {
+      const currentConsent = await consentStore.getConsent();
+      if (!mountedRef.current || consentCheckCounterRef.current !== consentCheck) return;
+      if (currentConsent) {
         void runAiAnalysis(false);
       } else {
         setConsentVisible(true);
       }
     } catch {
+      if (!mountedRef.current || consentCheckCounterRef.current !== consentCheck) return;
       setAiNotice(AI_FAILURE);
     }
   }
 
   function cancelAiAnalysis() {
+    consentCheckCounterRef.current += 1;
     activeRemoteRunRef.current = null;
     cancel();
     setAiRunning(false);

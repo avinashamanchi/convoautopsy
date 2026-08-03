@@ -1,6 +1,7 @@
 import { AiClientError, createAiClient } from '../src/services/aiClient';
 import type { AnalysisResult, ParsedMessage } from '../src/domain/analysis';
-import type { ConsentRecord } from '../src/services/consentStore';
+import { parseConversation } from '../src/domain/parser';
+import { SECURE_STORAGE_UNAVAILABLE_MESSAGE, SecureStorageUnavailableError, type ConsentRecord } from '../src/services/consentStore';
 
 const consent: ConsentRecord = {
   version: '2026-08-02',
@@ -43,6 +44,16 @@ async function expectCode(promise: Promise<unknown>, code: AiClientError['code']
   await expect(promise).rejects.toMatchObject({ code });
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 it('sends only anonymous parsed Person labels with consent and a device token', async () => {
   const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockResolvedValue(response({ analysis: aiResult, requestId: 'req-1' }));
 
@@ -59,6 +70,19 @@ it('sends only anonymous parsed Person labels with consent and a device token', 
     ],
   });
   expect(JSON.stringify(requestBody.messages)).not.toContain('Alex');
+});
+
+it('never serializes known participant names found in accepted message bodies', async () => {
+  const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockResolvedValue(response({ analysis: aiResult, requestId: 'req-mentions' }));
+  const parsed = parseConversation('Alex: Jordan, please call me\nJordan: Hi Alex\nthis rejected line mentions Alex');
+
+  await client(fetchImpl)(parsed.messages, new AbortController().signal);
+
+  const body = String(fetchImpl.mock.calls[0][1]?.body);
+  expect(body).not.toMatch(/Alex|Jordan/i);
+  expect(body).toContain('Person A');
+  expect(body).toContain('Person B');
+  expect(parsed.rejected[0].text).toContain('Alex');
 });
 
 it('rejects parsed messages that are not anonymous labels before making a request', async () => {
@@ -84,6 +108,47 @@ it('maps caller cancellation to CANCELLED', async () => {
   expect(fetchImpl).not.toHaveBeenCalled();
 });
 
+it('does not fetch after cancellation while consent lookup is pending', async () => {
+  const consentLookup = deferred<ConsentRecord | null>();
+  const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>();
+  const analyze = createAiClient({ endpoint: 'https://ai.example.test', fetch: fetchImpl, getConsent: () => consentLookup.promise, getInstallationToken: async () => 'token' });
+  const controller = new AbortController();
+  const request = analyze(anonymousMessages, controller.signal);
+
+  controller.abort();
+  consentLookup.resolve(consent);
+
+  await expectCode(request, 'CANCELLED');
+  expect(fetchImpl).not.toHaveBeenCalled();
+});
+
+it('does not fetch after cancellation while secure token lookup is pending', async () => {
+  const tokenLookup = deferred<string>();
+  const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>();
+  const analyze = createAiClient({ endpoint: 'https://ai.example.test', fetch: fetchImpl, getConsent: async () => consent, getInstallationToken: () => tokenLookup.promise });
+  const controller = new AbortController();
+  const request = analyze(anonymousMessages, controller.signal);
+
+  controller.abort();
+  tokenLookup.resolve('4b479c21-5169-41b5-ba54-3d0c5bdb82ba');
+
+  await expectCode(request, 'CANCELLED');
+  expect(fetchImpl).not.toHaveBeenCalled();
+});
+
+it('preserves the secure-storage error without attempting a request', async () => {
+  const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>();
+  const analyze = createAiClient({
+    endpoint: 'https://ai.example.test',
+    fetch: fetchImpl,
+    getConsent: async () => consent,
+    getInstallationToken: async () => { throw new SecureStorageUnavailableError(); },
+  });
+
+  await expect(analyze(anonymousMessages, new AbortController().signal)).rejects.toThrow(SECURE_STORAGE_UNAVAILABLE_MESSAGE);
+  expect(fetchImpl).not.toHaveBeenCalled();
+});
+
 it('maps a 20-second abort to TIMEOUT', async () => {
   jest.useFakeTimers();
   const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>((_input, init) => new Promise((_resolve, reject) => {
@@ -97,10 +162,48 @@ it('maps a 20-second abort to TIMEOUT', async () => {
   jest.useRealTimers();
 });
 
+it('times out and aborts a fetch implementation that ignores AbortSignal', async () => {
+  jest.useFakeTimers();
+  let requestSignal: AbortSignal | undefined;
+  const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>((_input, init) => {
+    requestSignal = init?.signal as AbortSignal;
+    return new Promise<Response>(() => undefined);
+  });
+  let error: unknown;
+  const request = client(fetchImpl)(anonymousMessages, new AbortController().signal).catch((reason) => { error = reason; });
+
+  await jest.advanceTimersByTimeAsync(20_000);
+  await request;
+
+  expect(error).toMatchObject({ code: 'TIMEOUT' });
+  expect(requestSignal?.aborted).toBe(true);
+  expect(jest.getTimerCount()).toBe(0);
+  jest.useRealTimers();
+});
+
+it('times out while a response body never finishes parsing', async () => {
+  jest.useFakeTimers();
+  const responseWithStalledJson = {
+    ok: true,
+    headers: new Headers(),
+    json: () => new Promise<unknown>(() => undefined),
+  } as unknown as Response;
+  const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockResolvedValue(responseWithStalledJson);
+  let error: unknown;
+  const request = client(fetchImpl)(anonymousMessages, new AbortController().signal).catch((reason) => { error = reason; });
+
+  await jest.advanceTimersByTimeAsync(20_000);
+  await request;
+
+  expect(error).toMatchObject({ code: 'TIMEOUT' });
+  expect(jest.getTimerCount()).toBe(0);
+  jest.useRealTimers();
+});
+
 it.each([
   [400, 'INVALID_REQUEST', 'INVALID_RESPONSE'],
   [413, 'PAYLOAD_TOO_LARGE', 'INVALID_RESPONSE'],
-  [503, 'SERVICE_UNAVAILABLE', 'SERVICE_UNAVAILABLE'],
+  [503, 'PROVIDER_UNAVAILABLE', 'SERVICE_UNAVAILABLE'],
 ] as const)('maps public %i responses without exposing their body', async (status, serverCode, expectedCode) => {
   const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockResolvedValue(response({ error: { code: serverCode, requestId: 'req-error' } }, { status }));
 

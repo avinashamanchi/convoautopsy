@@ -1,5 +1,5 @@
 import { AnalysisResultSchema, type AnalysisResult, type ParsedMessage } from '../domain/analysis';
-import { CONSENT_VERSION, type ConsentRecord } from './consentStore';
+import { CONSENT_VERSION, SecureStorageUnavailableError, type ConsentRecord } from './consentStore';
 
 export type AiClientErrorCode =
   | 'OFFLINE'
@@ -47,24 +47,44 @@ export function createAiClient({
 }: AiClientDependencies) {
   return async function analyzeRemotely(messages: ParsedMessage[], callerSignal: AbortSignal): Promise<AnalysisResult> {
     if (callerSignal.aborted) throw new AiClientError('CANCELLED');
-    const anonymousMessages = toAnonymousMessages(messages);
-    const consent = await getConsent();
-    if (!consent || consent.version !== CONSENT_VERSION || consent.provider !== 'Groq') {
-      throw new AiClientError('NOT_CONFIGURED');
-    }
-    const installationToken = await getInstallationToken();
-    const url = analysisUrl(endpoint, isProduction);
-    if (!url || !fetchPort) throw new AiClientError('NOT_CONFIGURED');
+    const requestController = new AbortController();
+    let timedOut = false;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    let rejectCancellation!: (reason: AiClientError) => void;
+    const abortFromCaller = () => {
+      requestController.abort();
+      rejectCancellation(new AiClientError('CANCELLED'));
+    };
+    const cancellation = new Promise<never>((_resolve, reject) => {
+      rejectCancellation = reject;
+      callerSignal.addEventListener('abort', abortFromCaller, { once: true });
+    });
+    const deadline = new Promise<never>((_resolve, reject) => {
+      timeout = setTimeout(() => {
+        timedOut = true;
+        requestController.abort();
+        reject(new AiClientError('TIMEOUT'));
+      }, timeoutMs);
+    });
 
-    const timeoutController = new AbortController();
-    const combinedController = new AbortController();
-    const abortFromCaller = () => combinedController.abort();
-    const abortFromTimeout = () => combinedController.abort();
-    callerSignal.addEventListener('abort', abortFromCaller, { once: true });
-    timeoutController.signal.addEventListener('abort', abortFromTimeout, { once: true });
-    const timeout = setTimeout(() => timeoutController.abort(), timeoutMs);
+    const ensureActive = () => {
+      if (callerSignal.aborted) throw new AiClientError('CANCELLED');
+      if (timedOut || requestController.signal.aborted) throw new AiClientError('TIMEOUT');
+    };
 
-    try {
+    const operation = async (): Promise<AnalysisResult> => {
+      ensureActive();
+      const anonymousMessages = toAnonymousMessages(messages);
+      const consent = await getConsent();
+      ensureActive();
+      if (!consent || consent.version !== CONSENT_VERSION || consent.provider !== 'Groq') {
+        throw new AiClientError('NOT_CONFIGURED');
+      }
+      const installationToken = await getInstallationToken();
+      ensureActive();
+      const url = analysisUrl(endpoint, isProduction);
+      if (!url || !fetchPort) throw new AiClientError('NOT_CONFIGURED');
+      ensureActive();
       const response = await fetchPort(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -74,20 +94,26 @@ export function createAiClient({
           installationToken,
           messages: anonymousMessages,
         }),
-        signal: combinedController.signal,
+        signal: requestController.signal,
       });
+      ensureActive();
       const body = await readJson(response);
+      ensureActive();
       if (!response.ok) throw publicError(response, body);
       return validAnalysis(response, body);
+    };
+
+    try {
+      return await Promise.race([operation(), cancellation, deadline]);
     } catch (error) {
       if (error instanceof AiClientError) throw error;
-      if (timeoutController.signal.aborted) throw new AiClientError('TIMEOUT');
+      if (error instanceof SecureStorageUnavailableError) throw error;
+      if (timedOut) throw new AiClientError('TIMEOUT');
       if (callerSignal.aborted || isAbortError(error)) throw new AiClientError('CANCELLED');
       throw new AiClientError('OFFLINE');
     } finally {
-      clearTimeout(timeout);
+      if (timeout !== null) clearTimeout(timeout);
       callerSignal.removeEventListener('abort', abortFromCaller);
-      timeoutController.signal.removeEventListener('abort', abortFromTimeout);
     }
   };
 }
@@ -140,7 +166,7 @@ function publicError(response: Response, body: unknown): AiClientError {
     }
     return new AiClientError('RATE_LIMITED', bodyRetry ?? headerRetry);
   }
-  if (response.status === 503 && body.error.code === 'SERVICE_UNAVAILABLE') {
+  if (response.status === 503 && body.error.code === 'PROVIDER_UNAVAILABLE') {
     return new AiClientError('SERVICE_UNAVAILABLE');
   }
   return new AiClientError('INVALID_RESPONSE');
