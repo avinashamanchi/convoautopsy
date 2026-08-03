@@ -30,12 +30,13 @@ export async function pickConversationFile(): Promise<ImportResult> {
 
     const asset = result.assets[0];
     if (!asset || !isSupportedTextFile(asset.name)) return { ok: false, code: 'UNSUPPORTED_TYPE' };
-    if (typeof asset.size === 'number' && asset.size > MAX_FILE_BYTES) {
-      return { ok: false, code: 'FILE_TOO_LARGE' };
-    }
 
     const file = new File(asset.uri);
-    if (asset.size === undefined && file.size !== null && file.size > MAX_FILE_BYTES) {
+    const actualSize = file.size;
+    if (typeof actualSize !== 'number' || !Number.isFinite(actualSize) || actualSize < 0) {
+      return { ok: false, code: 'UNREADABLE_FILE' };
+    }
+    if (actualSize > MAX_FILE_BYTES || (typeof asset.size === 'number' && asset.size > MAX_FILE_BYTES)) {
       return { ok: false, code: 'FILE_TOO_LARGE' };
     }
 

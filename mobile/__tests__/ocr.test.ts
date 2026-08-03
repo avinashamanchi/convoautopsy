@@ -33,6 +33,16 @@ it('surfaces a native recognition rejection as the stable OCR_FAILED code', asyn
   await expect(loadOcr().recognizeConversationText('file:///private/screenshot.png')).rejects.toThrow('OCR_FAILED');
 });
 
+it.each(['OCR_IMAGE_UNREADABLE', 'OCR_RECOGNITION_FAILED'])(
+  'preserves the stable native %s code',
+  async (code) => {
+    const error = Object.assign(new Error('native error'), { code });
+    mockRequireOptionalNativeModule.mockReturnValue({ recognizeText: jest.fn().mockRejectedValue(error) });
+
+    await expect(loadOcr().recognizeConversationText('file:///private/screenshot.png')).rejects.toThrow(code);
+  },
+);
+
 it('surfaces an empty native recognition result as OCR_EMPTY', async () => {
   mockRequireOptionalNativeModule.mockReturnValue({ recognizeText: jest.fn().mockResolvedValue('  ') });
 

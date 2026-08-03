@@ -6,6 +6,7 @@ jest.mock('expo-image-picker', () => ({
 jest.mock('expo-file-system', () => ({
   File: jest.fn(),
   __text: jest.fn(),
+  __size: { value: 10 },
 }));
 
 import * as DocumentPicker from 'expo-document-picker';
@@ -17,6 +18,7 @@ const mockGetDocumentAsync = DocumentPicker.getDocumentAsync as jest.Mock;
 const mockLaunchImageLibraryAsync = ImagePicker.launchImageLibraryAsync as jest.Mock;
 const mockFile = File as unknown as jest.Mock;
 const mockFileText = (jest.requireMock('expo-file-system') as { __text: jest.Mock }).__text;
+const mockFileSize = (jest.requireMock('expo-file-system') as { __size: { value: number | null } }).__size;
 
 const selectedFile = (name: string, size = 10) => ({
   canceled: false as const,
@@ -25,7 +27,8 @@ const selectedFile = (name: string, size = 10) => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockFile.mockImplementation(() => ({ text: mockFileText }));
+  mockFileSize.value = 10;
+  mockFile.mockImplementation(() => ({ size: mockFileSize.value, text: mockFileText }));
 });
 
 it.each(['conversation.txt', 'conversation.log', 'conversation.csv'])(
@@ -73,7 +76,26 @@ it('rejects a document larger than one MiB before reading it', async () => {
   mockGetDocumentAsync.mockResolvedValue(selectedFile('conversation.txt', 1_048_577));
 
   await expect(pickConversationFile()).resolves.toEqual({ ok: false, code: 'FILE_TOO_LARGE' });
-  expect(mockFile).not.toHaveBeenCalled();
+  expect(mockFile).toHaveBeenCalledTimes(1);
+  expect(mockFileText).not.toHaveBeenCalled();
+});
+
+it('rejects an actually oversized cached file when picker metadata understates its byte size', async () => {
+  mockGetDocumentAsync.mockResolvedValue(selectedFile('conversation.txt', 10));
+  mockFileSize.value = 1_048_577;
+  mockFile.mockImplementation(() => ({ size: mockFileSize.value, text: mockFileText }));
+
+  await expect(pickConversationFile()).resolves.toEqual({ ok: false, code: 'FILE_TOO_LARGE' });
+  expect(mockFileText).not.toHaveBeenCalled();
+});
+
+it('fails closed when the selected cached file has no readable byte size', async () => {
+  mockGetDocumentAsync.mockResolvedValue(selectedFile('conversation.txt', 10));
+  mockFileSize.value = null;
+  mockFile.mockImplementation(() => ({ size: mockFileSize.value, text: mockFileText }));
+
+  await expect(pickConversationFile()).resolves.toEqual({ ok: false, code: 'UNREADABLE_FILE' });
+  expect(mockFileText).not.toHaveBeenCalled();
 });
 
 it('rejects text beyond the authoritative 100,000 character input limit', async () => {
