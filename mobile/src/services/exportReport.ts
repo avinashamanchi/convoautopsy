@@ -1,7 +1,7 @@
-import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { PixelRatio } from 'react-native';
 import { captureRef, releaseCapture } from 'react-native-view-shot';
+import { createScopedExportTextFile, deleteScopedExportArtifact } from './cacheArtifacts';
 
 export type ExportOutcome =
   | { ok: true }
@@ -48,13 +48,11 @@ export const nativeReportSharingPort: ReportSharingPort = {
 export const nativeDraftSharingPort: DraftSharingPort = {
   isAvailableAsync: Sharing.isAvailableAsync,
   async createTextCacheFile(text) {
-    const file = new File(Paths.cache, `convoautopsy-response-${Date.now().toString(36)}.txt`);
-    file.write(text);
-    return file.uri;
+    return createScopedExportTextFile(text);
   },
   shareAsync: Sharing.shareAsync,
   async deleteCacheFile(uri) {
-    new File(uri).delete();
+    await deleteScopedExportArtifact(uri);
   },
 };
 

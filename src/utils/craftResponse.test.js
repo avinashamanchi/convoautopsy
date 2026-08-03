@@ -82,6 +82,32 @@ describe('craftResponse', () => {
     expect(JSON.parse(fetch.mock.calls[0][1].body)).toMatchObject({ sender: 'Person A', analysis: { mode: 'local', messages: [{ sender: 'Person A', possibleInterpretation: '[Person] feels unheard by [Person].' }] } })
   })
 
+  it('remaps canonically equivalent legacy sender labels before proxy validation', async () => {
+    vi.stubEnv('VITE_AI_PROXY_URL', 'https://proxy.example')
+    const fetch = vi.fn().mockResolvedValue(Response.json({
+      response: { id: 'd', text: 'Pause.', hint: 'Pause' }, requestId: 'id',
+    }))
+    vi.stubGlobal('fetch', fetch)
+
+    const output = await craftResponse({
+      sender: 'Jose\u0301',
+      goal: 'resolve',
+      tone: 'empathetic',
+      conversationText: 'José: Please listen.\nBob: Okay.',
+      result: {
+        ...legacyResult,
+        messages: [{ ...legacyResult.messages[0], sender: 'Jose\u0301' }],
+      },
+    }, options)
+
+    expect(output.source).toBe('ai')
+    const request = JSON.parse(fetch.mock.calls[0][1].body)
+    expect(request).toMatchObject({
+      sender: 'Person A',
+      analysis: { messages: [{ sender: 'Person A' }] },
+    })
+  })
+
   it('rejects public cleartext endpoints and times out hung response requests', async () => {
     const fetch = vi.fn(() => new Promise(() => {}))
     vi.stubGlobal('fetch', fetch)
@@ -90,6 +116,30 @@ describe('craftResponse', () => {
     expect(fetch).not.toHaveBeenCalled()
     vi.stubEnv('VITE_AI_PROXY_URL', 'https://proxy.example')
     await expect(craftResponse({ sender: 'Person A', goal: 'resolve', tone: 'empathetic', result: legacyResult }, { ...options, timeoutMs: 1 })).resolves.toMatchObject({ fallbackReason: 'REMOTE_UNAVAILABLE' })
+  })
+
+  it('keeps the deadline through response-body consumption and rejects oversized bodies', async () => {
+    vi.stubEnv('VITE_AI_PROXY_URL', 'https://proxy.example')
+    const stalled = new ReadableStream({ start() { /* deliberately never closes */ } })
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(stalled, { status: 200 }))
+      .mockResolvedValueOnce(new Response('x'.repeat(256 * 1024 + 1), { status: 200 }))
+    vi.stubGlobal('fetch', fetch)
+
+    await expect(craftResponse({ sender: 'Person A', goal: 'resolve', tone: 'empathetic', result: legacyResult }, { ...options, timeoutMs: 5 })).resolves.toMatchObject({ fallbackReason: 'REMOTE_UNAVAILABLE' })
+    await expect(craftResponse({ sender: 'Person A', goal: 'resolve', tone: 'empathetic', result: legacyResult }, options)).resolves.toMatchObject({ fallbackReason: 'REMOTE_UNAVAILABLE' })
+  })
+
+  it('validates response draft limits by Unicode code point', async () => {
+    vi.stubEnv('VITE_AI_PROXY_URL', 'https://proxy.example')
+    const envelope = (text) => Response.json({ response: { id: 'd', text, hint: 'Hint' }, requestId: 'id' })
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(envelope('🫠'.repeat(1_000)))
+      .mockResolvedValueOnce(envelope('🫠'.repeat(1_001)))
+    vi.stubGlobal('fetch', fetch)
+
+    await expect(craftResponse({ sender: 'Person A', goal: 'resolve', tone: 'empathetic', result: legacyResult }, options)).resolves.toMatchObject({ source: 'ai' })
+    await expect(craftResponse({ sender: 'Person A', goal: 'resolve', tone: 'empathetic', result: legacyResult }, options)).resolves.toMatchObject({ source: 'local', fallbackReason: 'REMOTE_UNAVAILABLE' })
   })
 
   it('contains no browser-provider endpoint or client key reference', async () => {

@@ -72,6 +72,7 @@ export default function AnalysisResult({ result, timestamp, onBack }) {
 
   const score = result.overall_tension_score
   const scoreColor = SCORE_COLOR(score)
+  const analysisMode = result.analysis_mode === 'ai' ? 'AI-assisted analysis' : 'On-device estimate'
 
   return (
     <div className="ar-wrap" ref={panelRef}>
@@ -171,6 +172,12 @@ export default function AnalysisResult({ result, timestamp, onBack }) {
             {formatDate(timestamp)}
           </div>
         )}
+        <div style={{ fontSize: '12px', color: 'rgba(167,139,250,0.78)', marginBottom: '6px' }}>
+          {analysisMode}
+        </div>
+        <div style={{ fontSize: '10px', lineHeight: 1.4, color: 'rgba(240,239,244,0.38)', marginBottom: '24px' }}>
+          Automated communication estimate; not a clinical diagnosis or factual finding.
+        </div>
 
         {/* Score block */}
         <div style={{

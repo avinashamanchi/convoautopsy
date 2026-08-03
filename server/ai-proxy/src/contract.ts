@@ -2,22 +2,35 @@ import { z } from 'zod';
 
 export const CONSENT_VERSION = '2026-08-02' as const;
 
+function codePointString(min: number, max: number) {
+  return z.string().superRefine((value, context) => {
+    const length = Array.from(value).length;
+    if (length < min || length > max) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `String must contain between ${min} and ${max} characters`,
+      });
+    }
+  });
+}
+
 export const InstallationTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{16,256}$/);
+export const AnonymousSenderSchema = z.string().regex(/^Person [A-Z]$/);
 
 export const InputMessageSchema = z
   .object({
-    sender: z.string().min(1).max(100),
-    text: z.string().min(1).max(1_000),
+    sender: AnonymousSenderSchema,
+    text: codePointString(1, 1_000),
   })
   .strict();
 
 export const AnalysisMessageSchema = z
   .object({
-    sender: z.string().regex(/^Person [A-Z]+$/),
-    text: z.string().min(1).max(1_000),
+    sender: AnonymousSenderSchema,
+    text: codePointString(1, 1_000),
     pattern: z.enum(['Criticism', 'Contempt', 'Defensiveness', 'Stonewalling', 'Neutral']),
     egoState: z.enum(['Parent', 'Adult', 'Child']),
-    possibleInterpretation: z.string().min(1).max(300),
+    possibleInterpretation: codePointString(1, 300),
   })
   .strict();
 
@@ -52,7 +65,7 @@ export const CraftResponseRequestSchema = z
     schemaVersion: z.literal(1),
     consentVersion: z.literal(CONSENT_VERSION),
     installationToken: InstallationTokenSchema,
-    sender: z.string().min(1).max(100),
+    sender: AnonymousSenderSchema,
     goal: z.enum(['resolve', 'boundary', 'feelings', 'understand', 'apologize', 'request']),
     tone: z.enum(['empathetic', 'assertive', 'deescalating', 'direct', 'diplomatic']),
     analysis: AnalysisResultSchema,
@@ -61,9 +74,9 @@ export const CraftResponseRequestSchema = z
 
 export const ResponseDraftSchema = z
   .object({
-    id: z.string().min(1).max(100),
-    text: z.string().min(1).max(1_000),
-    hint: z.string().min(1).max(200),
+    id: codePointString(1, 100),
+    text: codePointString(1, 1_000),
+    hint: codePointString(1, 200),
   })
   .strict();
 

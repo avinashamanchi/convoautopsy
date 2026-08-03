@@ -131,7 +131,7 @@ function analysisUrl(endpoint: string | undefined, isProduction: boolean): strin
 }
 
 function toAnonymousMessages(messages: ParsedMessage[]) {
-  if (messages.length === 0 || messages.some((message) => !/^Person [A-Z]+$/.test(message.sender) || !message.text)) {
+  if (messages.length === 0 || messages.some((message) => !/^Person [A-Z]$/.test(message.sender) || !message.text)) {
     throw new AiClientError('INVALID_RESPONSE');
   }
   return messages.map(({ sender, text }) => ({ sender, text }));

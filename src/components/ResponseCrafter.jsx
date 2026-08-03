@@ -14,16 +14,44 @@ export default function ResponseCrafter({ result, conversationText }) {
   const [responseSource, setResponseSource] = useState(null)
   const requestRef = useRef(null)
   const requestGeneration = useRef(0)
+  const copyGeneration = useRef(0)
+  const copyTimer = useRef(null)
 
-  useEffect(() => () => requestRef.current?.abort(), [])
+  useEffect(() => {
+    requestGeneration.current += 1
+    const generation = requestGeneration.current
+    requestRef.current?.abort()
+    requestRef.current = null
+    copyGeneration.current += 1
+    clearTimeout(copyTimer.current)
+    queueMicrotask(() => {
+      if (generation !== requestGeneration.current) return
+      setStep(1)
+      setSender('')
+      setGoal('')
+      setTone('')
+      setResponses(null)
+      setResponseSource(null)
+      setCopied(null)
+      setError('')
+      setLoading(false)
+    })
+    return () => {
+      requestGeneration.current += 1
+      requestRef.current?.abort()
+      copyGeneration.current += 1
+      clearTimeout(copyTimer.current)
+    }
+  }, [result, conversationText])
 
   const senders = getPersonSenders(result)
 
   const generate = async (selectedTone) => {
+    requestGeneration.current += 1
     requestRef.current?.abort()
     const controller = new AbortController()
     requestRef.current = controller
-    const generation = ++requestGeneration.current
+    const generation = requestGeneration.current
     setLoading(true)
     setError('')
     setStep(4)
@@ -42,16 +70,45 @@ export default function ResponseCrafter({ result, conversationText }) {
       if (generation !== requestGeneration.current || controller.signal.aborted || error?.name === 'AbortError') return
       setError('Failed to generate responses. Try again.')
     }
-    if (generation === requestGeneration.current) setLoading(false)
+    if (generation === requestGeneration.current) {
+      requestRef.current = null
+      setLoading(false)
+    }
   }
 
-  const handleCopy = (id, text) => {
-    navigator.clipboard.writeText(text).catch(() => {})
-    setCopied(id)
-    setTimeout(() => setCopied(null), 2200)
+  const handleCopy = async (id, text) => {
+    const generation = ++copyGeneration.current
+    clearTimeout(copyTimer.current)
+    setCopied(null)
+    setError('')
+    try {
+      await navigator.clipboard.writeText(text)
+      if (generation !== copyGeneration.current) return
+      setCopied(id)
+      copyTimer.current = setTimeout(() => {
+        if (generation === copyGeneration.current) setCopied(null)
+      }, 2200)
+    } catch {
+      if (generation === copyGeneration.current) setError('Copy failed. Select and copy the draft manually.')
+    }
   }
 
-  const reset = () => { setStep(1); setSender(''); setGoal(''); setTone(''); setResponses(null); setResponseSource(null); setError('') }
+  const reset = () => {
+    requestGeneration.current += 1
+    requestRef.current?.abort()
+    requestRef.current = null
+    copyGeneration.current += 1
+    clearTimeout(copyTimer.current)
+    setLoading(false)
+    setCopied(null)
+    setStep(1)
+    setSender('')
+    setGoal('')
+    setTone('')
+    setResponses(null)
+    setResponseSource(null)
+    setError('')
+  }
 
   const STEP_LABELS = ['Who', 'Goal', 'Tone', 'Responses']
 

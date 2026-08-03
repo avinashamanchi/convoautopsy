@@ -6,10 +6,13 @@ import { openExpoSqlitePort } from './expoSqlitePort';
 import type { PreferenceStore, ReportRepository } from './reportRepository';
 import { createSqlitePreferenceStore } from './sqlitePreferenceStore';
 import { createSqliteReportRepository } from './sqliteReportRepository';
+import { createInvalidatingReportRepository, type InvalidatingReportRepository } from './reportRepositoryCoordinator';
 
 type ReportRepositoryContextValue = {
   preferences: PreferenceStore;
-  repository: ReportRepository;
+  repository: InvalidatingReportRepository;
+  revision: number;
+  deletingAll: boolean;
 };
 
 const ReportRepositoryContext = createContext<ReportRepositoryContextValue | null>(null);
@@ -26,24 +29,34 @@ export function ReportRepositoryProvider({ children, repository: injectedReposit
 
   useEffect(() => {
     let active = true;
+    let unsubscribe: (() => void) | null = null;
     setValue(null);
     setError(false);
     void (async () => {
       try {
+        let repository: ReportRepository;
+        let preferences: PreferenceStore;
         if (injectedRepository && injectedPreferences) {
-          await injectedRepository.initialize();
-          if (active) setValue({ repository: injectedRepository, preferences: injectedPreferences });
-          return;
+          repository = injectedRepository;
+          preferences = injectedPreferences;
+        } else {
+          const port = await openExpoSqlitePort();
+          repository = createSqliteReportRepository(port);
+          preferences = createSqlitePreferenceStore(port);
         }
-        const port = await openExpoSqlitePort();
-        const repository = createSqliteReportRepository(port);
         await repository.initialize();
-        if (active) setValue({ repository, preferences: createSqlitePreferenceStore(port) });
+        if (!active) return;
+        const coordinated = createInvalidatingReportRepository(repository);
+        const commit = (snapshot: ReturnType<InvalidatingReportRepository['getSnapshot']>) => {
+          if (active) setValue({ repository: coordinated, preferences, ...snapshot });
+        };
+        unsubscribe = coordinated.subscribe(commit);
+        commit(coordinated.getSnapshot());
       } catch {
         if (active) setError(true);
       }
     })();
-    return () => { active = false; };
+    return () => { active = false; unsubscribe?.(); };
   }, [attempt, injectedPreferences, injectedRepository]);
 
   if (error) {

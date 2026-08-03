@@ -10,6 +10,7 @@ import ResponseCrafter from '../components/ResponseCrafter'
 import AiConsentModal from '../components/AiConsentModal'
 import { getAiConsent, grantAiConsent } from '../utils/aiConsent'
 import { analysisSourceMessage } from '../utils/analysisSourceMessage'
+import { MAX_INPUT_CHARACTERS, countCodePoints } from '../utils/textLimits'
 
 function formatDate(ts) {
   const d = new Date(ts)
@@ -51,7 +52,10 @@ export default function Dashboard({ user, onLogout }) {
   const consentBusy = useRef(false)
   const aiConsentTriggerRef = useRef(null)
 
-  useEffect(() => () => requestRef.current?.abort(), [])
+  useEffect(() => () => {
+    requestGeneration.current += 1
+    requestRef.current?.abort()
+  }, [])
 
   useEffect(() => {
     setConversations(getConversations(user.username))
@@ -75,11 +79,25 @@ export default function Dashboard({ user, onLogout }) {
     setInputText('')
   }
 
-  const runAnalysis = async (txt, options) => {
+  const invalidateAnalysisRequest = () => {
+    requestGeneration.current += 1
     requestRef.current?.abort()
+    requestRef.current = null
+    setAnalyzing(false)
+  }
+
+  const resetPendingFlow = () => {
+    invalidateAnalysisRequest()
+    setPendingText('')
+    setShowAiConsent(false)
+    consentBusy.current = false
+  }
+
+  const runAnalysis = async (txt, options) => {
+    invalidateAnalysisRequest()
     const controller = new AbortController()
     requestRef.current = controller
-    const generation = ++requestGeneration.current
+    const generation = requestGeneration.current
     setAnalyzing(true)
     try {
       const { result, source, fallbackReason } = await analyzeConversation(txt, { ...options, signal: controller.signal })
@@ -93,16 +111,24 @@ export default function Dashboard({ user, onLogout }) {
       if (generation !== requestGeneration.current || controller.signal.aborted || error?.name === 'AbortError') return
       setError('Analysis failed. Please try again.')
     } finally {
-      if (generation === requestGeneration.current) setAnalyzing(false)
+      if (generation === requestGeneration.current) {
+        requestRef.current = null
+        setAnalyzing(false)
+      }
     }
   }
 
   const handleAnalyze = async (text = inputText, preResult = null) => {
     const txt = text.trim()
     if (!txt) { setError('Paste a conversation first'); return }
+    if (countCodePoints(txt) > MAX_INPUT_CHARACTERS) {
+      setError(`Conversation must be ${MAX_INPUT_CHARACTERS.toLocaleString()} characters or fewer`)
+      return
+    }
     setError('')
 
     if (preResult) {
+      resetPendingFlow()
       saveAnalysis(txt, { ...preResult, analysis_mode: 'local' }, 'local', 'LOCAL_REQUESTED', 'Demo Analysis')
       return
     }
@@ -139,16 +165,19 @@ export default function Dashboard({ user, onLogout }) {
   }
 
   const handleDelete = (id) => {
+    if (activeConvo?.id === id) invalidateAnalysisRequest()
     deleteConversation(user.username, id)
     setConversations(getConversations(user.username))
     if (activeConvo?.id === id) setActiveConvo(null)
     setDeleteConfirm(null)
   }
 
-  const handleLogout = () => { clearSession(); onLogout() }
+  const handleLogout = () => { resetPendingFlow(); clearSession(); onLogout() }
 
   const handleFile = (file) => {
     if (!file) return
+    resetPendingFlow()
+    const generation = requestGeneration.current
     const name = file.name.toLowerCase()
     if (!name.endsWith('.txt') && !name.endsWith('.log') && !name.endsWith('.csv')) {
       setError('Upload a .txt file (WhatsApp export, Discord log, etc.)')
@@ -156,7 +185,13 @@ export default function Dashboard({ user, onLogout }) {
     }
     const reader = new FileReader()
     reader.onload = (e) => {
+      if (generation !== requestGeneration.current) return
       const text = e.target.result
+      if (typeof text !== 'string' || countCodePoints(text) > MAX_INPUT_CHARACTERS) {
+        setInputText('')
+        setError(`Conversation must be ${MAX_INPUT_CHARACTERS.toLocaleString()} characters or fewer`)
+        return
+      }
       setInputText(text)
       setError('')
       setActiveConvo(null)
@@ -205,7 +240,7 @@ export default function Dashboard({ user, onLogout }) {
 
           <button
             className="dash-new-btn"
-            onClick={() => { setActiveConvo(null); setInputText(''); setError('') }}
+            onClick={() => { resetPendingFlow(); setActiveConvo(null); setInputText(''); setError('') }}
           >
             + New Analysis
           </button>
@@ -218,7 +253,7 @@ export default function Dashboard({ user, onLogout }) {
               <div
                 key={c.id}
                 className={`dash-convo-item ${activeConvo?.id === c.id ? 'active' : ''}`}
-                onClick={() => setActiveConvo(c)}
+                onClick={() => { resetPendingFlow(); setActiveConvo(c) }}
               >
                 <div className="dash-convo-title">{c.title}</div>
                 <div className="dash-convo-meta">
@@ -251,7 +286,7 @@ export default function Dashboard({ user, onLogout }) {
               <AnalysisResult
                 result={activeConvo.result}
                 timestamp={activeConvo.timestamp}
-                onBack={() => setActiveConvo(null)}
+                onBack={() => { resetPendingFlow(); setActiveConvo(null) }}
               />
               <div className="dash-crafter-wrap">
                 <ResponseCrafter result={activeConvo.result} conversationText={activeConvo.text} />
@@ -285,6 +320,10 @@ export default function Dashboard({ user, onLogout }) {
                     <span>Drop your chat file here</span>
                   </div>
                 )}
+              </div>
+
+              <div className="dash-character-count" aria-live="polite">
+                {countCodePoints(inputText).toLocaleString()} of {MAX_INPUT_CHARACTERS.toLocaleString()} characters
               </div>
 
               <div className="dash-upload-row">

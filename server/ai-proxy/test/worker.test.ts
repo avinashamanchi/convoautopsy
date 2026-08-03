@@ -1,4 +1,4 @@
-import { env } from 'cloudflare:test';
+import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 
 import type { AnalysisResult, CraftResponseRequest } from '../src/contract';
@@ -82,16 +82,31 @@ describe('AI proxy routes', () => {
   });
 
   it('enforces the 128 KiB bound before JSON parsing', async () => {
+    const exactBoundary = new Request('https://proxy.example/v1/analyses', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: 'x'.repeat(128 * 1024),
+    });
     const oversized = new Request('https://proxy.example/v1/analyses', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: 'x'.repeat(128 * 1024 + 1),
     });
 
+    const exactResponse = await app().fetch(exactBoundary, env as unknown as Env);
     const response = await app().fetch(oversized, env as unknown as Env);
 
+    expect(exactResponse.status).toBe(400);
     expect(response.status).toBe(413);
     await expect(response.json()).resolves.toMatchObject({ error: { code: 'PAYLOAD_TOO_LARGE' } });
+  });
+
+  it('accepts 1,000 Unicode code points even when UTF-8 uses more bytes', async () => {
+    const response = await app().fetch(request('/v1/analyses', analysisRequest({
+      messages: [{ sender: 'Person A', text: '🫠'.repeat(1_000) }],
+    })), env as unknown as Env);
+
+    expect(response.status).toBe(200);
   });
 
   it('requires an installation token and the current consent version', async () => {
@@ -173,15 +188,55 @@ describe('AI proxy routes', () => {
     await expect(response.json()).resolves.toMatchObject({ response: { id: 'draft-1' }, requestId: expect.any(String) });
   });
 
-  it('keeps analysis and response limits in independent route buckets', async () => {
+  it('passes only the minimized anonymous DTO to the craft provider', async () => {
+    let received: unknown;
     const input: CraftResponseRequest = {
-      schemaVersion: 1, consentVersion: '2026-08-02', installationToken, sender: 'Person A', goal: 'resolve', tone: 'empathetic', analysis,
+      schemaVersion: 1,
+      consentVersion: '2026-08-02',
+      installationToken,
+      sender: 'Person A',
+      goal: 'resolve',
+      tone: 'empathetic',
+      analysis,
+    };
+    const provider: AiProvider = {
+      analyze: validProvider().analyze,
+      craftResponse: async (value) => {
+        received = value;
+        return validProvider().craftResponse(value);
+      },
+    };
+
+    const response = await app(provider).fetch(request('/v1/responses', input), env as unknown as Env);
+
+    expect(response.status).toBe(200);
+    expect(received).toEqual({
+      sender: input.sender,
+      goal: input.goal,
+      tone: input.tone,
+      analysis: {
+        intensityScore: analysis.intensityScore,
+        conflictMode: analysis.conflictMode,
+        messages: analysis.messages,
+      },
+    });
+    expect(JSON.stringify(received)).not.toContain(installationToken);
+    expect(JSON.stringify(received)).not.toContain('consentVersion');
+    expect(JSON.stringify(received)).not.toContain('schemaVersion');
+    expect(JSON.stringify(received)).not.toContain('mode');
+  });
+
+  it('keeps analysis and response limits in independent route buckets', async () => {
+    const routeToken = 'route-bucket-installation-token';
+    const routeHeaders = { 'CF-Connecting-IP': '192.0.2.88' };
+    const input: CraftResponseRequest = {
+      schemaVersion: 1, consentVersion: '2026-08-02', installationToken: routeToken, sender: 'Person A', goal: 'resolve', tone: 'empathetic', analysis,
     };
     for (let index = 0; index < 10; index += 1) {
-      expect((await app().fetch(request('/v1/analyses', analysisRequest()), env as unknown as Env)).status).toBe(200);
+      expect((await app().fetch(request('/v1/analyses', analysisRequest({ installationToken: routeToken }), { headers: routeHeaders }), env as unknown as Env)).status).toBe(200);
     }
     for (let index = 0; index < 20; index += 1) {
-      expect((await app().fetch(request('/v1/responses', input), env as unknown as Env)).status).toBe(200);
+      expect((await app().fetch(request('/v1/responses', input, { headers: routeHeaders }), env as unknown as Env)).status).toBe(200);
     }
   });
 });

@@ -93,6 +93,14 @@ it('rejects parsed messages that are not anonymous labels before making a reques
   expect(fetchImpl).not.toHaveBeenCalled();
 });
 
+it('rejects labels beyond Person Z before making a request', async () => {
+  const fetchImpl = jest.fn();
+  const outOfContractMessage = [{ ...anonymousMessages[0], sender: 'Person AA' }];
+
+  await expectCode(client(fetchImpl)(outOfContractMessage, new AbortController().signal), 'INVALID_RESPONSE');
+  expect(fetchImpl).not.toHaveBeenCalled();
+});
+
 it('maps a network rejection to OFFLINE without exposing the transport error', async () => {
   const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockRejectedValue(new Error('network details: do not expose'));
 

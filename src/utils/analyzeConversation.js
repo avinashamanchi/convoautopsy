@@ -35,35 +35,40 @@ function classify(text) {
 }
 
 function personLabel(index) {
-  let value = index
-  let label = ''
-  do {
-    label = String.fromCharCode(65 + (value % 26)) + label
-    value = Math.floor(value / 26) - 1
-  } while (value >= 0)
-  return `Person ${label}`
+  return index >= 0 && index < MAX_PARTICIPANTS ? `Person ${String.fromCharCode(65 + index)}` : null
 }
 
 export function parseConversation(raw) {
-  const lines = raw.split('\n').filter(l => l.trim())
-  const map = {}
+  const normalized = normalizeText(raw)
+  if (countCodePoints(normalized) > MAX_INPUT_CHARACTERS) return []
+  const lines = normalized.split('\n').filter(l => l.trim())
+  const map = new Map()
   const messages = []
   for (const line of lines) {
-    const m = line.match(/^([^:\n-]{1,40})[:-]\s*(.+)$/)
+    const m = line.match(/^([^:\n-]+)[:-]\s*(.+)$/u)
     if (!m) continue
-    const name = m[1].trim(), text = m[2].trim()
-    if (!name || !text) continue
-    if (!map[name]) map[name] = personLabel(Object.keys(map).length)
-    messages.push({ sender: map[name], rawName: name, text })
+    const name = normalizeText(m[1].trim())
+    const text = normalizeText(m[2].trim())
+    if (!name || !text || countCodePoints(name) > 40 || countCodePoints(text) > MAX_MESSAGE_CHARACTERS) return []
+    const key = name.toLowerCase()
+    if (!map.has(key)) {
+      const label = personLabel(map.size)
+      if (!label) return []
+      map.set(key, label)
+    }
+    messages.push({ sender: map.get(key), rawName: name, text })
+    if (messages.length > MAX_MESSAGES) return []
   }
   return messages
 }
 
 export function redactKnownParticipantNames(text, names) {
-  return names.reduce((redacted, name) => {
-    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    return redacted.replace(new RegExp(`(^|[^\\w])${escaped}(?=$|[^\\w])`, 'gi'), '$1[Person]')
-  }, text)
+  return [...new Set(names.map(normalizeText))]
+    .sort((a, b) => countCodePoints(b) - countCodePoints(a))
+    .reduce((redacted, name) => {
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      return redacted.replace(new RegExp(`(^|[^\\p{L}\\p{M}\\p{N}_])${escaped}(?=$|[^\\p{L}\\p{M}\\p{N}_])`, 'giu'), '$1[Person]')
+    }, normalizeText(text))
 }
 
 export function localAnalyze(text) {
@@ -80,8 +85,6 @@ export function localAnalyze(text) {
 }
 
 const CONSENT_VERSION = '2026-08-02'
-const MAX_MESSAGES = 100
-const MAX_MESSAGE_LENGTH = 1000
 const MODES = new Set(['local', 'ai'])
 const CONFLICT_MODES = new Set(['Competing', 'Avoiding', 'Compromising', 'Collaborating', 'Accommodating', 'Competing vs Avoiding'])
 const PATTERNS = new Set(['Criticism', 'Contempt', 'Defensiveness', 'Stonewalling', 'Neutral'])
@@ -124,7 +127,7 @@ function proxyUrl(path) {
 
 function anonymousMessages(text) {
   const parsed = parseConversation(text)
-  if (!parsed.length || parsed.length > MAX_MESSAGES || parsed.some(message => message.text.length > MAX_MESSAGE_LENGTH)) return null
+  if (!parsed.length) return null
   const names = [...new Set(parsed.map(message => message.rawName))]
   return parsed.map(({ sender, text: messageText }) => ({ sender, text: redactKnownParticipantNames(messageText, names) }))
 }
@@ -142,11 +145,11 @@ function isAnalysisResult(value) {
   if (value.schemaVersion !== 1 || !MODES.has(value.mode) || !Number.isInteger(value.intensityScore) || value.intensityScore < 0 || value.intensityScore > 100 || !CONFLICT_MODES.has(value.conflictMode) || !Array.isArray(value.messages) || value.messages.length === 0 || value.messages.length > MAX_MESSAGES) return false
   return value.messages.every(message => message && typeof message === 'object' && !Array.isArray(message)
     && hasOnlyKeys(message, ['sender', 'text', 'pattern', 'egoState', 'possibleInterpretation'])
-    && /^Person [A-Z]+$/.test(message.sender)
-    && typeof message.text === 'string' && message.text.length > 0 && message.text.length <= MAX_MESSAGE_LENGTH
+    && isAnonymousSender(message.sender)
+    && isCodePointLength(message.text, 1, MAX_MESSAGE_CHARACTERS)
     && PATTERNS.has(message.pattern)
     && EGO_STATES.has(message.egoState)
-    && typeof message.possibleInterpretation === 'string' && message.possibleInterpretation.length > 0 && message.possibleInterpretation.length <= 300)
+    && isCodePointLength(message.possibleInterpretation, 1, 300))
 }
 
 function isSuccessEnvelope(value) {
@@ -161,24 +164,6 @@ function requestIdMatchesHeader(response, requestId) {
   return header === null || header === requestId
 }
 
-function abortError() { return new DOMException('Request cancelled', 'AbortError') }
-
-async function fetchWithDeadline(url, init, options) {
-  if (options.signal?.aborted) throw abortError()
-  const controller = new AbortController()
-  let timer
-  let cancel
-  const cancelled = new Promise((_, reject) => {
-    cancel = () => { controller.abort(); reject(abortError()) }
-    options.signal?.addEventListener('abort', cancel, { once: true })
-  })
-  const timedOut = new Promise((_, reject) => {
-    timer = setTimeout(() => { controller.abort(); reject(new Error('timeout')) }, options.timeoutMs ?? 20_000)
-  })
-  try { return await Promise.race([fetch(url, { ...init, signal: controller.signal }), cancelled, timedOut]) }
-  finally { clearTimeout(timer); options.signal?.removeEventListener('abort', cancel) }
-}
-
 export async function analyzeConversation(text, options = {}) {
   const fallback = (fallbackReason) => ({ result: localAnalyze(text), source: 'local', fallbackReason })
   if (!remoteOptionsReady(options)) return fallback('NOT_CONFIGURED')
@@ -186,12 +171,11 @@ export async function analyzeConversation(text, options = {}) {
   const messages = anonymousMessages(text)
   if (!url || !messages) return fallback('NOT_CONFIGURED')
   try {
-    const res = await fetchWithDeadline(url, {
+    const { response: res, data } = await fetchBoundedJson(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ schemaVersion: 1, consentVersion: options.consentVersion, installationToken: options.installationToken, messages }),
     }, options)
-    const data = await res.json()
     if (!res.ok || !isSuccessEnvelope(data) || !requestIdMatchesHeader(res, data.requestId) || data.analysis.mode !== 'ai') throw new Error()
     return { result: toLegacyResult(data.analysis), source: 'ai', fallbackReason: null }
   } catch (error) {
@@ -219,3 +203,14 @@ export const DEMO_RESULT = {
     { sender: 'Person B', text: "I don't even care anymore. Figure it out yourself.", gottman_flag: 'Contempt', ego_state: 'Child', hidden_meaning: 'I care deeply but feel completely powerless in this dynamic.' },
   ]
 }
+import { fetchBoundedJson } from './fetchBoundedJson'
+import {
+  MAX_INPUT_CHARACTERS,
+  MAX_MESSAGE_CHARACTERS,
+  MAX_MESSAGES,
+  MAX_PARTICIPANTS,
+  countCodePoints,
+  isAnonymousSender,
+  isCodePointLength,
+  normalizeText,
+} from './textLimits'

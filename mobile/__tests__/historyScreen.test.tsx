@@ -1,13 +1,16 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { FlatList } from 'react-native';
 import { router } from 'expo-router';
 import ResultScreen from '../app/result';
 import HistoryScreen from '../app/(tabs)/history';
-import { ReportRepositoryProvider } from '../src/services/reportRepositoryContext';
+import { PrimaryButton } from '../src/components/PrimaryButton';
+import { ReportRepositoryProvider, useReportRepository } from '../src/services/reportRepositoryContext';
 import type { AnalysisResult } from '../src/domain/analysis';
 import type { PreferenceStore, ReportRepository, SavedReport } from '../src/services/reportRepository';
 
 jest.mock('expo-router', () => ({
   router: { push: jest.fn(), replace: jest.fn() },
+  useFocusEffect: (effect: () => void | (() => void)) => require('react').useEffect(effect, [effect]),
 }));
 
 jest.mock('../src/services/expoSqlitePort', () => ({
@@ -76,6 +79,30 @@ class MemoryReportRepository implements ReportRepository {
   async deleteAll() { this.reports = []; }
 }
 
+class DeferredDeleteRepository extends MemoryReportRepository {
+  deleteStarted = false;
+  deleteAllStarted = false;
+  private releaseDeleteOperation!: () => void;
+  private releaseDeleteAllOperation!: () => void;
+  private readonly deleteGate = new Promise<void>((resolve) => { this.releaseDeleteOperation = resolve; });
+  private readonly deleteAllGate = new Promise<void>((resolve) => { this.releaseDeleteAllOperation = resolve; });
+
+  override async delete(id: string) {
+    this.deleteStarted = true;
+    await this.deleteGate;
+    await super.delete(id);
+  }
+
+  override async deleteAll() {
+    this.deleteAllStarted = true;
+    await this.deleteAllGate;
+    await super.deleteAll();
+  }
+
+  releaseDelete() { this.releaseDeleteOperation(); }
+  releaseDeleteAll() { this.releaseDeleteAllOperation(); }
+}
+
 const preferences: PreferenceStore = {
   get: async () => null, set: async () => {}, delete: async () => {}, deleteAll: async () => {},
 };
@@ -88,16 +115,46 @@ function renderHistory(repository = new MemoryReportRepository()) {
   );
 }
 
+function DeleteAllButton() {
+  const { repository } = useReportRepository();
+  return <PrimaryButton label="Test delete all" onPress={() => { void repository.deleteAll(); }} />;
+}
+
 beforeEach(() => {
+  jest.useFakeTimers();
   useAnalysisSession.mockReturnValue({
     activeResult: result, draft: 'Alex: Can we talk?', reset: jest.fn(),
   });
   jest.clearAllMocks();
 });
 
+afterEach(() => {
+  cleanup();
+  jest.clearAllTimers();
+  jest.useRealTimers();
+});
+
 it('shows a useful empty history state', async () => {
-  renderHistory();
+  const view = renderHistory();
   expect(await screen.findByText('No saved analyses yet.')).toBeOnTheScreen();
+  expect(view.UNSAFE_getByType(FlatList).props.testID).toBe('history-list');
+});
+
+it('virtualizes a large report history instead of mounting every row in a plain view', async () => {
+  const reports = Array.from({ length: 200 }, (_, index) => savedReport({ id: `report-${index}`, title: `Report ${index}` }));
+  const view = renderHistory(new MemoryReportRepository(reports));
+
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  expect(view.UNSAFE_getByType(FlatList).props.data).toHaveLength(200);
+  expect(view.UNSAFE_getByType(FlatList).props.keyboardShouldPersistTaps).toBe('handled');
+  act(() => {
+    view.unmount();
+    jest.clearAllTimers();
+  });
 });
 
 it('retries failed initialization before allowing history to render', async () => {
@@ -137,7 +194,7 @@ it('saves a result without original text unless the user opts in', async () => {
   const repository = new MemoryReportRepository();
   render(
     <ReportRepositoryProvider preferenceStore={preferences} repository={repository}>
-      <ResultScreen />
+      <ResultScreen createReportId={() => '0cb5b617-8c6e-4120-a3cb-eec7589569a0'} />
     </ReportRepositoryProvider>,
   );
 
@@ -147,7 +204,10 @@ it('saves a result without original text unless the user opts in', async () => {
 
   await waitFor(() => expect(repository.reports).toHaveLength(1));
   expect(repository.reports[0].sourceText).toBeNull();
+  expect(repository.reports[0].id).toBe('0cb5b617-8c6e-4120-a3cb-eec7589569a0');
   expect(screen.getByText('Analysis saved on this device.')).toBeOnTheScreen();
+  fireEvent.press(screen.getByTestId('open-history'));
+  expect(router.replace).toHaveBeenCalledWith('/(tabs)/history');
 });
 
 it('shows a save failure without claiming the result was saved', async () => {
@@ -208,6 +268,38 @@ it('removes the deleted row and offers a retry when refreshing history fails', a
   expect(await screen.findByText('Could not refresh saved analyses. Please try again.')).toBeOnTheScreen();
   expect(screen.queryByText('Friday conversation')).toBeNull();
   fireEvent.press(screen.getByRole('button', { name: 'Retry loading saved analyses' }));
+  expect(await screen.findByText('No saved analyses yet.')).toBeOnTheScreen();
+});
+
+it('does not re-retain a failed delete payload after delete-all invalidates it', async () => {
+  const repository = new DeferredDeleteRepository([
+    savedReport({ sourceText: 'Private conversation that must leave memory' }),
+  ]);
+  render(
+    <ReportRepositoryProvider preferenceStore={preferences} repository={repository}>
+      <HistoryScreen />
+      <DeleteAllButton />
+    </ReportRepositoryProvider>,
+  );
+  await screen.findByText('Friday conversation');
+
+  fireEvent.press(screen.getByRole('button', { name: 'Delete Friday conversation' }));
+  fireEvent.press(screen.getByRole('button', { name: 'Confirm delete Friday conversation' }));
+  await waitFor(() => expect(repository.deleteStarted).toBe(true));
+  fireEvent.press(screen.getByRole('button', { name: 'Test delete all' }));
+  expect(await screen.findByText('No saved analyses yet.')).toBeOnTheScreen();
+
+  await act(async () => {
+    repository.releaseDelete();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  await waitFor(() => expect(repository.deleteAllStarted).toBe(true));
+  expect(screen.queryByText('Could not delete “Friday conversation”. Please try again.')).toBeNull();
+  expect(screen.queryByText('Friday conversation')).toBeNull();
+  expect(screen.queryByText('Private conversation that must leave memory')).toBeNull();
+
+  await act(async () => { repository.releaseDeleteAll(); });
   expect(await screen.findByText('No saved analyses yet.')).toBeOnTheScreen();
 });
 

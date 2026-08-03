@@ -8,8 +8,8 @@ import {
   type CraftResponseRequest,
 } from './contract';
 import { asPublicError, ProviderInvalidResponseError, ProviderUnavailableError, PublicError, type PublicErrorCode } from './errors';
-import { createGroqProvider, type AiProvider } from './provider';
-import { checkRateLimit, deriveRateLimitKey } from './rateLimit';
+import { createGroqProvider, type AiProvider, type ProviderCraftInput } from './provider';
+import { checkRateLimits, deriveRateLimitKeys } from './rateLimit';
 
 export type { AiProvider } from './provider';
 export { RateLimitDurableObject } from './rateLimit';
@@ -74,13 +74,13 @@ async function handle(request: Request, env: Env, route: SafeLog['route'], reque
 
   const secret = options.rateLimitSecret ?? env.RATE_LIMIT_HMAC_SECRET;
   if (!secret) throw new PublicError('INTERNAL_ERROR', 500);
-  const key = await deriveRateLimitKey(
+  const keys = await deriveRateLimitKeys(
     parsed.data.installationToken,
     request.headers.get('CF-Connecting-IP') ?? '0.0.0.0',
     secret,
     route,
   );
-  const rate = await checkRateLimit(env.RATE_LIMITER, key, route);
+  const rate = await checkRateLimits(env.RATE_LIMITER, keys, route);
   if (!rate.allowed) throw new PublicError('RATE_LIMITED', 429, rate.retryAfterSeconds);
 
   const provider = options.provider ?? createGroqProvider(env.GROQ_API_KEY);
@@ -99,7 +99,18 @@ async function handle(request: Request, env: Env, route: SafeLog['route'], reque
 
   let response;
   try {
-    response = ResponseDraftSchema.parse(await provider.craftResponse(parsed.data as CraftResponseRequest));
+    const input = parsed.data as CraftResponseRequest;
+    const providerInput: ProviderCraftInput = {
+      sender: input.sender,
+      goal: input.goal,
+      tone: input.tone,
+      analysis: {
+        intensityScore: input.analysis.intensityScore,
+        conflictMode: input.analysis.conflictMode,
+        messages: input.analysis.messages,
+      },
+    };
+    response = ResponseDraftSchema.parse(await provider.craftResponse(providerInput));
   } catch (error) {
     if (error instanceof DOMException && error.name === 'TimeoutError') throw error;
     if (error instanceof ProviderInvalidResponseError || error instanceof ProviderUnavailableError) throw error;

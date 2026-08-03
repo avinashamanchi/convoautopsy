@@ -1,16 +1,6 @@
-import { defineWorkersConfig } from '@cloudflare/vitest-pool-workers/config';
+import { cloudflareTest } from '@cloudflare/vitest-pool-workers';
+import { defineConfig } from 'vitest/config';
 
-export default defineWorkersConfig({
-  test: {
-    pool: '@cloudflare/vitest-pool-workers',
-    poolOptions: {
-      workers: {
-        main: './src/index.ts',
-        miniflare: {
-          compatibilityDate: '2026-08-02',
-          durableObjects: { RATE_LIMITER: { className: 'RateLimitDurableObject', useSQLite: true } },
-        },
-      },
-    },
-  },
+export default defineConfig({
+  plugins: [cloudflareTest({ wrangler: { configPath: './wrangler.jsonc' } })],
 });

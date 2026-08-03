@@ -200,3 +200,15 @@ it.each([
 
   expect(await screen.findByText(expectedMessage)).toBeOnTheScreen();
 });
+
+it('shows a validated rate-limit retry separately while keeping the local action', async () => {
+  remoteAnalysis.mockRejectedValue(new AiClientError('RATE_LIMITED', 37));
+  await renderPreview();
+  await screen.findByText('Person A');
+  fireEvent.press(screen.getByRole('button', { name: 'Use AI-assisted analysis' }));
+  await screen.findByText(/Names are replaced with Person labels/);
+  fireEvent.press(screen.getByRole('button', { name: 'Agree and continue' }));
+
+  expect(await screen.findByText('AI-assisted analysis rate limit reached. Try again in 37 seconds.')).toBeOnTheScreen();
+  expect(screen.getByRole('button', { name: 'Run on-device analysis instead' })).toBeOnTheScreen();
+});

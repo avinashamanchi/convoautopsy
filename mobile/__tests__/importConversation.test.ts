@@ -1,125 +1,126 @@
-jest.mock('expo-document-picker', () => ({ getDocumentAsync: jest.fn() }));
-jest.mock('expo-image-picker', () => ({
-  MediaTypeOptions: { Images: 'Images' },
-  launchImageLibraryAsync: jest.fn(),
-}));
-jest.mock('expo-file-system', () => ({
-  File: jest.fn(),
-  __text: jest.fn(),
-  __size: { value: 10 },
-}));
+import {
+  createImportConversationService,
+  type PickerArtifact,
+  type PickerArtifactPort,
+} from '../src/services/importConversation';
 
-import * as DocumentPicker from 'expo-document-picker';
-import { File } from 'expo-file-system';
-import * as ImagePicker from 'expo-image-picker';
-import { pickConversationFile, pickConversationScreenshot } from '../src/services/importConversation';
+const documentPicker = { getDocumentAsync: jest.fn() };
+const imagePicker = { launchImageLibraryAsync: jest.fn() };
 
-const mockGetDocumentAsync = DocumentPicker.getDocumentAsync as jest.Mock;
-const mockLaunchImageLibraryAsync = ImagePicker.launchImageLibraryAsync as jest.Mock;
-const mockFile = File as unknown as jest.Mock;
-const mockFileText = (jest.requireMock('expo-file-system') as { __text: jest.Mock }).__text;
-const mockFileSize = (jest.requireMock('expo-file-system') as { __size: { value: number | null } }).__size;
+function artifact(overrides: Partial<PickerArtifact> = {}): PickerArtifact {
+  return {
+    uri: 'file:///cache/convoautopsy-artifacts/picker/scoped.txt',
+    size: 10,
+    text: jest.fn().mockResolvedValue('Alex: Hello\nJordan: Hi'),
+    ...overrides,
+  };
+}
+
+function harness(nextArtifact = artifact()) {
+  const artifacts: jest.Mocked<PickerArtifactPort> = {
+    stagePickerArtifact: jest.fn().mockResolvedValue(nextArtifact),
+    deletePickerArtifact: jest.fn().mockResolvedValue(undefined),
+  };
+  return {
+    artifacts,
+    service: createImportConversationService({ documentPicker, imagePicker, artifacts }),
+  };
+}
 
 const selectedFile = (name: string, size = 10) => ({
   canceled: false as const,
-  assets: [{ name, size, uri: 'file:///private/input' }],
+  assets: [{ name, size, uri: 'file:///cache/document-picker-copy' }],
 });
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockFileSize.value = 10;
-  mockFile.mockImplementation(() => ({ size: mockFileSize.value, text: mockFileText }));
 });
 
 it.each(['conversation.txt', 'conversation.log', 'conversation.csv'])(
-  'imports a supported %s document into editable text',
+  'imports a supported %s document and deletes the scoped picker copy after reading',
   async (name) => {
-    mockGetDocumentAsync.mockResolvedValue(selectedFile(name));
-    mockFileText.mockResolvedValue('Alex: Hello\nJordan: Hi');
+    documentPicker.getDocumentAsync.mockResolvedValue(selectedFile(name));
+    const { artifacts, service } = harness();
 
-    await expect(pickConversationFile()).resolves.toEqual({
+    await expect(service.pickConversationFile()).resolves.toEqual({
       ok: true,
       source: 'document',
       text: 'Alex: Hello\nJordan: Hi',
     });
+    expect(artifacts.deletePickerArtifact).toHaveBeenCalledWith('file:///cache/convoautopsy-artifacts/picker/scoped.txt');
   },
 );
 
-it('treats a dismissed document picker as a non-error cancellation', async () => {
-  mockGetDocumentAsync.mockResolvedValue({ canceled: true, assets: null });
+it('deletes the copied document after a read failure and on a later retry', async () => {
+  documentPicker.getDocumentAsync
+    .mockResolvedValueOnce(selectedFile('conversation.txt'))
+    .mockResolvedValueOnce(selectedFile('conversation.txt'));
+  const unreadable = artifact({ text: jest.fn().mockRejectedValue(new Error('unreadable')) });
+  const readable = artifact({ uri: 'file:///cache/convoautopsy-artifacts/picker/retry.txt' });
+  const { artifacts, service } = harness();
+  artifacts.stagePickerArtifact
+    .mockResolvedValueOnce(unreadable)
+    .mockResolvedValueOnce(readable);
 
-  await expect(pickConversationFile()).resolves.toEqual({ ok: false, code: 'CANCELLED' });
+  await expect(service.pickConversationFile()).resolves.toEqual({ ok: false, code: 'UNREADABLE_FILE' });
+  await expect(service.pickConversationFile()).resolves.toMatchObject({ ok: true, source: 'document' });
+
+  expect(artifacts.deletePickerArtifact).toHaveBeenNthCalledWith(1, unreadable.uri);
+  expect(artifacts.deletePickerArtifact).toHaveBeenNthCalledWith(2, readable.uri);
 });
 
-it('rejects a document whose extension is not text based', async () => {
-  mockGetDocumentAsync.mockResolvedValue(selectedFile('conversation.pdf'));
+it('stages and deletes unsupported and oversized copied documents without reading them', async () => {
+  documentPicker.getDocumentAsync
+    .mockResolvedValueOnce(selectedFile('conversation.pdf'))
+    .mockResolvedValueOnce(selectedFile('conversation.txt', 1_048_577));
+  const nextArtifact = artifact({ text: jest.fn() });
+  const { artifacts, service } = harness(nextArtifact);
 
-  await expect(pickConversationFile()).resolves.toEqual({ ok: false, code: 'UNSUPPORTED_TYPE' });
-  expect(mockFile).not.toHaveBeenCalled();
+  await expect(service.pickConversationFile()).resolves.toEqual({ ok: false, code: 'UNSUPPORTED_TYPE' });
+  await expect(service.pickConversationFile()).resolves.toEqual({ ok: false, code: 'FILE_TOO_LARGE' });
+
+  expect(nextArtifact.text).not.toHaveBeenCalled();
+  expect(artifacts.deletePickerArtifact).toHaveBeenCalledTimes(2);
 });
 
-it('rejects an empty document', async () => {
-  mockGetDocumentAsync.mockResolvedValue(selectedFile('conversation.txt'));
-  mockFileText.mockResolvedValue('   ');
+it('treats dismissed pickers as cancellation without staging an artifact', async () => {
+  documentPicker.getDocumentAsync.mockResolvedValue({ canceled: true, assets: null });
+  imagePicker.launchImageLibraryAsync.mockResolvedValue({ canceled: true, assets: null });
+  const { artifacts, service } = harness();
 
-  await expect(pickConversationFile()).resolves.toEqual({ ok: false, code: 'EMPTY_FILE' });
+  await expect(service.pickConversationFile()).resolves.toEqual({ ok: false, code: 'CANCELLED' });
+  await expect(service.pickConversationScreenshot()).resolves.toEqual({ ok: false, code: 'CANCELLED' });
+  expect(artifacts.stagePickerArtifact).not.toHaveBeenCalled();
 });
 
-it('returns a stable unreadable code when the selected file cannot be read', async () => {
-  mockGetDocumentAsync.mockResolvedValue(selectedFile('conversation.txt'));
-  mockFileText.mockRejectedValue(new Error('permission denied'));
+it('uses code points for the 100,000-character document limit', async () => {
+  documentPicker.getDocumentAsync
+    .mockResolvedValueOnce(selectedFile('conversation.txt', 400_000))
+    .mockResolvedValueOnce(selectedFile('conversation.txt', 400_004));
+  const exact = artifact({ size: 400_000, text: jest.fn().mockResolvedValue('😀'.repeat(100_000)) });
+  const over = artifact({ size: 400_004, text: jest.fn().mockResolvedValue('😀'.repeat(100_001)) });
+  const { artifacts, service } = harness();
+  artifacts.stagePickerArtifact.mockResolvedValueOnce(exact).mockResolvedValueOnce(over);
 
-  await expect(pickConversationFile()).resolves.toEqual({ ok: false, code: 'UNREADABLE_FILE' });
+  await expect(service.pickConversationFile()).resolves.toMatchObject({ ok: true, source: 'document' });
+  await expect(service.pickConversationFile()).resolves.toEqual({ ok: false, code: 'FILE_TOO_LARGE' });
 });
 
-it('rejects a document larger than one MiB before reading it', async () => {
-  mockGetDocumentAsync.mockResolvedValue(selectedFile('conversation.txt', 1_048_577));
-
-  await expect(pickConversationFile()).resolves.toEqual({ ok: false, code: 'FILE_TOO_LARGE' });
-  expect(mockFile).toHaveBeenCalledTimes(1);
-  expect(mockFileText).not.toHaveBeenCalled();
-});
-
-it('rejects an actually oversized cached file when picker metadata understates its byte size', async () => {
-  mockGetDocumentAsync.mockResolvedValue(selectedFile('conversation.txt', 10));
-  mockFileSize.value = 1_048_577;
-  mockFile.mockImplementation(() => ({ size: mockFileSize.value, text: mockFileText }));
-
-  await expect(pickConversationFile()).resolves.toEqual({ ok: false, code: 'FILE_TOO_LARGE' });
-  expect(mockFileText).not.toHaveBeenCalled();
-});
-
-it('fails closed when the selected cached file has no readable byte size', async () => {
-  mockGetDocumentAsync.mockResolvedValue(selectedFile('conversation.txt', 10));
-  mockFileSize.value = null;
-  mockFile.mockImplementation(() => ({ size: mockFileSize.value, text: mockFileText }));
-
-  await expect(pickConversationFile()).resolves.toEqual({ ok: false, code: 'UNREADABLE_FILE' });
-  expect(mockFileText).not.toHaveBeenCalled();
-});
-
-it('rejects text beyond the authoritative 100,000 character input limit', async () => {
-  mockGetDocumentAsync.mockResolvedValue(selectedFile('conversation.txt'));
-  mockFileText.mockResolvedValue('x'.repeat(100_001));
-
-  await expect(pickConversationFile()).resolves.toEqual({ ok: false, code: 'FILE_TOO_LARGE' });
-});
-
-it('keeps a selected screenshot URI in the image result only', async () => {
-  mockLaunchImageLibraryAsync.mockResolvedValue({
+it('returns only a scoped screenshot URI and deletes it when the caller finishes OCR', async () => {
+  imagePicker.launchImageLibraryAsync.mockResolvedValue({
     canceled: false,
-    assets: [{ uri: 'file:///private/screenshot.png' }],
+    assets: [{ fileName: 'screenshot.png', uri: 'file:///cache/image-picker-copy.png' }],
   });
+  const screenshot = artifact({ uri: 'file:///cache/convoautopsy-artifacts/picker/screenshot.png' });
+  const { artifacts, service } = harness(screenshot);
 
-  await expect(pickConversationScreenshot()).resolves.toEqual({
+  await expect(service.pickConversationScreenshot()).resolves.toEqual({
     ok: true,
     source: 'screenshot',
-    uri: 'file:///private/screenshot.png',
+    uri: screenshot.uri,
   });
-});
+  expect(artifacts.deletePickerArtifact).not.toHaveBeenCalled();
 
-it('treats a dismissed screenshot picker as a non-error cancellation', async () => {
-  mockLaunchImageLibraryAsync.mockResolvedValue({ canceled: true, assets: null });
-
-  await expect(pickConversationScreenshot()).resolves.toEqual({ ok: false, code: 'CANCELLED' });
+  await service.deletePickerArtifact(screenshot.uri);
+  expect(artifacts.deletePickerArtifact).toHaveBeenCalledWith(screenshot.uri);
 });

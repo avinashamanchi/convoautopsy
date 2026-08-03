@@ -50,7 +50,7 @@
         "properties": {
           "sender": {
             "type": "string",
-            "pattern": "^Person [A-Z]+$"
+            "pattern": "^Person [A-Z]$"
           },
           "text": {
             "type": "string",

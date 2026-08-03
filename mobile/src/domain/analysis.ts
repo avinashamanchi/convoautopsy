@@ -1,4 +1,10 @@
 import { z } from 'zod';
+import { isCodePointLengthBetween } from './textLimits';
+
+const boundedString = (minimum: number, maximum: number) => z.string().refine(
+  (value) => isCodePointLengthBetween(value, minimum, maximum),
+  { message: `Must contain between ${minimum} and ${maximum} Unicode characters.` },
+);
 
 export const PatternLabelSchema = z.enum([
   'Criticism',
@@ -21,11 +27,11 @@ export const ConflictModeSchema = z.enum([
 
 export const AnalysisMessageSchema = z
   .object({
-    sender: z.string().regex(/^Person [A-Z]+$/),
-    text: z.string().min(1).max(1000),
+    sender: z.string().regex(/^Person [A-Z]$/),
+    text: boundedString(1, 1_000),
     pattern: PatternLabelSchema,
     egoState: EgoStateSchema,
-    possibleInterpretation: z.string().min(1).max(300),
+    possibleInterpretation: boundedString(1, 300),
   })
   .strict();
 
@@ -46,9 +52,9 @@ export type EgoState = z.infer<typeof EgoStateSchema>;
 
 export const ResponseDraftSchema = z
   .object({
-    id: z.string().min(1),
-    text: z.string().min(1).max(1000),
-    hint: z.string().min(1).max(200),
+    id: boundedString(1, 100),
+    text: boundedString(1, 1_000),
+    hint: boundedString(1, 200),
   })
   .strict();
 

@@ -8,15 +8,20 @@
 - [x] Credential-free EAS configuration, icon, splash configuration, bundle ID, build number, purpose strings, and initial metadata are in the repository.
 - [x] The web consent dialog has initial focus, focus trap, Escape handling, and focus restoration tests.
 - [x] Node 22 CI covers clean installs plus root web test/lint/build, mobile test/typecheck/lint/iOS export, and Worker test/typecheck/lint.
+- [x] The Pages publication job itself depends on those web, mobile, and Worker gates, dry-runs the Worker bundle, and runs a deterministic redacted scan of the tracked tree plus the web, mobile, and Worker bundles before artifact upload.
 - [x] The Maestro release flow uses production-control semantic IDs and, after an explicit Share press, asserts the stock English-locale iOS share-sheet `Copy` control. It proves only that the system sheet opened, never that a share completed.
 - [x] Mobile parser limits count Unicode code points with exact 100-message and 26-speaker boundary tests; History distinguishes an empty library from no search matches.
-- [x] The Worker uses a per-digest SQLite Durable Object rate limiter: exported `RateLimitDurableObject`, `RATE_LIMITER` binding, v1 SQLite migration, Worker type, and Miniflare Durable Object configuration are present. No KV namespace is configured or required.
+- [x] Web and mobile inputs, parsers, contracts, provider responses, and exports use the shared Unicode code-point limits and anonymous `Person A` through `Person Z` sender policy. The Worker separately preserves its 128 KiB raw UTF-8 request cap.
+- [x] The Worker uses independent HMAC-digest SQLite Durable Object buckets for source IP and installation token on each route. Token or IP rotation cannot bypass the stricter bucket; no raw identifier is stored in a Durable Object name.
+- [x] Picker and draft-export artifacts live under the dedicated `convoautopsy-artifacts` cache tree, success/failure/fallback paths clean their artifacts, and Delete All recursively targets only that tree.
+- [x] Repository revisions refresh mounted History and Responses screens, delete-all invalidates in-flight reads and writes before storage completes, and response-draft restore/reset persistence is covered by race tests.
+- [x] Native installation and report IDs use the Expo Crypto UUID API. Shareable web and mobile reports state their analysis mode and a neutral educational limitation.
 
 ## Automated verification record
 
-The ignored task scratch report is supplemental only and is not release evidence. Historical clean-clone evidence is limited to `2c797813611ddb8277566da8422f9a6e3f5a3482`: root `npm ci`, 12 web tests, lint, and build passed; mobile `npm ci`, 182 tests, typecheck, 18/18 Expo lint checks, Expo doctor, and iOS export passed; Worker `npm ci`, 24 tests, typecheck, and lint passed. It does not validate later commits. The Worker test runtime fell back from compatibility date `2026-08-02` to `2025-09-06`; no deployment occurred. Root full and production audits found 0 vulnerabilities; the mobile audit reported 15 vulnerabilities (1 high) whose offered fix is the deferred breaking Expo 57 upgrade.
+The ignored task scratch report is supplemental only and is not release evidence. Historical clean-clone evidence is limited to `2c797813611ddb8277566da8422f9a6e3f5a3482` and does not validate later commits.
 
-Latest working-tree verification (not a clean clone) passed root test (4 files / 15 tests), lint, and build; mobile test (26 suites / 183 tests), typecheck, lint, and iOS export; and Worker test (5 files / 24 tests), typecheck, and lint. This does not establish clean-checkout evidence for a later commit.
+The consolidated final-review candidate passed under Node 22 in the working tree: root test (8 files / 37 tests), lint, build, and full/production audits with 0 vulnerabilities; mobile test (29 suites / 203 tests), typecheck, lint, Expo Doctor 18/18, and iOS export; and Worker test (5 files / 34 tests), typecheck, lint, dry-run bundle, and full/production audits with 0 vulnerabilities. The Worker test integration is on Vitest 4 and reads the pinned `2025-09-06` Wrangler compatibility date without a runtime fallback warning. The mobile audit still reports 15 full-tree vulnerabilities (14 moderate, 1 high) and 14 production-tree vulnerabilities (13 moderate, 1 high); npm's proposed corrections require the deferred breaking Expo 57 migration. Authoritative final-SHA clean-clone evidence belongs in the task handoff rather than this checklist.
 
 ## Physical-device checkpoint (user observation required)
 
@@ -43,8 +48,8 @@ Latest working-tree verification (not a clean clone) passed root test (4 files /
 - [ ] Apple Developer membership, Expo login, EAS build/submit, TestFlight, screenshots, App Store Connect record, review, and publication have not been performed.
 - [ ] The AI proxy is undeployed; no Cloudflare or Groq credential has been entered. The current tree is credential-free.
 - [ ] Historical GitHub token revocation and an authorized history purge remain pending; history scans must not print candidate values.
-- [ ] Swift OCR is uncompiled, Expo Go physical observations are pending, and audit/tooling findings are advisory until separately remediated.
-- [ ] The required @2x/@3x PNG dimensions remain unverified.
-- [ ] The deferred Expo 57 audit correction and a risky web chunk rewrite were intentionally not attempted in this release-verification task.
+- [ ] Swift OCR is uncompiled, Expo Go physical observations are pending, and the current machine has only Command Line Tools selected rather than a usable Xcode installation.
+- [x] Automated @2x/@3x report-capture tests target 1080×1920 pixels, and the configured app icon is a 1024×1024 PNG. Physical share-output and App Store screenshot review remain pending.
+- [ ] The deferred Expo 57 audit correction and a risky web chunk rewrite were intentionally not attempted in this repair wave.
 
 No App Store acceptance or publication is claimed by this checklist.

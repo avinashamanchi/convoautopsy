@@ -17,12 +17,12 @@ appId: io.convoautopsy.app
 - tapOn:
     id: save-without-source
 - tapOn:
-    id: tab-history
+    id: open-history
 - tapOn:
     id: report-row-0
 - assertVisible: "On-device estimate"
 - tapOn:
-    id: tab-responses
+    id: open-responses
 - tapOn:
     id: response-report-row-0
 - tapOn:

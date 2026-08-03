@@ -5,8 +5,9 @@ export type RateRoute = '/v1/analyses' | '/v1/responses';
 
 type WindowState = { windowStart: number; count: number };
 export type RateLimitResult = { windowStart: number; count: number; allowed: boolean; retryAfterSeconds: number };
+export type RateLimitKeys = { ipDigest: string; tokenDigest: string };
 
-export async function deriveRateLimitKey(token: string, ip: string, secret: string, route: RateRoute): Promise<string> {
+export async function deriveRateLimitKeys(token: string, ip: string, secret: string, route: RateRoute): Promise<RateLimitKeys> {
   const key = await crypto.subtle.importKey(
     'raw',
     new TextEncoder().encode(secret),
@@ -14,8 +15,11 @@ export async function deriveRateLimitKey(token: string, ip: string, secret: stri
     false,
     ['sign'],
   );
-  const digest = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${token}\n${ip}\n${route}`));
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+  const [ipDigest, tokenDigest] = await Promise.all([
+    digestKey(key, `ip\n${ip}\n${route}`),
+    digestKey(key, `token\n${token}\n${route}`),
+  ]);
+  return { ipDigest, tokenDigest };
 }
 
 export function evaluateWindow(current: WindowState | undefined, now: number, limit: number): RateLimitResult {
@@ -48,6 +52,22 @@ export async function checkRateLimit(
   } catch {
     throw new PublicError('INTERNAL_ERROR', 500);
   }
+}
+
+export async function checkRateLimits(
+  namespace: DurableObjectNamespace,
+  keys: RateLimitKeys,
+  route: RateRoute,
+): Promise<Pick<RateLimitResult, 'allowed' | 'retryAfterSeconds'>> {
+  const [ipResult, tokenResult] = await Promise.all([
+    checkRateLimit(namespace, keys.ipDigest, route),
+    checkRateLimit(namespace, keys.tokenDigest, route),
+  ]);
+  const allowed = ipResult.allowed && tokenResult.allowed;
+  return {
+    allowed,
+    retryAfterSeconds: allowed ? 0 : Math.max(ipResult.retryAfterSeconds, tokenResult.retryAfterSeconds),
+  };
 }
 
 export class RateLimitDurableObject {
@@ -118,4 +138,9 @@ async function parseRoute(request: Request): Promise<RateRoute | undefined> {
   } catch {
     return undefined;
   }
+}
+
+async function digestKey(key: CryptoKey, value: string): Promise<string> {
+  const digest = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }

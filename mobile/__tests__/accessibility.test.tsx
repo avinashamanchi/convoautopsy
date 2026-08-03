@@ -39,6 +39,12 @@ it('gives the editor and import controls discoverable names', () => {
   expect(screen.getByRole('button', { name: 'Import conversation screenshot' })).toBeOnTheScreen();
 });
 
+it('shows the Unicode code-point count users are actually limited by', () => {
+  render(<ConversationEditor disabled={false} error={null} onChange={() => {}} onImportFile={() => {}} onImportScreenshot={() => {}} onReview={() => {}} value={'😀'.repeat(1_000)} />);
+
+  expect(screen.getByText('1,000 of 100,000 characters')).toBeOnTheScreen();
+});
+
 it('exposes each primary tab as a named selectable navigation control', async () => {
   renderRouter('./fixtures/routes', { initialUrl: '/' });
 

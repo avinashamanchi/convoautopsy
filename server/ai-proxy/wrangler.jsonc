@@ -2,7 +2,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "convoautopsy-ai-proxy",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-02",
+  "compatibility_date": "2025-09-06",
   "compatibility_flags": ["nodejs_compat"],
   "durable_objects": {
     "bindings": [

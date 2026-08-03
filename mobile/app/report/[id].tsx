@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { useLocalSearchParams } from 'expo-router';
+import { useCallback, useRef, useState } from 'react';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { PrimaryButton } from '../../src/components/PrimaryButton';
 import { ResultSummary } from '../../src/components/ResultSummary';
@@ -12,28 +12,37 @@ import { tokens } from '../../src/theme/tokens';
 
 export default function ReportScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { repository } = useReportRepository();
+  const { repository, revision, deletingAll } = useReportRepository();
   const [report, setReport] = useState<SavedReport | null>(null);
   const [status, setStatus] = useState<'loading' | 'missing' | 'error' | 'ready'>('loading');
   const [shareStatus, setShareStatus] = useState<'idle' | 'sharing'>('idle');
   const [shareOutcome, setShareOutcome] = useState<ExportOutcome | null>(null);
   const reportRef = useRef<View>(null);
+  const readGeneration = useRef(0);
 
-  useEffect(() => {
-    let active = true;
+  useFocusEffect(useCallback(() => {
+    void revision;
+    const generation = ++readGeneration.current;
+    if (deletingAll) {
+      setReport(null);
+      setStatus('loading');
+      setShareOutcome(null);
+      return () => { readGeneration.current += 1; };
+    }
     void (async () => {
       try {
         const saved = typeof id === 'string' ? await repository.get(id) : null;
-        if (!active) return;
+        if (generation !== readGeneration.current) return;
         setReport(saved);
         setStatus(saved ? 'ready' : 'missing');
       } catch {
-        if (active) setStatus('error');
+        if (generation === readGeneration.current) setStatus('error');
       }
     })();
-    return () => { active = false; };
-  }, [id, repository]);
+    return () => { readGeneration.current += 1; };
+  }, [deletingAll, id, repository, revision]));
 
+  if (deletingAll) return <Screen><Text style={styles.message}>Saved app data is being deleted…</Text></Screen>;
   if (status === 'loading') return <Screen><Text style={styles.message}>Loading saved analysis…</Text></Screen>;
   if (status === 'missing') return <Screen><Text accessibilityRole="alert" style={styles.message}>This saved analysis no longer exists.</Text></Screen>;
   if (status === 'error' || !report) return <Screen><Text accessibilityRole="alert" style={styles.error}>This saved analysis could not be read.</Text></Screen>;
@@ -53,6 +62,7 @@ export default function ReportScreen() {
         <Text style={styles.message}>Saved {new Date(report.updatedAt).toLocaleString()}</Text>
         <ResultSummary result={report.result} />
         <PrimaryButton label={shareStatus === 'sharing' ? 'Preparing report…' : 'Share report image'} disabled={shareStatus === 'sharing'} onPress={() => { void shareReport(); }} />
+        <PrimaryButton label="Open Responses" onPress={() => router.replace('/(tabs)/responses')} testID="open-responses" />
         {shareOutcome?.ok ? <Text accessibilityLiveRegion="polite" style={styles.message}>Share sheet opened. This does not confirm completion.</Text> : null}
         {shareOutcome && !shareOutcome.ok ? <Text accessibilityRole="alert" style={styles.error}>{reportExportFailureMessage(shareOutcome)}</Text> : null}
         <View pointerEvents="none" style={styles.captureContainer}>

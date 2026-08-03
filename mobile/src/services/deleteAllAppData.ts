@@ -1,4 +1,3 @@
-import { Directory, File, Paths } from 'expo-file-system';
 import type { ConsentStore } from './consentStore';
 import type { PreferenceStore, ReportRepository } from './reportRepository';
 
@@ -20,18 +19,7 @@ export type DeleteAllAppDataDependencies = {
   session: { reset(): void };
 };
 
-const APP_CACHE_PREFIXES = ['convoautopsy-response-', 'convoautopsy-report-'] as const;
-
-export const nativeCacheArtifactStore: CacheArtifactStore = {
-  async deleteAllConvoAutopsyArtifacts() {
-    const cacheDirectory = new Directory(Paths.cache);
-    for (const entry of cacheDirectory.list()) {
-      if (entry instanceof File && APP_CACHE_PREFIXES.some((prefix) => entry.name.startsWith(prefix))) {
-        entry.delete();
-      }
-    }
-  },
-};
+export { nativeCacheArtifactStore } from './cacheArtifacts';
 
 export async function deleteAllAppData({ repository, preferences, secureStore, cache, session }: DeleteAllAppDataDependencies): Promise<DeleteAllOutcome> {
   const operations: [Exclude<DeleteSubsystem, 'session'>, () => Promise<void>][] = [

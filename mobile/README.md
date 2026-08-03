@@ -1,50 +1,30 @@
-# Welcome to your Expo app 👋
+# ConvoAutopsy iOS app
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+This directory contains the Expo SDK 54 / React Native iOS app. Use Node.js 22 and the committed lockfile.
 
-## Get started
-
-1. Install dependencies
-
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+## Local setup
 
 ```bash
-npm run reset-project
+npm ci
+npm start
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Expo Go supports the main local workflow: text import, parsing, on-device estimates, history, response drafts, and sharing. Screenshot OCR requires the native `convo-ocr` module, so Expo Go uses the documented manual-paste fallback instead.
 
-## Learn more
+Use an iOS development build when validating native OCR or other compiled-module behavior. A development build and a physical iPhone are also required for release-quality checks of camera/photo permissions, share sheets, VoiceOver, Dynamic Type, and offline behavior.
 
-To learn more about developing your project with Expo, look at the following resources:
+## Required checks
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+Run all checks with Node.js 22:
 
-## Join the community
+```bash
+npm test
+npm run typecheck
+npm run lint
+npm run export:ios
+npx expo-doctor
+```
 
-Join our community of developers creating universal apps.
+`npm run export:ios` proves that Expo can produce the static iOS JavaScript bundle. It does not compile the native Xcode project, install on a device, create a TestFlight build, or publish to the App Store.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+The AI proxy must be deployed separately, and `EXPO_PUBLIC_AI_PROXY_URL` may contain only its public HTTPS endpoint. Provider keys and rate-limit secrets belong in the Worker secret store and must never be placed in an `EXPO_PUBLIC_` variable.

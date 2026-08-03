@@ -1,4 +1,5 @@
 import { deleteAllAppData } from '../src/services/deleteAllAppData';
+import { createScopedCacheArtifactStore } from '../src/services/cacheArtifacts';
 
 describe('deleteAllAppData', () => {
   it('removes every ConvoAutopsy data subsystem before resetting the in-memory session', async () => {
@@ -41,5 +42,30 @@ describe('deleteAllAppData', () => {
     });
     expect(outcome).toEqual({ ok: false, failed: ['preferences'] });
     expect(calls).toEqual(['preferences', 'secureStore']);
+  });
+});
+
+describe('scoped cache deletion', () => {
+  it('recursively deletes only the dedicated ConvoAutopsy artifact directory', async () => {
+    const deleteDirectory = jest.fn().mockResolvedValue(undefined);
+    const store = createScopedCacheArtifactStore({ deleteDirectory });
+
+    await store.deleteAllConvoAutopsyArtifacts();
+
+    expect(deleteDirectory).toHaveBeenCalledTimes(1);
+    expect(deleteDirectory).toHaveBeenCalledWith('convoautopsy-artifacts');
+  });
+
+  it('retries the same scoped directory after a cleanup failure', async () => {
+    const deleteDirectory = jest.fn()
+      .mockRejectedValueOnce(new Error('busy'))
+      .mockResolvedValueOnce(undefined);
+    const store = createScopedCacheArtifactStore({ deleteDirectory });
+
+    await expect(store.deleteAllConvoAutopsyArtifacts()).rejects.toThrow('busy');
+    await expect(store.deleteAllConvoAutopsyArtifacts()).resolves.toBeUndefined();
+
+    expect(deleteDirectory).toHaveBeenCalledTimes(2);
+    expect(deleteDirectory).toHaveBeenNthCalledWith(2, 'convoautopsy-artifacts');
   });
 });

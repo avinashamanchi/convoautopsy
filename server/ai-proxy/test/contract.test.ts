@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import fixture from '../../../contracts/fixtures/analysis.valid.json';
-import { AnalysisResultSchema, AnalyzeRequestSchema, normalizeAnalysisProviderOutput } from '../src/contract';
+import {
+  AnalysisResultSchema,
+  AnalyzeRequestSchema,
+  CraftResponseRequestSchema,
+  normalizeAnalysisProviderOutput,
+} from '../src/contract';
 
 describe('request contract', () => {
   it('accepts the canonical v1 analysis fixture', () => {
@@ -45,6 +50,53 @@ describe('request contract', () => {
       installationToken: 'installation-token-which-is-long-enough',
       messages: [{ sender: 'Person A', text: 'x'.repeat(1_001) }],
     }).success).toBe(false);
+  });
+
+  it('counts Unicode code points instead of UTF-16 code units at the 1,000-character boundary', () => {
+    const request = (text: string) => ({
+      schemaVersion: 1,
+      consentVersion: '2026-08-02',
+      installationToken: 'installation-token-which-is-long-enough',
+      messages: [{ sender: 'Person A', text }],
+    });
+
+    expect(AnalyzeRequestSchema.safeParse(request('🫠'.repeat(1_000))).success).toBe(true);
+    expect(AnalyzeRequestSchema.safeParse(request('🫠'.repeat(1_001))).success).toBe(false);
+  });
+
+  it('enforces anonymous Person A through Person Z labels at every provider boundary', () => {
+    const rawInput = {
+      schemaVersion: 1,
+      consentVersion: '2026-08-02',
+      installationToken: 'installation-token-which-is-long-enough',
+      messages: [{ sender: 'Alice', text: 'Please listen.' }],
+    };
+    const rawNestedAnalysis = {
+      schemaVersion: 1,
+      mode: 'ai',
+      intensityScore: 42,
+      conflictMode: 'Collaborating',
+      messages: [{
+        sender: 'Alice',
+        text: 'Please listen.',
+        pattern: 'Neutral',
+        egoState: 'Adult',
+        possibleInterpretation: 'A request to be heard.',
+      }],
+    };
+
+    expect(AnalyzeRequestSchema.safeParse(rawInput).success).toBe(false);
+    expect(AnalysisResultSchema.safeParse(rawNestedAnalysis).success).toBe(false);
+    expect(CraftResponseRequestSchema.safeParse({
+      schemaVersion: 1,
+      consentVersion: '2026-08-02',
+      installationToken: 'installation-token-which-is-long-enough',
+      sender: 'Alice',
+      goal: 'resolve',
+      tone: 'empathetic',
+      analysis: { ...rawNestedAnalysis, messages: [{ ...rawNestedAnalysis.messages[0], sender: 'Person A' }] },
+    }).success).toBe(false);
+    expect(AnalyzeRequestSchema.safeParse({ ...rawInput, messages: [{ sender: 'Person AA', text: 'Please listen.' }] }).success).toBe(false);
   });
 
   it('renames the legacy hidden_meaning provider field and stamps the AI boundary', () => {

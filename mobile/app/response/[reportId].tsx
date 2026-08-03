@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import * as Clipboard from 'expo-clipboard';
-import { useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { ResponseDraft } from '../../src/domain/analysis';
 import { craftLocalResponses, type ResponseGoal, type ResponseTone } from '../../src/domain/responseCrafter';
@@ -31,7 +31,7 @@ const tones: readonly { id: ResponseTone; label: string }[] = [
 
 export default function ResponseScreen() {
   const { reportId } = useLocalSearchParams<{ reportId: string }>();
-  const { repository } = useReportRepository();
+  const { repository, revision, deletingAll } = useReportRepository();
   const [report, setReport] = useState<SavedReport | null>(null);
   const [loadStatus, setLoadStatus] = useState<'loading' | 'missing' | 'error' | 'ready'>('loading');
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -41,42 +41,75 @@ export default function ResponseScreen() {
   const [drafts, setDrafts] = useState<ResponseDraft[]>([]);
   const [saveError, setSaveError] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [retryDrafts, setRetryDrafts] = useState<ResponseDraft[] | null>(null);
+  const loadGeneration = useRef(0);
+  const persistenceGeneration = useRef(0);
+  const loadedReportId = useRef<string | null>(null);
 
-  useEffect(() => {
-    let active = true;
-    void (async () => {
+  useFocusEffect(useCallback(() => {
+    void loadAttempt;
+    void revision;
+    const generation = ++loadGeneration.current;
+    persistenceGeneration.current += 1;
+    setSaving(false);
+    if (deletingAll) {
+      setReport(null);
+      setDrafts([]);
+      setRetryDrafts(null);
+      setSender(null);
+      setGoal(null);
+      setTone(null);
+      setSaveError(false);
+      setSaving(false);
       setLoadStatus('loading');
+      loadedReportId.current = null;
+      return () => { loadGeneration.current += 1; };
+    }
+    void (async () => {
+      const routeChanged = loadedReportId.current !== reportId;
+      if (routeChanged) setLoadStatus('loading');
       try {
         const saved = typeof reportId === 'string' ? await repository.get(reportId) : null;
-        if (!active) return;
+        if (generation !== loadGeneration.current) return;
+        loadedReportId.current = saved ? reportId : null;
+        if (routeChanged) {
+          setSender(null);
+          setGoal(null);
+          setTone(null);
+        }
         setReport(saved);
+        setDrafts(saved?.responseDrafts.map((draft) => ({ ...draft })) ?? []);
+        setRetryDrafts(null);
+        setSaveError(false);
         setLoadStatus(saved ? 'ready' : 'missing');
       } catch {
-        if (active) setLoadStatus('error');
+        if (generation === loadGeneration.current) setLoadStatus('error');
       }
     })();
-    return () => { active = false; };
-  }, [loadAttempt, reportId, repository]);
+    return () => { loadGeneration.current += 1; };
+  }, [deletingAll, loadAttempt, reportId, repository, revision]));
 
   const senders = useMemo(() => Array.from(new Set(report?.result.messages.map((message) => message.sender) ?? [])), [report]);
   const progress = !sender ? 'Step 2 of 4: Sender' : !goal ? 'Step 3 of 4: Goal' : !tone ? 'Step 4 of 4: Tone' : 'Ready to generate';
 
-  const [retryDrafts, setRetryDrafts] = useState<ResponseDraft[] | null>(null);
-
   const persistDrafts = async (nextDrafts: ResponseDraft[]) => {
     if (!report) return;
+    const generation = ++persistenceGeneration.current;
     setSaving(true);
     setSaveError(false);
     const draftsToSave = nextDrafts.map((draft) => ({ ...draft }));
     const updated = { ...report, responseDrafts: draftsToSave, updatedAt: new Date().toISOString() };
     try {
       await repository.save(updated);
+      if (generation !== persistenceGeneration.current) return;
       setReport(updated);
+      setDrafts(draftsToSave);
       setRetryDrafts(null);
     } catch {
+      if (generation !== persistenceGeneration.current) return;
       setSaveError(true);
     } finally {
-      setSaving(false);
+      if (generation === persistenceGeneration.current) setSaving(false);
     }
   };
 
@@ -88,6 +121,17 @@ export default function ResponseScreen() {
     void persistDrafts(nextDrafts);
   };
 
+  const resetWizard = () => {
+    setSender(null);
+    setGoal(null);
+    setTone(null);
+    setDrafts([]);
+    setRetryDrafts([]);
+    setSaveError(false);
+    void persistDrafts([]);
+  };
+
+  if (deletingAll) return <Screen><Text style={styles.message}>Saved app data is being deleted…</Text></Screen>;
   if (loadStatus === 'loading') return <Screen><Text style={styles.message}>Loading saved analysis…</Text></Screen>;
   if (loadStatus === 'missing') return <Screen><Text accessibilityRole="alert" style={styles.error}>This saved analysis no longer exists.</Text></Screen>;
   if (loadStatus === 'error' || !report) {
@@ -150,7 +194,7 @@ export default function ResponseScreen() {
         ) : null}
 
         <PrimaryButton label="Generate drafts" disabled={!sender || !goal || !tone || saving} onPress={generate} testID="generate-responses" />
-        <PrimaryButton label="Reset draft choices" disabled={saving} onPress={() => { setSender(null); setGoal(null); setTone(null); setDrafts([]); setRetryDrafts(null); setSaveError(false); }} />
+        <PrimaryButton label="Reset draft choices" disabled={saving} onPress={resetWizard} />
         {saveError ? (
           <View style={styles.section}>
             <Text accessibilityRole="alert" style={styles.error}>Could not save these drafts. Please try again.</Text>

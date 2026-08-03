@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { PrimaryButton } from './PrimaryButton';
 import { tokens } from '../theme/tokens';
+import { codePointCount, MAX_INPUT_CODE_POINTS } from '../domain/textLimits';
 
 export type ConversationEditorProps = {
   value: string;
@@ -38,7 +39,7 @@ export function ConversationEditor({
         textAlignVertical="top"
         value={value}
       />
-      <Text accessibilityLiveRegion="polite" style={styles.count}>{value.length.toLocaleString()} characters</Text>
+      <Text accessibilityLiveRegion="polite" style={styles.count}>{codePointCount(value).toLocaleString()} of {MAX_INPUT_CODE_POINTS.toLocaleString()} characters</Text>
       {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
       <PrimaryButton
         disabled={disabled || !value.trim()}

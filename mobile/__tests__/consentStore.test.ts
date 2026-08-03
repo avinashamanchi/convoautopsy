@@ -3,7 +3,9 @@ jest.mock('expo-secure-store', () => ({
   setItemAsync: jest.fn(),
   deleteItemAsync: jest.fn(),
 }));
+jest.mock('expo-crypto', () => ({ randomUUID: jest.fn() }));
 
+import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 import {
   CONSENT_VERSION,
@@ -24,9 +26,11 @@ function createPreferences(): PreferenceStore {
 }
 
 const secureStore = SecureStore as jest.Mocked<typeof SecureStore>;
+const crypto = Crypto as jest.Mocked<typeof Crypto>;
 
 beforeEach(() => {
   jest.clearAllMocks();
+  crypto.randomUUID.mockReturnValue('d35af7b0-1a44-47c7-a63c-71071fd4ed4d');
 });
 
 it('has no consent until the person explicitly agrees', async () => {
@@ -84,6 +88,20 @@ it('uses the same secure installation token on later requests', async () => {
 
   expect(first).toBe('4b479c21-5169-41b5-ba54-3d0c5bdb82ba');
   expect(second).toBe(first);
+});
+
+it('uses the SDK 54 native UUID provider when no test token factory is injected', async () => {
+  secureStore.getItemAsync.mockResolvedValue(null);
+  secureStore.setItemAsync.mockResolvedValue(undefined);
+  const store = createConsentStore({ preferences: createPreferences() });
+
+  await expect(store.getInstallationToken()).resolves.toBe('d35af7b0-1a44-47c7-a63c-71071fd4ed4d');
+
+  expect(crypto.randomUUID).toHaveBeenCalledTimes(1);
+  expect(secureStore.setItemAsync).toHaveBeenCalledWith(
+    'convoautopsy.installation-token.v1',
+    'd35af7b0-1a44-47c7-a63c-71071fd4ed4d',
+  );
 });
 
 it('reports the accessible on-device-only message when secure storage is unavailable', async () => {

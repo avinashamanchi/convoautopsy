@@ -47,3 +47,16 @@ it('replaces every known participant mention only after all speakers are discove
   ]);
   expect(parsed.messages.map((message) => message.text).join('\n')).not.toMatch(/Alex|Jordan|A\.B/i);
 });
+
+it('NFC-normalizes sender identity and redacts composed, decomposed, and non-ASCII case equivalents', () => {
+  const parsed = parseConversation(
+    'E\u0301lodie: ÉLODIE asked e\u0301LODIE to call SøREN.\nélodie: Søren replied to E\u0301lodie.\nSøren: Élodie, I replied.',
+  );
+
+  expect(parsed.messages).toEqual([
+    { id: 'line-1', sender: 'Person A', text: 'Person A asked Person A to call Person B.', sourceLine: 1 },
+    { id: 'line-2', sender: 'Person A', text: 'Person B replied to Person A.', sourceLine: 2 },
+    { id: 'line-3', sender: 'Person B', text: 'Person A, I replied.', sourceLine: 3 },
+  ]);
+  expect(parsed.messages.map((message) => message.text).join('\n').normalize('NFD')).not.toMatch(/e\u0301lodie|søren/iu);
+});

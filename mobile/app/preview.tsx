@@ -183,6 +183,9 @@ export default function PreviewScreen() {
 function aiFailureMessage(error: unknown): string {
   if (error instanceof Error && error.message === SECURE_STORAGE_UNAVAILABLE_MESSAGE) return SECURE_STORAGE_UNAVAILABLE_MESSAGE;
   if (error instanceof AiClientError && error.code === 'NOT_CONFIGURED') return 'AI-assisted analysis is not configured. On-device analysis is available.';
+  if (error instanceof AiClientError && error.code === 'RATE_LIMITED' && error.retryAfterSeconds) {
+    return `AI-assisted analysis rate limit reached. Try again in ${error.retryAfterSeconds} seconds.`;
+  }
   if (error instanceof AiClientError && (error.code === 'SERVICE_UNAVAILABLE' || error.code === 'OFFLINE' || error.code === 'TIMEOUT')) return 'AI-assisted analysis is temporarily unavailable. Your conversation is still available.';
   return AI_FAILURE;
 }

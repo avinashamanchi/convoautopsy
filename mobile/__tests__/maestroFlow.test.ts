@@ -7,4 +7,8 @@ it('asserts the English iOS share-sheet control after the explicit share action'
   const flow = fs.readFileSync(path.join(__dirname, '..', 'e2e', 'analyze-flow.yaml'), 'utf8');
 
   expect(flow).toContain('id: share-response-0\n- assertVisible: "Copy"');
+  expect(flow).toContain('id: open-history');
+  expect(flow).toContain('id: open-responses');
+  expect(flow).not.toContain('id: tab-history');
+  expect(flow).not.toContain('id: tab-responses');
 });

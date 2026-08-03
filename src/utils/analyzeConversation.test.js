@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { analyzeConversation, parseConversation } from './analyzeConversation'
+import { readBoundedJson } from './fetchBoundedJson'
 
 const options = {
   allowRemote: true,
@@ -16,10 +17,39 @@ afterEach(() => {
 })
 
 describe('analyzeConversation', () => {
-  it('keeps every anonymized participant label within the proxy contract bound', () => {
+  it('rejects conversations that would require labels beyond Person Z', () => {
     const input = Array.from({ length: 27 }, (_, index) => `Person${index}: Message ${index}`).join('\n')
 
-    expect(parseConversation(input).at(-1).sender).toBe('Person AA')
+    expect(parseConversation(input)).toEqual([])
+  })
+
+  it('normalizes Unicode names and redacts canonically equivalent mentions', () => {
+    const parsed = parseConversation('Jose\u0301: José, please listen.\nBOB: Okay.\nbob: I will.')
+
+    expect(parsed).toEqual([
+      { sender: 'Person A', rawName: 'José', text: 'José, please listen.' },
+      { sender: 'Person B', rawName: 'BOB', text: 'Okay.' },
+      { sender: 'Person B', rawName: 'bob', text: 'I will.' },
+    ])
+  })
+
+  it('counts message bounds by Unicode code point', async () => {
+    vi.stubEnv('VITE_AI_PROXY_URL', 'https://proxy.example')
+    const fetch = vi.fn().mockResolvedValue(Response.json({
+      analysis: {
+        schemaVersion: 1,
+        mode: 'ai',
+        intensityScore: 1,
+        conflictMode: 'Collaborating',
+        messages: [{ sender: 'Person A', text: '🫠'.repeat(1_000), pattern: 'Neutral', egoState: 'Adult', possibleInterpretation: 'Calm.' }],
+      },
+      requestId: 'unicode-request',
+    }))
+    vi.stubGlobal('fetch', fetch)
+
+    await expect(analyzeConversation(`Alice: ${'🫠'.repeat(1_000)}`, options)).resolves.toMatchObject({ source: 'ai' })
+    await expect(analyzeConversation(`Alice: ${'🫠'.repeat(1_001)}`, options)).resolves.toMatchObject({ source: 'local', fallbackReason: 'NOT_CONFIGURED' })
+    expect(fetch).toHaveBeenCalledTimes(1)
   })
 
   it('sends anonymized, participant-redacted messages to the analysis proxy without authorization', async () => {
@@ -92,6 +122,45 @@ describe('analyzeConversation', () => {
     const pending = analyzeConversation('Alice: Hi', { ...options, signal: controller.signal, timeoutMs: 50 })
     controller.abort()
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+  })
+
+  it('keeps the deadline through response-body consumption and caps upstream bytes', async () => {
+    vi.stubEnv('VITE_AI_PROXY_URL', 'https://proxy.example')
+    const stalled = new ReadableStream({ start() { /* deliberately never closes */ } })
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(stalled, { status: 200 }))
+      .mockResolvedValueOnce(new Response('x'.repeat(256 * 1024 + 1), { status: 200 }))
+    vi.stubGlobal('fetch', fetch)
+
+    await expect(analyzeConversation('Alice: Hi', { ...options, timeoutMs: 5 })).resolves.toMatchObject({ fallbackReason: 'REMOTE_UNAVAILABLE' })
+    await expect(analyzeConversation('Alice: Hi', options)).resolves.toMatchObject({ fallbackReason: 'REMOTE_UNAVAILABLE' })
+  })
+
+  it('rejects oversized bodies without waiting for an uncooperative stream cancel', async () => {
+    const never = new Promise(() => {})
+    const settleWithin = (promise) => Promise.race([
+      promise.then(
+        value => ({ status: 'fulfilled', value }),
+        error => ({ status: 'rejected', error }),
+      ),
+      new Promise(resolve => setTimeout(() => resolve({ status: 'timeout' }), 30)),
+    ])
+    const cancellation = new Promise(() => {})
+    const declaredBody = new ReadableStream({ cancel: () => never })
+    const streamedBody = new ReadableStream({
+      start(controller) { controller.enqueue(new Uint8Array(2)) },
+      cancel: () => never,
+    })
+
+    const declared = await settleWithin(readBoundedJson(
+      new Response(declaredBody, { headers: { 'content-length': '2' } }),
+      cancellation,
+      1,
+    ))
+    const streamed = await settleWithin(readBoundedJson(new Response(streamedBody), cancellation, 1))
+
+    expect(declared).toMatchObject({ status: 'rejected', error: expect.any(Error) })
+    expect(streamed).toMatchObject({ status: 'rejected', error: expect.any(Error) })
   })
 
   it('contains no browser-provider endpoint or client key reference', async () => {

@@ -11,6 +11,7 @@ import { ShareableReportCard } from '../src/components/ShareableReportCard';
 
 jest.mock('expo-router', () => ({
   router: { replace: jest.fn() },
+  useFocusEffect: (effect: () => void | (() => void)) => require('react').useEffect(effect, [effect]),
   useLocalSearchParams: () => ({ id: 'saved-report' }),
 }));
 
@@ -108,6 +109,8 @@ it('opens a report share sheet from a saved result and gives a recoverable failu
 
   await waitFor(() => expect(mockedCaptureAndShare).toHaveBeenCalledTimes(1));
   expect(await screen.findByText('Could not open the share sheet. Please try again.')).toBeOnTheScreen();
+  fireEvent.press(screen.getByTestId('open-responses'));
+  expect(require('expo-router').router.replace).toHaveBeenCalledWith('/(tabs)/responses');
 });
 
 it('distinguishes an unavailable sharing service without revealing report content', async () => {
@@ -155,4 +158,17 @@ it('keeps six bounded redacted rows and the educational limitation inside the ca
   expect(screen.getByTestId('shareable-report-limitation', { includeHiddenElements: true }).props.style).toMatchObject({ height: 62, overflow: 'hidden' });
   expect(screen.queryByText('Person A', { includeHiddenElements: true })).toBeNull();
   expect(screen.queryByText('private draft source', { includeHiddenElements: true })).toBeNull();
+});
+
+it.each([
+  ['local', 'Analysis mode: On-device estimate'],
+  ['ai', 'Analysis mode: AI-assisted estimate'],
+] as const)('labels a %s capture explicitly without a mode-inaccurate limitation', (mode, modeLabel) => {
+  render(<ShareableReportCard generatedAt="2026-08-02T12:00:00.000Z" result={{ ...result, mode }} />);
+
+  expect(screen.getByText(modeLabel, { includeHiddenElements: true })).toBeOnTheScreen();
+  expect(screen.getByText('This educational estimate may be incomplete or wrong and is not a factual conclusion about people or relationships.', { includeHiddenElements: true })).toBeOnTheScreen();
+  if (mode === 'ai') {
+    expect(screen.queryByText(/This on-device estimate/, { includeHiddenElements: true })).toBeNull();
+  }
 });

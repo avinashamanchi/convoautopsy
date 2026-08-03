@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { router } from 'expo-router';
+import { useCallback, useRef, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
 import { ScrollView, StyleSheet, Text } from 'react-native';
 import { EmptyState } from '../../src/components/EmptyState';
 import { PrimaryButton } from '../../src/components/PrimaryButton';
@@ -9,26 +9,34 @@ import { useReportRepository } from '../../src/services/reportRepositoryContext'
 import { tokens } from '../../src/theme/tokens';
 
 export default function ResponsesScreen() {
-  const { repository } = useReportRepository();
+  const { repository, revision, deletingAll } = useReportRepository();
   const [reports, setReports] = useState<SavedReport[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [attempt, setAttempt] = useState(0);
+  const readGeneration = useRef(0);
 
-  useEffect(() => {
-    let active = true;
+  useFocusEffect(useCallback(() => {
+    void attempt;
+    void revision;
+    const generation = ++readGeneration.current;
+    if (deletingAll) {
+      setReports([]);
+      setStatus('loading');
+      return () => { readGeneration.current += 1; };
+    }
     void (async () => {
       setStatus('loading');
       try {
         const saved = await repository.list();
-        if (!active) return;
+        if (generation !== readGeneration.current) return;
         setReports(saved);
         setStatus('ready');
       } catch {
-        if (active) setStatus('error');
+        if (generation === readGeneration.current) setStatus('error');
       }
     })();
-    return () => { active = false; };
-  }, [attempt, repository]);
+    return () => { readGeneration.current += 1; };
+  }, [attempt, deletingAll, repository, revision]));
 
   if (status === 'loading') return <Screen><Text style={styles.message}>Loading saved analyses…</Text></Screen>;
   if (status === 'error') {

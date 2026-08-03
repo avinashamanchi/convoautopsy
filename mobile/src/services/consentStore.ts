@@ -1,5 +1,6 @@
 import * as SecureStore from 'expo-secure-store';
 import type { PreferenceStore } from './reportRepository';
+import { createNativeUuid } from './uuid';
 
 export const CONSENT_VERSION = '2026-08-02' as const;
 export const SECURE_STORAGE_UNAVAILABLE_MESSAGE = 'Secure device storage is unavailable. On-device analysis still works.';
@@ -49,7 +50,7 @@ export function createConsentStore({
   preferences,
   secureStore = SecureStore,
   now = () => new Date(),
-  createToken = createInstallationToken,
+  createToken = createNativeUuid,
 }: ConsentStoreDependencies): ConsentStore {
   return {
     async getConsent() {
@@ -108,19 +109,4 @@ export function createConsentStore({
       await this.revokeConsent();
     },
   };
-}
-
-function createInstallationToken(): string {
-  if (typeof globalThis.crypto?.randomUUID === 'function') {
-    return globalThis.crypto.randomUUID();
-  }
-  const values = new Uint8Array(16);
-  if (typeof globalThis.crypto?.getRandomValues !== 'function') {
-    throw new SecureStorageUnavailableError();
-  }
-  globalThis.crypto.getRandomValues(values);
-  values[6] = (values[6] & 0x0f) | 0x40;
-  values[8] = (values[8] & 0x3f) | 0x80;
-  const hex = Array.from(values, (value) => value.toString(16).padStart(2, '0')).join('');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }

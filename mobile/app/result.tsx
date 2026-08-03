@@ -9,8 +9,11 @@ import { captureAndShareReport, reportExportFailureMessage, type ExportOutcome }
 import { useReportRepository } from '../src/services/reportRepositoryContext';
 import { useAnalysisSession } from '../src/state/AnalysisSession';
 import { tokens } from '../src/theme/tokens';
+import { createNativeUuid, type UuidProvider } from '../src/services/uuid';
 
-export default function ResultScreen() {
+type ResultScreenProps = { createReportId?: UuidProvider };
+
+export default function ResultScreen({ createReportId = createNativeUuid }: ResultScreenProps) {
   const { activeResult, draft, reset } = useAnalysisSession();
   const { repository } = useReportRepository();
   const [saveOptionsVisible, setSaveOptionsVisible] = useState(false);
@@ -36,7 +39,7 @@ export default function ResultScreen() {
     try {
       const timestamp = new Date().toISOString();
       await repository.save({
-        id: `report-${Date.now().toString(36)}`,
+        id: createReportId(),
         title: title.trim() || 'Saved analysis',
         createdAt: timestamp,
         updatedAt: timestamp,
@@ -67,6 +70,7 @@ export default function ResultScreen() {
         {shareOutcome?.ok ? <Text accessibilityLiveRegion="polite" style={styles.success}>Share sheet opened. This does not confirm completion.</Text> : null}
         {shareOutcome && !shareOutcome.ok ? <Text accessibilityRole="alert" style={styles.error}>{reportExportFailureMessage(shareOutcome)}</Text> : null}
         {saveStatus === 'saved' ? <Text accessibilityLiveRegion="polite" style={styles.success}>Analysis saved on this device.</Text> : null}
+        {saveStatus === 'saved' ? <PrimaryButton label="Open History" onPress={() => router.replace('/(tabs)/history')} testID="open-history" /> : null}
         {saveStatus === 'failed' ? <Text accessibilityRole="alert" style={styles.error}>Could not save this analysis. Please try again.</Text> : null}
         {saveOptionsVisible ? (
           <View style={styles.saveOptions}>

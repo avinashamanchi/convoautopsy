@@ -8,6 +8,7 @@ type ShareableReportCardProps = {
 };
 
 export const ShareableReportCard = forwardRef<View, ShareableReportCardProps>(function ShareableReportCard({ generatedAt, result }, ref) {
+  const modeLabel = result.mode === 'ai' ? 'AI-assisted estimate' : 'On-device estimate';
   const participantLabels = new Map<string, string>();
   const labelFor = (sender: string) => {
     const existing = participantLabels.get(sender);
@@ -22,6 +23,7 @@ export const ShareableReportCard = forwardRef<View, ShareableReportCardProps>(fu
       <Text numberOfLines={1} style={styles.brand}>ConvoAutopsy</Text>
       <Text numberOfLines={1} style={styles.kicker}>Private educational report</Text>
       <Text numberOfLines={1} style={styles.date}>Report date: {new Date(generatedAt).toLocaleDateString()}</Text>
+      <Text numberOfLines={1} style={styles.mode}>Analysis mode: {modeLabel}</Text>
 
       <View style={styles.estimateBox}>
         <Text numberOfLines={1} style={styles.estimateLabel}>Intensity estimate</Text>
@@ -41,7 +43,7 @@ export const ShareableReportCard = forwardRef<View, ShareableReportCardProps>(fu
 
       <View style={styles.limitationBox} testID="shareable-report-limitation">
         <Text numberOfLines={1} style={styles.limitationTitle}>Educational limitation</Text>
-        <Text numberOfLines={2} style={styles.limitation}>This on-device estimate is educational context, not a factual conclusion about people or relationships.</Text>
+        <Text numberOfLines={3} style={styles.limitation}>This educational estimate may be incomplete or wrong and is not a factual conclusion about people or relationships.</Text>
       </View>
     </View>
   );
@@ -52,6 +54,7 @@ const styles = StyleSheet.create({
   brand: { color: '#F8FAFC', fontSize: 26, fontWeight: '800', letterSpacing: 0.3, lineHeight: 30 },
   kicker: { color: '#9AC7FF', fontSize: 11, fontWeight: '700', lineHeight: 14, marginTop: 2, textTransform: 'uppercase' },
   date: { color: '#CBD5E1', fontSize: 11, lineHeight: 14, marginTop: 8 },
+  mode: { color: '#BFDBFE', fontSize: 10, fontWeight: '700', lineHeight: 12, marginTop: 2 },
   estimateBox: { backgroundColor: '#1E293B', borderRadius: 12, height: 68, marginTop: 10, overflow: 'hidden', paddingHorizontal: 10, paddingVertical: 8 },
   estimateLabel: { color: '#CBD5E1', fontSize: 10, fontWeight: '700', lineHeight: 11, textTransform: 'uppercase' },
   estimateValue: { color: '#F8FAFC', fontSize: 24, fontWeight: '800', lineHeight: 27 },
