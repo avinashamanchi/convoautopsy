@@ -28,6 +28,7 @@ export default function PreviewScreen() {
   const activeRemoteRunRef = useRef<number | null>(null);
   const remoteRunCounterRef = useRef(0);
   const consentCheckCounterRef = useRef(0);
+  const consentLookupPendingRef = useRef(false);
   const mountedRef = useRef(false);
   const cancelRef = useRef(cancel);
   cancelRef.current = cancel;
@@ -61,10 +62,12 @@ export default function PreviewScreen() {
   useEffect(() => {
     mountedRef.current = true;
     return () => {
+      const hasUnfinishedWork = activeRemoteRunRef.current !== null || consentLookupPendingRef.current;
       mountedRef.current = false;
       activeRemoteRunRef.current = null;
       consentCheckCounterRef.current += 1;
-      cancelRef.current();
+      consentLookupPendingRef.current = false;
+      if (hasUnfinishedWork) cancelRef.current();
     };
   }, []);
 
@@ -76,6 +79,7 @@ export default function PreviewScreen() {
   const messagesForAi = activePreview.messages;
 
   function runLocalAndOpenResult() {
+    cancelPendingWork();
     runLocal();
     router.replace('/result');
   }
@@ -89,6 +93,14 @@ export default function PreviewScreen() {
 
   function isCurrentRun(run: number) {
     return mountedRef.current && activeRemoteRunRef.current === run;
+  }
+
+  function cancelPendingWork() {
+    const hasUnfinishedWork = activeRemoteRunRef.current !== null || consentLookupPendingRef.current;
+    consentCheckCounterRef.current += 1;
+    consentLookupPendingRef.current = false;
+    activeRemoteRunRef.current = null;
+    if (hasUnfinishedWork) cancel();
   }
 
   async function runAiAnalysis(grantConsent: boolean) {
@@ -106,6 +118,7 @@ export default function PreviewScreen() {
       if (attempt.signal.aborted || !isCurrentRun(run)) return;
       setRemoteResult(result, attempt.requestId);
       if (!isCurrentRun(run)) return;
+      finishRemoteRun(run);
       setConsentVisible(false);
       router.replace('/result');
     } catch (error) {
@@ -124,10 +137,12 @@ export default function PreviewScreen() {
   async function startConsentFlow() {
     if (!mountedRef.current || activeRemoteRunRef.current !== null) return;
     const consentCheck = ++consentCheckCounterRef.current;
+    consentLookupPendingRef.current = true;
     setAiNotice(null);
     try {
       const currentConsent = await consentStore.getConsent();
       if (!mountedRef.current || consentCheckCounterRef.current !== consentCheck) return;
+      consentLookupPendingRef.current = false;
       if (currentConsent) {
         void runAiAnalysis(false);
       } else {
@@ -135,14 +150,13 @@ export default function PreviewScreen() {
       }
     } catch {
       if (!mountedRef.current || consentCheckCounterRef.current !== consentCheck) return;
+      consentLookupPendingRef.current = false;
       setAiNotice(AI_FAILURE);
     }
   }
 
   function cancelAiAnalysis() {
-    consentCheckCounterRef.current += 1;
-    activeRemoteRunRef.current = null;
-    cancel();
+    cancelPendingWork();
     setAiRunning(false);
     setConsentVisible(false);
   }
