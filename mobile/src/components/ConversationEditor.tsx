@@ -44,10 +44,10 @@ export function ConversationEditor({
         onPress={onReview}
       />
       <View style={styles.imports}>
-        <Pressable accessibilityRole="button" onPress={onImportFile} style={styles.importButton}>
+        <Pressable accessibilityRole="button" disabled={disabled} onPress={onImportFile} style={styles.importButton}>
           <Text style={styles.importText}>Import file</Text>
         </Pressable>
-        <Pressable accessibilityRole="button" onPress={onImportScreenshot} style={styles.importButton}>
+        <Pressable accessibilityRole="button" disabled={disabled} onPress={onImportScreenshot} style={styles.importButton}>
           <Text style={styles.importText}>Import screenshot</Text>
         </Pressable>
       </View>
