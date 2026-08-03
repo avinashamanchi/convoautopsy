@@ -11,6 +11,19 @@ type ReportRow = {
   response_drafts_json: string;
 };
 
+function sqliteAsciiLower(value: string) {
+  return value.replace(/[A-Z]/g, (character) => character.toLowerCase());
+}
+
+function sqliteLike(value: string, pattern: string) {
+  const expression = [...pattern].map((character) => {
+    if (character === '%') return '.*';
+    if (character === '_') return '.';
+    return character.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }).join('');
+  return new RegExp(`^${expression}$`).test(value);
+}
+
 const validResult = {
   schemaVersion: 1,
   mode: 'local',
@@ -92,8 +105,7 @@ class FakeSqlitePort implements SqlitePort {
       let rows = [...this.rows];
       if (sql.includes('WHERE id = ?')) rows = rows.filter((row) => row.id === params[0]);
       if (sql.includes('LOWER(title) LIKE LOWER(?)')) {
-        const needle = params[0].replace(/%/g, '').toLocaleLowerCase();
-        rows = rows.filter((row) => row.title.toLocaleLowerCase().includes(needle));
+        rows = rows.filter((row) => sqliteLike(sqliteAsciiLower(row.title), sqliteAsciiLower(params[0])));
       }
       return rows.sort((a, b) => b.updated_at.localeCompare(a.updated_at)) as T[];
     }
@@ -134,6 +146,25 @@ describe('SQLite report repository', () => {
     await expect(repository.list()).rejects.toThrow('CORRUPT_REPORT');
   });
 
+  it('fails closed when result JSON is malformed in list and get', async () => {
+    const repository = createSqliteReportRepository(fakeDbWithRows([{ ...validRow, result_json: '{' }]));
+
+    await expect(repository.list()).rejects.toThrow('CORRUPT_REPORT');
+    await expect(repository.get('report-1')).rejects.toThrow('CORRUPT_REPORT');
+  });
+
+  it('fails closed when response drafts JSON is malformed in list', async () => {
+    const repository = createSqliteReportRepository(fakeDbWithRows([{ ...validRow, response_drafts_json: '[' }]));
+
+    await expect(repository.list()).rejects.toThrow('CORRUPT_REPORT');
+  });
+
+  it('fails closed when response drafts do not match their schema in get', async () => {
+    const repository = createSqliteReportRepository(fakeDbWithRows([{ ...validRow, response_drafts_json: '[{}]' }]));
+
+    await expect(repository.get('report-1')).rejects.toThrow('CORRUPT_REPORT');
+  });
+
   it('lists reports newest first and filters titles case-insensitively', async () => {
     const db = fakeDbWithRows([
       validRow,
@@ -143,6 +174,21 @@ describe('SQLite report repository', () => {
 
     expect((await repository.list()).map((report) => report.id)).toEqual(['report-2', 'report-1']);
     expect((await repository.list('sAtUrDaY')).map((report) => report.id)).toEqual(['report-2']);
+  });
+
+  it('searches literal punctuation and Unicode case without SQLite wildcard semantics', async () => {
+    const repository = createSqliteReportRepository(fakeDbWithRows([
+      { ...validRow, id: 'percent', title: '100% ready' },
+      { ...validRow, id: 'underscore', title: 'follow_up' },
+      { ...validRow, id: 'slash', title: 'Folder \\ archive' },
+      { ...validRow, id: 'accent', title: 'CAFÉ notes' },
+      { ...validRow, id: 'near-match', title: '100x ready' },
+    ]));
+
+    await expect(repository.list('%')).resolves.toMatchObject([{ id: 'percent' }]);
+    await expect(repository.list('_')).resolves.toMatchObject([{ id: 'underscore' }]);
+    await expect(repository.list('\\')).resolves.toMatchObject([{ id: 'slash' }]);
+    await expect(repository.list('café')).resolves.toMatchObject([{ id: 'accent' }]);
   });
 
   it('deletes one report without deleting the others', async () => {

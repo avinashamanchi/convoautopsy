@@ -55,6 +55,10 @@ function parseSavedReport(row: ReportRow): SavedReport {
   }
 }
 
+function normalizeTitleSearch(value: string) {
+  return value.normalize('NFKC').toLowerCase();
+}
+
 export function createSqliteReportRepository(db: SqlitePort): ReportRepository {
   return {
     async initialize() {
@@ -64,13 +68,10 @@ export function createSqliteReportRepository(db: SqlitePort): ReportRepository {
     },
     async list(query) {
       const normalizedQuery = query?.trim();
-      const rows = normalizedQuery
-        ? await db.query<ReportRow>(
-          'SELECT * FROM reports WHERE LOWER(title) LIKE LOWER(?) ORDER BY updated_at DESC',
-          [`%${normalizedQuery}%`],
-        )
-        : await db.query<ReportRow>('SELECT * FROM reports ORDER BY updated_at DESC');
-      return rows.map(parseSavedReport);
+      const reports = (await db.query<ReportRow>('SELECT * FROM reports ORDER BY updated_at DESC')).map(parseSavedReport);
+      if (!normalizedQuery) return reports;
+      const searchTerm = normalizeTitleSearch(normalizedQuery);
+      return reports.filter((report) => normalizeTitleSearch(report.title).includes(searchTerm));
     },
     async get(id) {
       const rows = await db.query<ReportRow>('SELECT * FROM reports WHERE id = ?', [id]);

@@ -43,10 +43,22 @@ function savedReport(overrides: Partial<SavedReport> = {}): SavedReport {
 class MemoryReportRepository implements ReportRepository {
   public reports: SavedReport[];
   public saveError: Error | null = null;
+  public deleteError: Error | null = null;
+  public initializeFailures = 0;
+  public listFailures = 0;
 
   constructor(reports: SavedReport[] = []) { this.reports = reports; }
-  async initialize() {}
+  async initialize() {
+    if (this.initializeFailures > 0) {
+      this.initializeFailures -= 1;
+      throw new Error('storage unavailable');
+    }
+  }
   async list(query?: string) {
+    if (this.listFailures > 0) {
+      this.listFailures -= 1;
+      throw new Error('list unavailable');
+    }
     const needle = query?.toLocaleLowerCase() ?? '';
     return this.reports
       .filter((report) => report.title.toLocaleLowerCase().includes(needle))
@@ -57,7 +69,10 @@ class MemoryReportRepository implements ReportRepository {
     if (this.saveError) throw this.saveError;
     this.reports = [...this.reports.filter((item) => item.id !== report.id), report];
   }
-  async delete(id: string) { this.reports = this.reports.filter((report) => report.id !== id); }
+  async delete(id: string) {
+    if (this.deleteError) throw this.deleteError;
+    this.reports = this.reports.filter((report) => report.id !== id);
+  }
   async deleteAll() { this.reports = []; }
 }
 
@@ -82,6 +97,17 @@ beforeEach(() => {
 
 it('shows a useful empty history state', async () => {
   renderHistory();
+  expect(await screen.findByText('No saved analyses yet.')).toBeOnTheScreen();
+});
+
+it('retries failed initialization before allowing history to render', async () => {
+  const repository = new MemoryReportRepository();
+  repository.initializeFailures = 1;
+  renderHistory(repository);
+
+  expect(await screen.findByText('Storage is unavailable. Your saved analyses could not be opened.')).toBeOnTheScreen();
+  fireEvent.press(screen.getByRole('button', { name: 'Retry storage' }));
+
   expect(await screen.findByText('No saved analyses yet.')).toBeOnTheScreen();
 });
 
@@ -142,6 +168,37 @@ it('requires a title-specific confirmation before deletion', async () => {
 
   expect(await screen.findByText('No saved analyses yet.')).toBeOnTheScreen();
   expect(repository.reports).toHaveLength(0);
+});
+
+it('keeps the report visible and offers a retry when deletion fails', async () => {
+  const repository = new MemoryReportRepository([savedReport()]);
+  repository.deleteError = new Error('database locked');
+  renderHistory(repository);
+  await screen.findByText('Friday conversation');
+
+  fireEvent.press(screen.getByRole('button', { name: 'Delete Friday conversation' }));
+  fireEvent.press(screen.getByRole('button', { name: 'Confirm delete Friday conversation' }));
+
+  expect(await screen.findByText('Could not delete “Friday conversation”. Please try again.')).toBeOnTheScreen();
+  expect(screen.getByText('Friday conversation')).toBeOnTheScreen();
+  repository.deleteError = null;
+  fireEvent.press(screen.getByRole('button', { name: 'Retry deleting Friday conversation' }));
+  expect(await screen.findByText('No saved analyses yet.')).toBeOnTheScreen();
+});
+
+it('removes the deleted row and offers a retry when refreshing history fails', async () => {
+  const repository = new MemoryReportRepository([savedReport()]);
+  renderHistory(repository);
+  await screen.findByText('Friday conversation');
+  repository.listFailures = 1;
+
+  fireEvent.press(screen.getByRole('button', { name: 'Delete Friday conversation' }));
+  fireEvent.press(screen.getByRole('button', { name: 'Confirm delete Friday conversation' }));
+
+  expect(await screen.findByText('Could not refresh saved analyses. Please try again.')).toBeOnTheScreen();
+  expect(screen.queryByText('Friday conversation')).toBeNull();
+  fireEvent.press(screen.getByRole('button', { name: 'Retry loading saved analyses' }));
+  expect(await screen.findByText('No saved analyses yet.')).toBeOnTheScreen();
 });
 
 it('opens a saved report from history', async () => {

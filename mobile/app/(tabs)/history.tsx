@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { router } from 'expo-router';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { ConfirmDeleteSheet } from '../../src/components/ConfirmDeleteSheet';
+import { PrimaryButton } from '../../src/components/PrimaryButton';
 import { ReportListItem } from '../../src/components/ReportListItem';
 import { Screen } from '../../src/components/Screen';
 import { useReportRepository } from '../../src/services/reportRepositoryContext';
@@ -12,25 +13,33 @@ export default function HistoryScreen() {
   const { repository } = useReportRepository();
   const [query, setQuery] = useState('');
   const [reports, setReports] = useState<SavedReport[]>([]);
-  const [error, setError] = useState(false);
+  const [loadError, setLoadError] = useState<'none' | 'read' | 'refresh'>('none');
   const [pendingDelete, setPendingDelete] = useState<SavedReport | null>(null);
+  const [failedDelete, setFailedDelete] = useState<SavedReport | null>(null);
 
-  const loadReports = useCallback(async (nextQuery: string) => {
+  const loadReports = useCallback(async (nextQuery: string, errorType: 'read' | 'refresh') => {
     try {
-      setError(false);
       setReports(await repository.list(nextQuery));
+      setLoadError('none');
+      return true;
     } catch {
-      setError(true);
+      setLoadError(errorType);
+      return false;
     }
   }, [repository]);
 
-  useEffect(() => { void loadReports(query); }, [loadReports, query]);
+  useEffect(() => { void loadReports(query, 'read'); }, [loadReports, query]);
 
-  const deleteReport = async () => {
-    if (!pendingDelete) return;
-    await repository.delete(pendingDelete.id);
+  const deleteReport = async (report: SavedReport) => {
     setPendingDelete(null);
-    await loadReports(query);
+    try {
+      await repository.delete(report.id);
+      setReports((current) => current.filter((item) => item.id !== report.id));
+      setFailedDelete(null);
+      await loadReports(query, 'refresh');
+    } catch {
+      setFailedDelete(report);
+    }
   };
 
   return (
@@ -46,8 +55,19 @@ export default function HistoryScreen() {
           style={styles.search}
           value={query}
         />
-        {error ? <Text accessibilityRole="alert" style={styles.error}>Saved analyses could not be read.</Text> : null}
-        {!error && reports.length === 0 ? <Text style={styles.empty}>No saved analyses yet.</Text> : null}
+        {loadError !== 'none' ? (
+          <>
+            <Text accessibilityRole="alert" style={styles.error}>Could not {loadError === 'refresh' ? 'refresh' : 'load'} saved analyses. Please try again.</Text>
+            <PrimaryButton label="Retry loading saved analyses" onPress={() => { void loadReports(query, 'read'); }} />
+          </>
+        ) : null}
+        {failedDelete ? (
+          <>
+            <Text accessibilityRole="alert" style={styles.error}>Could not delete “{failedDelete.title}”. Please try again.</Text>
+            <PrimaryButton label={`Retry deleting ${failedDelete.title}`} onPress={() => { void deleteReport(failedDelete); }} />
+          </>
+        ) : null}
+        {loadError === 'none' && reports.length === 0 ? <Text style={styles.empty}>No saved analyses yet.</Text> : null}
         {reports.map((report) => (
           <ReportListItem
             key={report.id}
@@ -59,7 +79,7 @@ export default function HistoryScreen() {
       </View>
       <ConfirmDeleteSheet
         onCancel={() => setPendingDelete(null)}
-        onConfirm={() => { void deleteReport(); }}
+        onConfirm={() => { if (pendingDelete) void deleteReport(pendingDelete); }}
         title={pendingDelete?.title ?? ''}
         visible={pendingDelete !== null}
       />
