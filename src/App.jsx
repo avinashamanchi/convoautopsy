@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { getSession, setSession } from './utils/storage'
 import LandingPage from './pages/LandingPage'
 import AuthPage from './pages/AuthPage'
@@ -6,12 +6,7 @@ import Dashboard from './pages/Dashboard'
 
 export default function App() {
   const [page, setPage] = useState('landing')
-  const [user, setUser] = useState(null)
-
-  useEffect(() => {
-    const session = getSession()
-    if (session) setUser(session)
-  }, [])
+  const [user, setUser] = useState(() => getSession())
 
   const handleAuth = (authUser) => {
     setSession(authUser)

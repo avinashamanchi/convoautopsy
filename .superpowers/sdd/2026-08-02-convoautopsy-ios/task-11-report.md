@@ -62,3 +62,10 @@
 - RED: public cleartext proxy, missing local analysis mode, unredacted response interpretation/sender, and hung request tests failed against the prior implementation.
 - GREEN: root Vitest passes 11 tests after the fixes.
 - Node 22 root lint, build, and audit (`npm audit`, `npm audit --omit=dev`) pass. Build retains Vite's non-failing large-chunk advisory.
+
+## Fix Round 2
+
+- Root lint is now `eslint src eslint.config.js vite.config.js vitest.config.js --max-warnings=0`; a direct `npx eslint src --max-warnings=0` passes with no warnings.
+- Repaired the active source findings without weakening lint rules: session state is initialized lazily, unused imports/components are removed, deterministic phone-shard values are render-immutable, hook dependencies are complete, and callback parameters are accurate.
+- `.claude/settings.local.json` is ignored and removed from Git tracking while its local scrubbed file remains in place. No historical rewrite or external revocation action was performed.
+- Fix Round 2 checks: Node 22 root lint/test/build passed (11 Vitest tests); `npm ci` and full/production audits were previously clean in this round. Build retains the non-failing large-chunk advisory.

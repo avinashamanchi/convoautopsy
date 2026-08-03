@@ -1,9 +1,8 @@
-import React, { useRef, useEffect, useState } from 'react'
+import React, { useCallback, useRef, useEffect, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { gsap } from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import PhoneScene from '../components/PhoneScene'
-import DiagnosisPanel from '../components/DiagnosisPanel'
 import { analyzeConversation, DEMO_TEXT, DEMO_RESULT } from '../utils/analyzeConversation'
 import './LandingPage.css'
 
@@ -180,7 +179,7 @@ function LiveDemoSection({ onGetStarted }) {
   const hasRunRef = useRef(false)
   const runningRef = useRef(false)
 
-  const runDemo = async (inputText = text, preResult = null) => {
+  const runDemo = useCallback(async (inputText = text, preResult = null) => {
     if (runningRef.current) return
     runningRef.current = true
     setLoading(true)
@@ -230,7 +229,7 @@ function LiveDemoSection({ onGetStarted }) {
       setVisibleCount(i + 1)
     }
     runningRef.current = false
-  }
+  }, [text])
 
   // Auto-trigger on scroll into view (first time only)
   useEffect(() => {
@@ -246,7 +245,7 @@ function LiveDemoSection({ onGetStarted }) {
     )
     observer.observe(sectionRef.current)
     return () => observer.disconnect()
-  }, [])
+  }, [runDemo])
 
   const sc = result ? scoreColor(result.overall_tension_score) : '#9ca3af'
 

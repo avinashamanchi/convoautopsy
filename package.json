@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "build:app": "VITE_CAPACITOR=true vite build",
-    "lint": "eslint src/utils src/components/AiConsentModal.jsx src/components/ResponseCrafter.jsx src/pages/Dashboard.jsx eslint.config.js vite.config.js vitest.config.js --max-warnings=0",
+    "lint": "eslint src eslint.config.js vite.config.js vitest.config.js --max-warnings=0",
     "test": "vitest run",
     "preview": "vite preview",
     "ios": "npm run build:app && npx cap sync ios && npx cap open ios",
