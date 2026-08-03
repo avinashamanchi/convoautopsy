@@ -19,6 +19,17 @@ const result: AnalysisResult = {
   }],
 };
 
+const allPatternsResult: AnalysisResult = {
+  ...result,
+  messages: [
+    { sender: 'Person A', text: 'You never listen.', pattern: 'Criticism', egoState: 'Parent', possibleInterpretation: 'Criticism interpretation.' },
+    { sender: 'Person B', text: 'That is ridiculous.', pattern: 'Contempt', egoState: 'Parent', possibleInterpretation: 'Contempt interpretation.' },
+    { sender: 'Person C', text: 'I did nothing wrong.', pattern: 'Defensiveness', egoState: 'Child', possibleInterpretation: 'Defensiveness interpretation.' },
+    { sender: 'Person D', text: '...', pattern: 'Stonewalling', egoState: 'Child', possibleInterpretation: 'Stonewalling interpretation.' },
+    { sender: 'Person E', text: 'Can we pause?', pattern: 'Neutral', egoState: 'Adult', possibleInterpretation: 'Neutral interpretation.' },
+  ],
+};
+
 it('gives the editor and import controls discoverable names', () => {
   render(<ConversationEditor disabled={false} error={null} onChange={() => {}} onImportFile={() => {}} onImportScreenshot={() => {}} onReview={() => {}} value="" />);
 
@@ -68,6 +79,7 @@ it('stacks action groups at a 200 percent font scale without clipping critical c
   expect(screen.getByTestId('editor-import-actions').props.style).toEqual(expect.arrayContaining([expect.objectContaining({ flexDirection: 'column' })]));
   expect(screen.getByRole('button', { name: 'Review conversation' }).props.style).toEqual(expect.arrayContaining([expect.objectContaining({ minHeight: 48 })]));
   expect(screen.getByRole('button', { name: 'Import conversation file' }).props.style).toEqual(expect.objectContaining({ minHeight: 48 }));
+  expect(screen.getByRole('button', { name: 'Import conversation screenshot' }).props.style).toEqual(expect.objectContaining({ minHeight: 48 }));
   screen.unmount();
   render(<ResponseDraftCard draft={{ id: 'boundary', text: 'I need a pause.', hint: 'Sets a boundary' }} onCopy={async () => {}} onShare={async () => ({ ok: true })} />);
   expect(screen.getByTestId('draft-actions').props.style).toEqual(expect.arrayContaining([expect.objectContaining({ flexDirection: 'column' })]));
@@ -76,13 +88,19 @@ it('stacks action groups at a 200 percent font scale without clipping critical c
   expect(screen.getByRole('button', { name: 'Copy draft' }).props.style).toEqual(expect.arrayContaining([expect.objectContaining({ minHeight: 48 })]));
   expect(screen.getByRole('button', { name: 'Share draft' }).props.style).toEqual(expect.arrayContaining([expect.objectContaining({ minHeight: 48 })]));
   screen.unmount();
-  render(<ResultSummary result={result} />);
+  render(<ResultSummary result={allPatternsResult} />);
 
   expect(screen.getByText('Intensity score (estimate): 42/100')).toBeOnTheScreen();
-  expect(screen.getByText('Pattern: Neutral')).toBeOnTheScreen();
+  expect(screen.getByText('Analysis mode: On-device (local)')).toBeOnTheScreen();
+  for (const [pattern, interpretation] of [
+    ['Criticism', 'Criticism interpretation.'], ['Contempt', 'Contempt interpretation.'], ['Defensiveness', 'Defensiveness interpretation.'], ['Stonewalling', 'Stonewalling interpretation.'], ['Neutral', 'Neutral interpretation.'],
+  ]) {
+    expect(screen.getByText(`Pattern: ${pattern}`)).toBeOnTheScreen();
+    expect(screen.getByText(interpretation)).toBeOnTheScreen();
+  }
   expect(screen.getByText('This educational estimate is not a factual conclusion about people or relationships.')).toBeOnTheScreen();
-  expect(screen.getByLabelText('Pattern for Person A: Neutral').props.style).not.toEqual(expect.objectContaining({ height: expect.any(Number), overflow: 'hidden' }));
-  for (const item of [screen.getByTestId('result-summary'), screen.getByTestId('pattern-card'), screen.getByTestId('result-limitation')]) {
+  expect(screen.getByLabelText('Pattern for Person E: Neutral').props.style).not.toEqual(expect.objectContaining({ height: expect.any(Number), overflow: 'hidden' }));
+  for (const item of [screen.getByTestId('result-summary'), ...screen.getAllByTestId('pattern-card'), screen.getByTestId('result-limitation')]) {
     const style = item.props.style;
     expect(style.height).toBeUndefined();
     expect(style.maxHeight).toBeUndefined();
