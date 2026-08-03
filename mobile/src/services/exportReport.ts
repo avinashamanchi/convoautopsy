@@ -1,6 +1,7 @@
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import { captureRef } from 'react-native-view-shot';
+import { PixelRatio } from 'react-native';
+import { captureRef, releaseCapture } from 'react-native-view-shot';
 
 export type ExportOutcome =
   | { ok: true }
@@ -20,9 +21,10 @@ export function reportExportFailureMessage(outcome: Exclude<ExportOutcome, { ok:
 }
 
 export type ReportSharingPort = {
+  getPixelRatio(): number;
   isAvailableAsync(): Promise<boolean>;
+  releaseCapture(captureHandle: string): void;
   shareAsync(uri: string, options: { mimeType: string; UTI: string; dialogTitle: string }): Promise<void>;
-  deleteCacheFile(uri: string): Promise<void>;
 };
 
 export type DraftShareOutcome =
@@ -37,11 +39,10 @@ export type DraftSharingPort = {
 };
 
 export const nativeReportSharingPort: ReportSharingPort = {
+  getPixelRatio: PixelRatio.get,
   isAvailableAsync: Sharing.isAvailableAsync,
+  releaseCapture,
   shareAsync: Sharing.shareAsync,
-  async deleteCacheFile(uri) {
-    new File(uri).delete();
-  },
 };
 
 export const nativeDraftSharingPort: DraftSharingPort = {
@@ -57,13 +58,24 @@ export const nativeDraftSharingPort: DraftSharingPort = {
   },
 };
 
-const captureOptions = {
-  format: 'png' as const,
-  height: 1920,
-  quality: 1,
-  result: 'tmpfile' as const,
-  width: 1080,
-};
+const REPORT_TARGET_PIXELS = { height: 1920, width: 1080 } as const;
+
+function captureOptionsForScale(scale: number) {
+  if (!Number.isFinite(scale) || scale <= 0) return null;
+  return {
+    format: 'png' as const,
+    height: REPORT_TARGET_PIXELS.height / scale,
+    quality: 1,
+    result: 'tmpfile' as const,
+    width: REPORT_TARGET_PIXELS.width / scale,
+  };
+}
+
+function toFileUrl(captureHandle: string) {
+  if (captureHandle.startsWith('file:')) return captureHandle;
+  const encodedPath = captureHandle.split('/').map(encodeURIComponent).join('/');
+  return encodedPath.startsWith('/') ? `file://${encodedPath}` : `file:///${encodedPath}`;
+}
 
 export async function captureAndShareReport(
   ref: CaptureTarget | null,
@@ -77,16 +89,24 @@ export async function captureAndShareReport(
     return { ok: false, code: 'SHARING_UNAVAILABLE' };
   }
 
-  let temporaryUri: string | null = null;
+  let captureOptions: ReturnType<typeof captureOptionsForScale>;
+  try {
+    captureOptions = captureOptionsForScale(sharingPort.getPixelRatio());
+  } catch {
+    return { ok: false, code: 'CAPTURE_FAILED' };
+  }
+  if (!captureOptions) return { ok: false, code: 'CAPTURE_FAILED' };
+
+  let captureHandle: string | null = null;
   try {
     try {
-      temporaryUri = await captureRef(ref, captureOptions);
+      captureHandle = await captureRef(ref, captureOptions);
     } catch {
       return { ok: false, code: 'CAPTURE_FAILED' };
     }
 
     try {
-      await sharingPort.shareAsync(temporaryUri, {
+      await sharingPort.shareAsync(toFileUrl(captureHandle), {
         dialogTitle: 'Share private report image',
         mimeType: 'image/png',
         UTI: 'public.png',
@@ -96,11 +116,11 @@ export async function captureAndShareReport(
       return { ok: false, code: 'SHARE_FAILED' };
     }
   } finally {
-    if (temporaryUri) {
+    if (captureHandle) {
       try {
-        await sharingPort.deleteCacheFile(temporaryUri);
+        sharingPort.releaseCapture(captureHandle);
       } catch {
-        // The share result is still accurate even if cache cleanup is unavailable.
+        // The share result is still accurate even if native capture cleanup is unavailable.
       }
     }
   }

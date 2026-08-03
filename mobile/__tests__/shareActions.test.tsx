@@ -128,13 +128,31 @@ it('distinguishes an unavailable sharing service without revealing report conten
   expect(screen.queryByText('Ava: original private text')).toBeNull();
 });
 
-it('exposes a native capture root while redacting message contents and original names', () => {
+it('keeps six bounded redacted rows and the educational limitation inside the capture canvas', () => {
   const ref = createRef<View>();
-  render(<ShareableReportCard generatedAt="2026-08-02T12:00:00.000Z" ref={ref} result={result} />);
+  const sixMessageResult: AnalysisResult = {
+    ...result,
+    messages: [
+      { ...result.messages[0], sender: 'Person A', pattern: 'Criticism' },
+      { ...result.messages[0], sender: 'Person B', pattern: 'Contempt' },
+      { ...result.messages[0], sender: 'Person C', pattern: 'Defensiveness' },
+      { ...result.messages[0], sender: 'Person D', pattern: 'Stonewalling' },
+      { ...result.messages[0], sender: 'Person E', pattern: 'Neutral' },
+      { ...result.messages[0], sender: 'Person F', pattern: 'Criticism' },
+      { ...result.messages[0], sender: 'Person G', pattern: 'Neutral' },
+    ],
+  };
+  render(<ShareableReportCard generatedAt="2026-08-02T12:00:00.000Z" ref={ref} result={sixMessageResult} />);
 
   expect(ref.current).toBeTruthy();
-  expect(screen.getByText('Participant 1', { includeHiddenElements: true })).toBeOnTheScreen();
-  expect(screen.getByText('[Message content redacted]', { includeHiddenElements: true })).toBeOnTheScreen();
+  expect(screen.getAllByTestId('shareable-report-row', { includeHiddenElements: true })).toHaveLength(6);
+  expect(screen.getByText('Participant 6', { includeHiddenElements: true })).toBeOnTheScreen();
+  expect(screen.getAllByText('[Message content redacted]', { includeHiddenElements: true })).toHaveLength(6);
+  expect(screen.getByText('Pattern label: Stonewalling', { includeHiddenElements: true })).toBeOnTheScreen();
+  expect(screen.getByTestId('shareable-report-limitation', { includeHiddenElements: true })).toBeOnTheScreen();
+  expect(screen.getByTestId('shareable-report-canvas', { includeHiddenElements: true }).props.style).toMatchObject({ height: 640, overflow: 'hidden', width: 360 });
+  expect(screen.getAllByTestId('shareable-report-row', { includeHiddenElements: true })[0].props.style).toMatchObject({ height: 39, maxHeight: 39, overflow: 'hidden' });
+  expect(screen.getByTestId('shareable-report-limitation', { includeHiddenElements: true }).props.style).toMatchObject({ height: 62, overflow: 'hidden' });
   expect(screen.queryByText('Person A', { includeHiddenElements: true })).toBeNull();
   expect(screen.queryByText('private draft source', { includeHiddenElements: true })).toBeNull();
 });
