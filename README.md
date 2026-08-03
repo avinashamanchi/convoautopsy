@@ -1,6 +1,6 @@
 # ConvoAutopsy
 
-**AI-powered conversation diagnostics.** Paste any argument, text thread, or chat — get a clinical breakdown of who escalated it, why it broke down, and exactly what to say next.
+**Private conversation reflection tools.** Paste a conversation to review on-device pattern estimates, optionally request AI-assisted feedback after consent, and draft responses you can edit before sending.
 
 Live site → **[avinashamanchi.github.io/convoautopsy](https://avinashamanchi.github.io/convoautopsy/)**
 
@@ -8,14 +8,12 @@ Live site → **[avinashamanchi.github.io/convoautopsy](https://avinashamanchi.g
 
 ## What it does
 
-- **Tension Score** — 0–100 score showing how hostile the conversation was
-- **Gottman's Four Horsemen** — flags every message as Criticism, Contempt, Defensiveness, Stonewalling, or Neutral
-- **Thomas-Kilmann Conflict Mode** — identifies overall conflict style (Competing, Avoiding, Collaborating, etc.)
-- **Transactional Analysis** — tags each message's ego state (Parent, Adult, Child) and its hidden meaning
-- **Response Crafter** — 4-step wizard: pick who you are → set your goal → choose a tone → get 3 tailored responses
+- **Tension Score** — a 0–100 on-device estimate from text patterns, not a factual conclusion about people
+- **Conversation patterns** — educational labels inspired by Gottman, Thomas-Kilmann, and Transactional Analysis; they do not infer intent, diagnosis, or hidden meaning
+- **Response Crafter** — choose a sender, goal, and tone to generate three editable local drafts for human review
 - **Receipt Export** — download a shareable 9:16 PNG of your analysis (Instagram/TikTok ready)
 - **File Upload** — drag-and-drop .txt chat exports (WhatsApp, Discord, etc.)
-- **Saved History** — every analysis saved per user account via localStorage
+- **Saved History** — analyses are stored locally and can be deleted by the user
 
 ---
 
@@ -25,11 +23,11 @@ Live site → **[avinashamanchi.github.io/convoautopsy](https://avinashamanchi.g
 |---|---|
 | Frontend | React 19 + Vite 8 |
 | 3D / Animation | Three.js · React Three Fiber · GSAP ScrollTrigger |
-| AI Analysis | ConvoAutopsy AI proxy (Groq server-side) with local regex fallback |
-| Frameworks | Gottman Method · Thomas-Kilmann · Transactional Analysis |
+| AI Analysis | Optional consented ConvoAutopsy AI proxy (when deployed); on-device estimates remain available |
+| Frameworks | Educational heuristic inspirations: Gottman · Thomas-Kilmann · Transactional Analysis |
 | Auth / Storage | localStorage; optional AI proxy for consented assistance |
 | Receipt Export | html2canvas |
-| Mobile | Expo (React Native WebView) · Capacitor iOS |
+| Mobile | Expo / React Native app in `mobile/`; it does not load the website in a WebView |
 | Deployment | GitHub Pages via GitHub Actions |
 
 ---
@@ -68,7 +66,6 @@ Open [http://localhost:5173/convoautopsy/](http://localhost:5173/convoautopsy/)
 
 ```bash
 npm run build        # GitHub Pages build (base: /convoautopsy/)
-npm run build:app    # Mobile/Capacitor build (base: ./)
 ```
 
 ---
@@ -89,29 +86,15 @@ npm run export:ios
 
 For a bounded Expo Go smoke test on the same network, run `npx expo start --lan --clear`, scan the generated QR code with Expo Go, and stop the server when finished. Expo Go does not compile the local Swift Vision OCR module; its screenshot import fallback is expected there. Physical-device navigation, input, history, accessibility, offline, and share observations remain a user-run release checkpoint.
 
-The repeatable Maestro flow is [`mobile/e2e/analyze-flow.yaml`](mobile/e2e/analyze-flow.yaml). It uses production-control semantic IDs and ends when the user opens the system share sheet; it never treats an external share as completed.
+The repeatable Maestro flow is [`mobile/e2e/analyze-flow.yaml`](mobile/e2e/analyze-flow.yaml). It uses production-control semantic IDs and, after the user presses Share, asserts the stock iOS **Copy** control. That exact assertion requires an English-locale iOS share sheet and proves only that the system sheet opened; it never treats an external share as completed.
 
 ---
 
-## iOS App Store Submission (Capacitor)
+## iOS Release Path (Expo/EAS)
 
-The `ios/` directory contains a complete Xcode project.
+The iOS release path is the Expo app in `mobile/`, not the legacy Capacitor project. App Store uploads currently require Xcode 26 or later using the iOS 26 SDK or later. Apple Developer membership, Expo login, EAS initialization, development-build OCR verification, production build, TestFlight, App Store Connect record, review, and publication are not complete.
 
-### Requirements
-- **Xcode** — download free from the Mac App Store (~12GB)
-- **Apple Developer Account** — $99/year at [developer.apple.com](https://developer.apple.com/programs)
-
-### Steps
-
-```bash
-# 1. Build and sync
-npm run ios   # builds, syncs, and opens Xcode automatically
-
-# 2. In Xcode:
-#    - Select your team under Signing & Capabilities
-#    - Product → Archive
-#    - Distribute App → App Store Connect
-```
+After the user has personally completed the Apple and Expo credential steps, the user-owned release process uses EAS from `mobile/` to create a development build, verify native OCR on a physical iPhone, and only then create a production build and submit it. Do not treat an Expo Go export or a submission as App Store publication.
 
 ### GitHub Pages proxy configuration
 
@@ -148,13 +131,16 @@ convoautopsy/
 │   │   ├── craftResponse.js        # Proxy client + local response templates
 │   │   └── storage.js              # localStorage auth + conversation history
 │   └── index.css               # Global styles + all component styles
-├── native/                     # Expo app (live phone preview)
-│   └── App.js                  # WebView pointing to Vite dev server
-├── ios/                        # Capacitor iOS Xcode project
+├── mobile/                     # Expo / React Native iOS app
+│   ├── app/                    # Expo Router screens
+│   ├── src/                    # Local analysis, persistence, consent, exports
+│   ├── modules/convo-ocr/      # Native Apple Vision module (development build required)
+│   └── e2e/                    # Maestro release flow
+├── server/ai-proxy/            # Cloudflare Worker and Durable Object limiter
 ├── .github/workflows/
-│   └── deploy.yml              # GitHub Actions → GitHub Pages
-├── capacitor.config.ts         # Capacitor / iOS configuration
-└── vite.config.js              # Vite config (base path switches for mobile)
+│   ├── deploy.yml              # GitHub Actions → GitHub Pages
+│   └── ios-ci.yml              # Node 22 web, mobile, and Worker gates
+└── vite.config.js              # Vite config for the web application
 ```
 
 ---

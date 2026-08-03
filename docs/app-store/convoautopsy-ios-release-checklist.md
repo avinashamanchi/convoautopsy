@@ -8,13 +8,13 @@
 - [x] Credential-free EAS configuration, icon, splash configuration, bundle ID, build number, purpose strings, and initial metadata are in the repository.
 - [x] The web consent dialog has initial focus, focus trap, Escape handling, and focus restoration tests.
 - [x] Node 22 CI covers clean installs plus root web test/lint/build, mobile test/typecheck/lint/iOS export, and Worker test/typecheck/lint.
-- [x] The Maestro release flow uses production-control semantic IDs and only proves that a user opens the system share sheet.
+- [x] The Maestro release flow uses production-control semantic IDs and, after an explicit Share press, asserts the stock English-locale iOS share-sheet `Copy` control. It proves only that the system sheet opened, never that a share completed.
 - [x] Mobile parser limits count Unicode code points with exact 100-message and 26-speaker boundary tests; History distinguishes an empty library from no search matches.
 - [x] The Worker uses a per-digest SQLite Durable Object rate limiter: exported `RateLimitDurableObject`, `RATE_LIMITER` binding, v1 SQLite migration, Worker type, and Miniflare Durable Object configuration are present. No KV namespace is configured or required.
 
 ## Automated verification record
 
-Observed results and command output are recorded in `.superpowers/sdd/2026-08-02-convoautopsy-ios/task-13-report.md` after each run. The clean-checkout verification is the release evidence; a working-tree check alone is not acceptance evidence.
+The ignored task scratch report is supplemental only and is not release evidence. Recorded from a clean local clone at `2c797813611ddb8277566da8422f9a6e3f5a3482`: root `npm ci`, 12 web tests, lint, and build passed; mobile `npm ci`, 182 tests, typecheck, 18/18 Expo lint checks, Expo doctor, and iOS export passed; Worker `npm ci`, 24 tests, typecheck, and lint passed. The Worker test runtime fell back from compatibility date `2026-08-02` to `2025-09-06`; no deployment occurred. Root full and production audits found 0 vulnerabilities; the mobile audit reported 15 vulnerabilities (1 high) whose offered fix is the deferred breaking Expo 57 upgrade.
 
 ## Physical-device checkpoint (user observation required)
 

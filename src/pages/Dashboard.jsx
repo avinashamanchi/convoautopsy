@@ -9,6 +9,7 @@ import Onboarding from '../components/Onboarding'
 import ResponseCrafter from '../components/ResponseCrafter'
 import AiConsentModal from '../components/AiConsentModal'
 import { getAiConsent, grantAiConsent } from '../utils/aiConsent'
+import { analysisSourceMessage } from '../utils/analysisSourceMessage'
 
 function formatDate(ts) {
   const d = new Date(ts)
@@ -87,7 +88,7 @@ export default function Dashboard({ user, onLogout }) {
         setError("Couldn't parse the conversation. Use format: Name: Message")
         return
       }
-      saveAnalysis(txt, result, source, fallbackReason)
+      saveAnalysis(txt, result, source, options.localReason ?? fallbackReason)
     } catch (error) {
       if (generation !== requestGeneration.current || controller.signal.aborted || error?.name === 'AbortError') return
       setError('Analysis failed. Please try again.')
@@ -102,7 +103,7 @@ export default function Dashboard({ user, onLogout }) {
     setError('')
 
     if (preResult) {
-      saveAnalysis(txt, { ...preResult, analysis_mode: 'local' }, 'local', 'NOT_CONFIGURED', 'Demo Analysis')
+      saveAnalysis(txt, { ...preResult, analysis_mode: 'local' }, 'local', 'LOCAL_REQUESTED', 'Demo Analysis')
       return
     }
     const consent = getAiConsent()
@@ -133,7 +134,7 @@ export default function Dashboard({ user, onLogout }) {
     setShowAiConsent(false)
     const txt = pendingText
     setPendingText('')
-    await runAnalysis(txt, { allowRemote: false })
+    await runAnalysis(txt, { allowRemote: false, localReason: 'LOCAL_REQUESTED' })
     consentBusy.current = false
   }
 
@@ -245,9 +246,7 @@ export default function Dashboard({ user, onLogout }) {
           {activeConvo ? (
             <div className="dash-result-view">
               <div className={`dash-ai-source dash-ai-source-${activeConvo.source || 'local'}`}>
-                {activeConvo.source === 'ai'
-                  ? 'AI-assisted analysis'
-                  : 'AI service unavailable—showing the on-device estimate.'}
+                {analysisSourceMessage(activeConvo.source, activeConvo.fallbackReason)}
               </div>
               <AnalysisResult
                 result={activeConvo.result}

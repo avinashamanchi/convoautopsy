@@ -36,3 +36,4 @@ appId: io.convoautopsy.app
 - assertVisible: "Draft—review before sending"
 - tapOn:
     id: share-response-0
+- assertVisible: "Copy"

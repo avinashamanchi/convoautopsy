@@ -1056,7 +1056,7 @@ git commit -m "feat: add private report exports and sharing"
 
 - [ ] **Step 1: Create the Worker package**
 
-Use Node 22, Wrangler, Vitest, `@cloudflare/vitest-pool-workers`, and Zod. Define an `Env` interface with KV binding `RATE_LIMITS` and secrets `GROQ_API_KEY` and `RATE_LIMIT_HMAC_SECRET`; inject the KV binding through the Vitest Worker pool for local tests. Keep the live `kv_namespaces` entry absent from `wrangler.jsonc` until Task 13 creates the real namespace and writes its returned ID. Do not put secret values in `wrangler.jsonc`.
+Use Node 22, Wrangler, Vitest, `@cloudflare/vitest-pool-workers`, and Zod. Define an `Env` interface with a `RATE_LIMITER` Durable Object namespace plus `GROQ_API_KEY` and `RATE_LIMIT_HMAC_SECRET`; inject the SQLite Durable Object through the Vitest Worker pool for local tests. Track the `RATE_LIMITER` binding and `RateLimitDurableObject` SQLite migration in `wrangler.jsonc`; do not create or configure a KV namespace. Do not put secret values in `wrangler.jsonc`.
 
 - [ ] **Step 2: Write failing contract tests**
 
@@ -1564,18 +1564,17 @@ git commit -m "test: verify ConvoAutopsy iOS release candidate"
 
 Do not request or accept the user's Cloudflare password, Groq key, browser session, or raw access token. The user signs in and enters secrets through each provider's own prompt.
 
-Run interactively:
+Run interactively only after the user has completed provider sign-in. Do not create a KV namespace: the accepted limiter is the existing per-digest SQLite Durable Object, with exported `RateLimitDurableObject`, `RATE_LIMITER` binding, and v1 migration already tracked in `wrangler.jsonc`.
 
 ```bash
 cd server/ai-proxy
 npx wrangler login
-npx wrangler kv namespace create RATE_LIMITS
 npx wrangler secret put GROQ_API_KEY
 npx wrangler secret put RATE_LIMIT_HMAC_SECRET
 npx wrangler deploy
 ```
 
-Put the KV namespace ID printed by Wrangler into the `RATE_LIMITS` binding in `wrangler.jsonc`, rerun Worker tests, and deploy again. Record the HTTPS Worker URL. Configure that public URL as `EXPO_PUBLIC_AI_PROXY_URL` in the Expo development/preview/production environments and as the GitHub repository variable `VITE_AI_PROXY_URL`. Rebuild the web app and run one consented mobile analysis plus one web analysis. Confirm Worker logs contain request metadata but no conversation marker text.
+Rerun Worker tests and record the HTTPS Worker URL. Configure that public URL as `EXPO_PUBLIC_AI_PROXY_URL` in the Expo development/preview/production environments and as the GitHub repository variable `VITE_AI_PROXY_URL`. Rebuild the web app and run one consented mobile analysis plus one web analysis. Confirm Worker logs contain request metadata but no conversation marker text.
 
 - [ ] **Step 7: Stop at the Apple/Expo credential boundary**
 
