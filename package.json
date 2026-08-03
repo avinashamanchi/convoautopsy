@@ -32,18 +32,19 @@
     "three": "^0.183.2"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.4",
     "@capacitor/cli": "^8.3.0",
     "@capacitor/ios": "^8.3.0",
+    "@eslint/js": "^9.39.4",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
     "eslint": "^9.39.4",
-    "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "gh-pages": "^6.3.0",
     "globals": "^17.4.0",
+    "jsdom": "^26.1.0",
     "typescript": "^6.0.2",
     "vite": "^8.0.1",
     "vitest": "^4.0.18"

@@ -10,11 +10,11 @@ export function ResultSummary({ result }: { result: AnalysisResult }) {
       <Text accessibilityRole="header" style={styles.title}>
         {result.mode === 'local' ? 'On-device estimate' : 'AI-assisted estimate'}
       </Text>
-      <Text style={styles.metric}>Intensity score (estimate): {result.intensityScore}/100</Text>
+      <Text accessibilityLabel={`Intensity score: ${result.intensityScore} out of 100`} style={styles.metric}>Intensity score (estimate): {result.intensityScore}/100</Text>
       <Text style={styles.metric}>Conflict-style estimate: {result.conflictMode}</Text>
       <Text style={styles.mode}>Analysis mode: {modeLabel}</Text>
       {result.messages.map((message, index) => (
-        <View key={`${message.sender}-${index}`} style={styles.message}>
+        <View accessibilityLabel={`Pattern for ${message.sender}: ${message.pattern}`} key={`${message.sender}-${index}`} style={styles.message}>
           <Text style={styles.sender}>{message.sender}</Text>
           <Text style={styles.text}>{message.text}</Text>
           <Text style={styles.pattern}>Pattern: {message.pattern}</Text>

@@ -1,0 +1,82 @@
+import { AccessibilityInfo, Modal, PixelRatio } from 'react-native';
+import { act, render, screen, waitFor } from '@testing-library/react-native';
+import { renderRouter } from 'expo-router/testing-library';
+import { ConversationEditor } from '../src/components/ConversationEditor';
+import { AiConsentSheet } from '../src/components/AiConsentSheet';
+import { ConfirmDeleteSheet } from '../src/components/ConfirmDeleteSheet';
+import { ResponseDraftCard } from '../src/components/ResponseDraftCard';
+import { ResultSummary } from '../src/components/ResultSummary';
+import type { AnalysisResult } from '../src/domain/analysis';
+
+const result: AnalysisResult = {
+  schemaVersion: 1,
+  mode: 'local',
+  intensityScore: 42,
+  conflictMode: 'Collaborating',
+  messages: [{
+    sender: 'Person A', text: 'Can we talk?', pattern: 'Neutral', egoState: 'Adult',
+    possibleInterpretation: 'This wording may reflect an attempt to communicate without a clear hostile pattern.',
+  }],
+};
+
+it('gives the editor and import controls discoverable names', () => {
+  render(<ConversationEditor disabled={false} error={null} onChange={() => {}} onImportFile={() => {}} onImportScreenshot={() => {}} onReview={() => {}} value="" />);
+
+  expect(screen.getByLabelText('Conversation text')).toBeOnTheScreen();
+  expect(screen.getByRole('button', { name: 'Review conversation' })).toBeOnTheScreen();
+  expect(screen.getByRole('button', { name: 'Import conversation file' })).toBeOnTheScreen();
+  expect(screen.getByRole('button', { name: 'Import conversation screenshot' })).toBeOnTheScreen();
+});
+
+it('exposes each primary tab as a named selectable navigation control', async () => {
+  renderRouter('./fixtures/routes', { initialUrl: '/' });
+
+  expect(await screen.findByRole('button', { name: 'Analyze, tab, 1 of 4', selected: true })).toBeOnTheScreen();
+  expect(screen.getByRole('button', { name: 'History, tab, 2 of 4', selected: false })).toBeOnTheScreen();
+  expect(screen.getByRole('button', { name: 'Responses, tab, 3 of 4', selected: false })).toBeOnTheScreen();
+  expect(screen.getByRole('button', { name: 'Settings, tab, 4 of 4', selected: false })).toBeOnTheScreen();
+});
+
+it('announces the score and each pattern card with meaningful labels', () => {
+  render(<ResultSummary result={result} />);
+
+  expect(screen.getByLabelText('Intensity score: 42 out of 100')).toBeOnTheScreen();
+  expect(screen.getByLabelText('Pattern for Person A: Neutral')).toBeOnTheScreen();
+});
+
+it('keeps consent and share actions identifiable to assistive technology', () => {
+  render(<AiConsentSheet isRunning={false} onAgree={() => {}} onCancel={() => {}} />);
+  expect(screen.getByRole('button', { name: 'Agree and continue' })).toBeOnTheScreen();
+  expect(screen.getByRole('button', { name: 'Cancel' })).toBeOnTheScreen();
+  screen.unmount();
+
+  render(<ResponseDraftCard draft={{ id: 'boundary', text: 'I need a pause.', hint: 'Sets a boundary' }} onCopy={async () => {}} onShare={async () => ({ ok: true })} />);
+  expect(screen.getByRole('button', { name: 'Copy draft' })).toBeOnTheScreen();
+  expect(screen.getByRole('button', { name: 'Share draft' })).toBeOnTheScreen();
+});
+
+it('gives the destructive cancel action a specific name', async () => {
+  render(<ConfirmDeleteSheet onCancel={() => {}} onConfirm={() => {}} title="Friday conversation" visible />);
+  expect(screen.getByRole('button', { name: 'Confirm delete Friday conversation' })).toBeOnTheScreen();
+  expect(screen.getByRole('button', { name: 'Cancel deletion' })).toBeOnTheScreen();
+  await act(async () => { await Promise.resolve(); });
+});
+
+it('keeps critical result content available at a 200 percent font scale', () => {
+  const scale = jest.spyOn(PixelRatio, 'getFontScale').mockReturnValue(2);
+  render(<ResultSummary result={result} />);
+
+  expect(screen.getByText('Intensity score (estimate): 42/100')).toBeOnTheScreen();
+  expect(screen.getByText('Pattern: Neutral')).toBeOnTheScreen();
+  expect(screen.getByText('This educational estimate is not a factual conclusion about people or relationships.')).toBeOnTheScreen();
+  scale.mockRestore();
+});
+
+it('removes the nonessential delete-sheet transition when Reduce Motion is enabled', async () => {
+  const preference = jest.spyOn(AccessibilityInfo, 'isReduceMotionEnabled').mockResolvedValue(true);
+  const view = render(<ConfirmDeleteSheet onCancel={() => {}} onConfirm={() => {}} title="Friday conversation" visible />);
+
+  await waitFor(() => expect(view.UNSAFE_getByType(Modal).props.animationType).toBe('none'));
+  expect(preference).toHaveBeenCalled();
+  preference.mockRestore();
+});

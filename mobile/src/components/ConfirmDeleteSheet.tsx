@@ -1,4 +1,5 @@
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { AccessibilityInfo, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { tokens } from '../theme/tokens';
 
 type ConfirmDeleteSheetProps = {
@@ -9,8 +10,19 @@ type ConfirmDeleteSheetProps = {
 };
 
 export function ConfirmDeleteSheet({ title, visible, onCancel, onConfirm }: ConfirmDeleteSheetProps) {
+  const [reduceMotion, setReduceMotion] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
+      if (active) setReduceMotion(enabled);
+    }).catch(() => undefined);
+    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion);
+    return () => { active = false; subscription.remove(); };
+  }, []);
+
   return (
-    <Modal animationType="slide" onRequestClose={onCancel} transparent visible={visible}>
+    <Modal animationType={reduceMotion ? 'none' : 'slide'} onRequestClose={onCancel} transparent visible={visible}>
       <View style={styles.backdrop}>
         <View accessibilityRole="alert" style={styles.sheet}>
           <Text style={styles.title}>Delete “{title}”?</Text>
@@ -18,7 +30,7 @@ export function ConfirmDeleteSheet({ title, visible, onCancel, onConfirm }: Conf
           <Pressable accessibilityRole="button" accessibilityLabel={`Confirm delete ${title}`} onPress={onConfirm} style={styles.delete}>
             <Text style={styles.deleteText}>Delete permanently</Text>
           </Pressable>
-          <Pressable accessibilityRole="button" onPress={onCancel} style={styles.cancel}>
+          <Pressable accessibilityLabel="Cancel deletion" accessibilityRole="button" onPress={onCancel} style={styles.cancel}>
             <Text style={styles.cancelText}>Cancel</Text>
           </Pressable>
         </View>

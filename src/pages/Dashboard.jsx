@@ -48,6 +48,7 @@ export default function Dashboard({ user, onLogout }) {
   const requestRef = useRef(null)
   const requestGeneration = useRef(0)
   const consentBusy = useRef(false)
+  const aiConsentTriggerRef = useRef(null)
 
   useEffect(() => () => requestRef.current?.abort(), [])
 
@@ -175,7 +176,7 @@ export default function Dashboard({ user, onLogout }) {
         <Onboarding username={user.username} onDone={() => setShowOnboarding(false)} />
       )}
       {showAiConsent && (
-        <AiConsentModal onAgree={handleConsent} onDecline={handleDecline} isRunning={analyzing} />
+        <AiConsentModal onAgree={handleConsent} onDecline={handleDecline} isRunning={analyzing} returnFocusRef={aiConsentTriggerRef} />
       )}
 
       {/* ── Top nav ── */}
@@ -318,6 +319,7 @@ export default function Dashboard({ user, onLogout }) {
                 </button>
                 <button
                   className="dash-analyze-btn"
+                  ref={aiConsentTriggerRef}
                   onClick={() => handleAnalyze()}
                   disabled={analyzing || !inputText.trim()}
                 >
