@@ -66,16 +66,20 @@ export default function ResponseScreen() {
   }, [loadAttempt, reportId, repository]);
 
   const senders = useMemo(() => Array.from(new Set(report?.result.messages.map((message) => message.sender) ?? [])), [report]);
-  const progress = !sender ? 'Step 1 of 4: Report' : !goal ? 'Step 2 of 4: Sender' : !tone ? 'Step 3 of 4: Goal' : 'Step 4 of 4: Tone';
+  const progress = !sender ? 'Step 2 of 4: Sender' : !goal ? 'Step 3 of 4: Goal' : !tone ? 'Step 4 of 4: Tone' : 'Ready to generate';
+
+  const [retryDrafts, setRetryDrafts] = useState<ResponseDraft[] | null>(null);
 
   const persistDrafts = async (nextDrafts: ResponseDraft[]) => {
     if (!report) return;
     setSaving(true);
     setSaveError(false);
-    const updated = { ...report, responseDrafts: nextDrafts, updatedAt: new Date().toISOString() };
+    const draftsToSave = nextDrafts.map((draft) => ({ ...draft }));
+    const updated = { ...report, responseDrafts: draftsToSave, updatedAt: new Date().toISOString() };
     try {
       await repository.save(updated);
       setReport(updated);
+      setRetryDrafts(null);
     } catch {
       setSaveError(true);
     } finally {
@@ -87,6 +91,7 @@ export default function ResponseScreen() {
     if (!sender || !goal || !tone) return;
     const nextDrafts = craftLocalResponses({ sender, goal, tone });
     setDrafts(nextDrafts);
+    setRetryDrafts(nextDrafts);
     void persistDrafts(nextDrafts);
   };
 
@@ -109,27 +114,52 @@ export default function ResponseScreen() {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>1. Report</Text>
-          <Text style={styles.message}>{report.title}</Text>
+          <Text style={styles.message}>Selected report: {report.title}</Text>
         </View>
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>2. Who is sending this?</Text>
-          {senders.map((person) => <PrimaryButton key={person} label={person} onPress={() => setSender(person)} />)}
+          {sender ? <Text style={styles.message}>Selected sender: {sender}</Text> : null}
+          {senders.map((person) => (
+            <PrimaryButton
+              key={person}
+              label={person}
+              selected={sender === person}
+              disabled={saving}
+              onPress={() => { setSender(person); setGoal(null); setTone(null); }}
+            />
+          ))}
         </View>
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>3. What is your goal?</Text>
-          {goals.map((option) => <PrimaryButton key={option.id} label={option.label} onPress={() => setGoal(option.id)} />)}
-        </View>
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>4. What tone fits?</Text>
-          {tones.map((option) => <PrimaryButton key={option.id} label={option.label} onPress={() => setTone(option.id)} />)}
-        </View>
+        {sender ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>3. What is your goal?</Text>
+            {goal ? <Text style={styles.message}>Selected goal: {goals.find((option) => option.id === goal)?.label}</Text> : null}
+            {goals.map((option) => (
+              <PrimaryButton
+                key={option.id}
+                label={option.label}
+                selected={goal === option.id}
+                disabled={saving}
+                onPress={() => { setGoal(option.id); setTone(null); }}
+              />
+            ))}
+          </View>
+        ) : null}
+        {goal ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>4. What tone fits?</Text>
+            {tone ? <Text style={styles.message}>Selected tone: {tones.find((option) => option.id === tone)?.label}</Text> : null}
+            {tones.map((option) => (
+              <PrimaryButton key={option.id} label={option.label} selected={tone === option.id} disabled={saving} onPress={() => setTone(option.id)} />
+            ))}
+          </View>
+        ) : null}
 
         <PrimaryButton label="Generate drafts" disabled={!sender || !goal || !tone || saving} onPress={generate} />
-        <PrimaryButton label="Reset draft choices" onPress={() => { setSender(null); setGoal(null); setTone(null); setDrafts([]); setSaveError(false); }} />
+        <PrimaryButton label="Reset draft choices" disabled={saving} onPress={() => { setSender(null); setGoal(null); setTone(null); setDrafts([]); setRetryDrafts(null); setSaveError(false); }} />
         {saveError ? (
           <View style={styles.section}>
             <Text accessibilityRole="alert" style={styles.error}>Could not save these drafts. Please try again.</Text>
-            <PrimaryButton label="Retry saving drafts" disabled={saving} onPress={() => { void persistDrafts(drafts); }} />
+            <PrimaryButton label="Retry saving drafts" disabled={saving || !retryDrafts} onPress={() => { if (retryDrafts) void persistDrafts(retryDrafts); }} />
           </View>
         ) : null}
         {drafts.map((draft) => (

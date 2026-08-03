@@ -5,17 +5,19 @@ import { tokens } from '../theme/tokens';
 type PrimaryButtonProps = Pick<ComponentProps<typeof Pressable>, 'onPress' | 'testID'> & {
   label: string;
   disabled?: boolean;
+  selected?: boolean;
 };
 
-export function PrimaryButton({ label, disabled = false, onPress, testID }: PrimaryButtonProps) {
+export function PrimaryButton({ label, disabled = false, selected = false, onPress, testID }: PrimaryButtonProps) {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityState={{ disabled }}
+      accessibilityState={{ disabled, selected }}
       disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [
         styles.button,
+        selected && styles.selected,
         disabled && styles.disabled,
         pressed && !disabled && styles.pressed,
       ]}
@@ -40,6 +42,10 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.8,
+  },
+  selected: {
+    borderColor: tokens.colors.textPrimary,
+    borderWidth: 2,
   },
   label: {
     color: tokens.colors.textPrimary,

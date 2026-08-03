@@ -33,6 +33,22 @@ describe('craftLocalResponses', () => {
     expect(understanding[1].hint).toBe('Invites clarification');
   });
 
+  it('does not state unverified feelings, behavior, or shared goals as facts', () => {
+    const allDraftText = RESPONSE_GOALS.flatMap((goal) => (
+      RESPONSE_TONES.flatMap((tone) => craftLocalResponses({ sender: 'Person A', goal, tone }))
+    )).map((draft) => `${draft.text}\n${draft.hint}`).join('\n');
+
+    const unsupportedClaims = [
+      /\b(?:you(?:'re| are)|they(?:'re| are))\s+(?:frustrated|hurt|feeling|not listening)\b/i,
+      /\b(?:we both|both of us)\s+(?:feel|are|have|want|need|owe)\b/i,
+      /\bneither of us\b/i,
+      /\bI (?:know|think|believe)\s+(?:that )?(?:you|they|we)\b/i,
+      /\b(?:a|the)\s+(?:good|better)\s+outcome\s+for\s+both\s+of\s+us\b/i,
+    ];
+
+    for (const claim of unsupportedClaims) expect(allDraftText).not.toMatch(claim);
+  });
+
   it('does not expose an automatic-send function', () => {
     expect((responseCrafter as Record<string, unknown>).sendResponses).toBeUndefined();
     expect((responseCrafter as Record<string, unknown>).autoSend).toBeUndefined();

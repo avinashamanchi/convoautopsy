@@ -58,6 +58,28 @@ class MemoryReportRepository implements ReportRepository {
   async deleteAll() {}
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => { resolve = nextResolve; reject = nextReject; });
+  return { promise, resolve, reject };
+}
+
+class DeferredSaveRepository extends MemoryReportRepository {
+  readonly savePayloads: SavedReport[] = [];
+  readonly firstSave = deferred<void>();
+  readonly retrySave = deferred<void>();
+  private readonly pendingSaves = [this.firstSave, this.retrySave];
+
+  override async save(report: SavedReport) {
+    this.savePayloads.push(report);
+    const pending = this.pendingSaves.shift();
+    if (!pending) throw new Error('unexpected save');
+    await pending.promise;
+    this.reports = [...this.reports.filter((item) => item.id !== report.id), report];
+  }
+}
+
 const preferences: PreferenceStore = {
   get: async () => null, set: async () => {}, delete: async () => {}, deleteAll: async () => {},
 };
@@ -95,15 +117,15 @@ it('selects a saved report before opening the response wizard', async () => {
 it('requires sender, goal, and tone before generating exactly three drafts and saving them', async () => {
   const { repository } = renderResponse();
 
-  expect(await screen.findByText('Step 1 of 4: Report')).toBeOnTheScreen();
+  expect(await screen.findByText('Step 2 of 4: Sender')).toBeOnTheScreen();
   expect(screen.getByRole('button', { name: 'Generate drafts' }).props.accessibilityState.disabled).toBe(true);
 
   fireEvent.press(screen.getByRole('button', { name: 'Person A' }));
-  expect(screen.getByText('Step 2 of 4: Sender')).toBeOnTheScreen();
-  fireEvent.press(screen.getByRole('button', { name: 'Resolve the conflict' }));
   expect(screen.getByText('Step 3 of 4: Goal')).toBeOnTheScreen();
-  fireEvent.press(screen.getByRole('button', { name: 'Direct & clear' }));
+  fireEvent.press(screen.getByRole('button', { name: 'Resolve the conflict' }));
   expect(screen.getByText('Step 4 of 4: Tone')).toBeOnTheScreen();
+  fireEvent.press(screen.getByRole('button', { name: 'Direct & clear' }));
+  expect(screen.getByText('Ready to generate')).toBeOnTheScreen();
   expect(screen.getByRole('button', { name: 'Generate drafts' }).props.accessibilityState.disabled).toBe(false);
 
   fireEvent.press(screen.getByRole('button', { name: 'Generate drafts' }));
@@ -117,7 +139,7 @@ it('requires sender, goal, and tone before generating exactly three drafts and s
 
 it('copies and shares only after the respective user presses', async () => {
   renderResponse();
-  await screen.findByText('Step 1 of 4: Report');
+  await screen.findByText('Step 2 of 4: Sender');
   fireEvent.press(screen.getByRole('button', { name: 'Person A' }));
   fireEvent.press(screen.getByRole('button', { name: 'Resolve the conflict' }));
   fireEvent.press(screen.getByRole('button', { name: 'Direct & clear' }));
@@ -140,17 +162,18 @@ it('copies and shares only after the respective user presses', async () => {
 });
 
 it('resets the wizard without deleting the saved analysis', async () => {
-  renderResponse();
-  await screen.findByText('Step 1 of 4: Report');
+  const { repository } = renderResponse();
+  await screen.findByText('Step 2 of 4: Sender');
   fireEvent.press(screen.getByRole('button', { name: 'Person A' }));
   fireEvent.press(screen.getByRole('button', { name: 'Resolve the conflict' }));
   fireEvent.press(screen.getByRole('button', { name: 'Direct & clear' }));
   fireEvent.press(screen.getByRole('button', { name: 'Generate drafts' }));
   await screen.findAllByText('Draft—review before sending');
+  await waitFor(() => expect(repository.reports[0].responseDrafts).toHaveLength(3));
 
   fireEvent.press(screen.getByRole('button', { name: 'Reset draft choices' }));
 
-  expect(screen.getByText('Step 1 of 4: Report')).toBeOnTheScreen();
+  expect(screen.getByText('Step 2 of 4: Sender')).toBeOnTheScreen();
   expect(screen.queryByText('Draft—review before sending')).toBeNull();
   expect(screen.getByRole('button', { name: 'Generate drafts' }).props.accessibilityState.disabled).toBe(true);
 });
@@ -159,7 +182,7 @@ it('shows a recoverable persistence failure while keeping generated drafts visib
   const repository = new MemoryReportRepository();
   repository.saveError = new Error('disk full');
   renderResponse(repository);
-  await screen.findByText('Step 1 of 4: Report');
+  await screen.findByText('Step 2 of 4: Sender');
   fireEvent.press(screen.getByRole('button', { name: 'Person A' }));
   fireEvent.press(screen.getByRole('button', { name: 'Resolve the conflict' }));
   fireEvent.press(screen.getByRole('button', { name: 'Direct & clear' }));
@@ -169,5 +192,54 @@ it('shows a recoverable persistence failure while keeping generated drafts visib
   expect(screen.getAllByText('Draft—review before sending')).toHaveLength(3);
   repository.saveError = null;
   fireEvent.press(screen.getByRole('button', { name: 'Retry saving drafts' }));
+  await waitFor(() => expect(repository.reports[0].responseDrafts).toHaveLength(3));
+});
+
+it('prevents out-of-order choices and exposes each selected wizard choice', async () => {
+  renderResponse();
+
+  expect(await screen.findByText('Selected report: Friday conversation')).toBeOnTheScreen();
+  expect(screen.queryByText('3. What is your goal?')).toBeNull();
+  expect(screen.queryByText('4. What tone fits?')).toBeNull();
+
+  fireEvent.press(screen.getByRole('button', { name: 'Person A' }));
+  expect(screen.getByText('Selected sender: Person A')).toBeOnTheScreen();
+  expect(screen.getByRole('button', { name: 'Person A' }).props.accessibilityState.selected).toBe(true);
+  expect(screen.getByText('3. What is your goal?')).toBeOnTheScreen();
+  expect(screen.queryByText('4. What tone fits?')).toBeNull();
+
+  fireEvent.press(screen.getByRole('button', { name: 'Resolve the conflict' }));
+  expect(screen.getByText('Selected goal: Resolve the conflict')).toBeOnTheScreen();
+  expect(screen.getByRole('button', { name: 'Resolve the conflict' }).props.accessibilityState.selected).toBe(true);
+  expect(screen.getByText('4. What tone fits?')).toBeOnTheScreen();
+
+  fireEvent.press(screen.getByRole('button', { name: 'Direct & clear' }));
+  expect(screen.getByText('Selected tone: Direct & clear')).toBeOnTheScreen();
+  expect(screen.getByRole('button', { name: 'Direct & clear' }).props.accessibilityState.selected).toBe(true);
+});
+
+it('keeps the generated save payload stable when a reset is pressed during a failed save', async () => {
+  const repository = new DeferredSaveRepository();
+  renderResponse(repository);
+  await screen.findByText('Step 2 of 4: Sender');
+  fireEvent.press(screen.getByRole('button', { name: 'Person A' }));
+  fireEvent.press(screen.getByRole('button', { name: 'Resolve the conflict' }));
+  fireEvent.press(screen.getByRole('button', { name: 'Direct & clear' }));
+  fireEvent.press(screen.getByRole('button', { name: 'Generate drafts' }));
+  await screen.findAllByText('Draft—review before sending');
+  await waitFor(() => expect(repository.savePayloads).toHaveLength(1));
+
+  expect(screen.getByRole('button', { name: 'Reset draft choices' }).props.accessibilityState.disabled).toBe(true);
+  fireEvent.press(screen.getByRole('button', { name: 'Reset draft choices' }));
+  expect(screen.getAllByText('Draft—review before sending')).toHaveLength(3);
+
+  repository.firstSave.reject(new Error('disk full'));
+  expect(await screen.findByText('Could not save these drafts. Please try again.')).toBeOnTheScreen();
+  fireEvent.press(screen.getByRole('button', { name: 'Retry saving drafts' }));
+  await waitFor(() => expect(repository.savePayloads).toHaveLength(2));
+  expect(repository.savePayloads[1].responseDrafts.map((draft) => draft.id)).toEqual([
+    'resolve-direct-1', 'resolve-direct-2', 'resolve-direct-3',
+  ]);
+  repository.retrySave.resolve();
   await waitFor(() => expect(repository.reports[0].responseDrafts).toHaveLength(3));
 });

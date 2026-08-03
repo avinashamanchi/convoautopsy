@@ -17,29 +17,29 @@ type TemplateMatrix = Record<ResponseGoal, Record<ResponseTone, readonly [DraftT
 const templates: TemplateMatrix = {
   resolve: {
     empathetic: [
-      { text: "I've been thinking about our conversation and I want to genuinely understand your perspective. Can we talk about what specifically hurt you?", hint: 'Opens the door without blame' },
-      { text: "I hear that you're frustrated, and that makes sense. I want us to resolve this — not just prove a point. What do you need right now?", hint: 'Acknowledges feelings first' },
-      { text: "I think we're both feeling unheard, which is exhausting. Can we each share our side without interrupting? I'll go second.", hint: 'Proposes a structured reset' },
+      { text: "I've been thinking about our conversation and I want to understand your perspective. Could you tell me what [specific moment] was like for you?", hint: 'Opens the door without blame' },
+      { text: "I want to make space for your perspective rather than prove a point. What would you like me to understand right now?", hint: 'Invites clarification first' },
+      { text: "I feel unheard, and I want to explain my side carefully. Would you be willing to share your side without interruptions if I go second?", hint: 'Proposes a structured reset' },
     ],
     assertive: [
       { text: "I want to address this directly — not to escalate, but because going in circles isn't working. Can we talk about what happened?", hint: 'Direct but not aggressive' },
       { text: "Here's where I stand: I'm open to your perspective, but I need mine to be heard too. Can we have that honest conversation?", hint: 'Holds ground while staying open' },
-      { text: "I'd like to resolve this, but it takes both of us engaging. What would it take for us to move past this?", hint: 'Puts responsibility on both sides' },
+      { text: "I'd like to work toward resolving this. Are you open to talking about what would help us move forward?", hint: 'Invites shared participation' },
     ],
     deescalating: [
-      { text: "Let's both slow down. I don't want to fight — I care about this, which is why I'm still here. Can we talk?", hint: 'Drops defenses first' },
-      { text: "I'm going to stop defending myself for a second. I think we're both hurt and reacting to that. What if we focused on what we each need?", hint: 'Breaks the attack-defend cycle' },
-      { text: "This is getting heated and neither of us is listening anymore. Can we take a short pause and come back to this? I'm not walking away — I want this to go somewhere.", hint: 'Buys time without abandoning' },
+      { text: "I'd like to slow down. I don't want to fight — I care about this, which is why I'm still here. Would you be open to talking?", hint: 'Drops defenses first' },
+      { text: "I'm going to pause my own defensiveness for a moment. I am feeling hurt and want to focus on what I need. Would you be open to sharing what you need?", hint: 'Breaks the attack-defend cycle' },
+      { text: "I am finding this heated and I am having trouble listening well. Could we take a short pause and come back to this? I would like to continue later.", hint: 'Buys time without abandoning' },
     ],
     direct: [
-      { text: 'I need us to resolve this. What specifically needs to change for that to happen?', hint: 'Solution-focused and brief' },
-      { text: 'Can we skip the back-and-forth and just say what we mean? I need [your truth].', hint: 'Invites radical honesty' },
-      { text: "Here's what I need from this conversation: [specific outcome]. Can we agree on that?", hint: 'States the goal upfront' },
+      { text: 'I need clarity about how I can move forward. What specifically would you like to change?', hint: 'Solution-focused and brief' },
+      { text: 'Could you say what you mean directly? I need [your truth].', hint: 'Invites directness' },
+      { text: "Here's what I need from this conversation: [specific outcome]. Would you be willing to discuss that?", hint: 'States the goal upfront' },
     ],
     diplomatic: [
-      { text: "There are valid points on both sides. From my perspective, [your view]. I can also see where you're coming from. Is there middle ground we haven't tried?", hint: 'Validates both sides' },
-      { text: "I don't want to dismiss how you're feeling. I also need my perspective heard. What if we each acknowledged the other's side first?", hint: 'Creates mutual acknowledgment' },
-      { text: "We both have a point. Can we focus on what a good outcome looks like for both of us, instead of who's right?", hint: 'Shifts from blame to solution' },
+      { text: "From my perspective, [your view]. I would like to hear your perspective too. Is there an option we have not considered?", hint: 'Makes room for both perspectives' },
+      { text: "I want to hear your perspective, and I need my perspective heard too. Would you be open to each of us describing our view first?", hint: 'Invites mutual acknowledgment' },
+      { text: "I want to focus on a practical next step instead of who is right. What outcome would you be willing to discuss?", hint: 'Shifts from blame to a next step' },
     ],
   },
   boundary: {
@@ -54,19 +54,19 @@ const templates: TemplateMatrix = {
       { text: "I've let this slide before, but I can't anymore. [Boundary]. This is something I need from you.", hint: 'Acknowledges past tolerance' },
     ],
     deescalating: [
-      { text: "I'm not saying this to start a fight. I need you to know that [behavior] affects me, and I need us to address it.", hint: 'Defuses before stating' },
+      { text: "I'm not saying this to start a fight. I need you to know that [behavior] affects me, and I would like to discuss it.", hint: 'Defuses before stating' },
       { text: 'I want to stay calm about this because it matters. I need [boundary] — not as an ultimatum, just as something I genuinely need.', hint: 'Distinguishes need from threat' },
       { text: 'Can I share something without it becoming an argument? I need [boundary]. That is what I am asking for.', hint: 'Requests safe space first' },
     ],
     direct: [
       { text: '[Behavior] has to stop. Here is what I need instead: [specific request].', hint: 'Two sentences and maximum clarity' },
-      { text: 'I need [boundary]. That is the short version. Can we agree on that?', hint: 'Minimal and seeks agreement' },
+      { text: 'I need [boundary]. That is the short version. Can you respect that?', hint: 'Minimal and seeks agreement' },
       { text: 'Let me be direct: [boundary statement]. I need to know if you can respect that.', hint: 'Ends with a clear question' },
     ],
     diplomatic: [
-      { text: 'I think we both want this to work, and part of that means being honest. I need [boundary] to feel comfortable. Is that something you can commit to?', hint: 'Frames it as a shared goal' },
+      { text: 'I would like this relationship to work, and I need to be honest. I need [boundary] to feel comfortable. Is that something you can commit to?', hint: 'States a personal goal clearly' },
       { text: "I'm not trying to make this complicated — I have a need: [boundary]. I'd like to hear if that works for you.", hint: 'Invites dialogue around the need' },
-      { text: 'Would it be possible for us to agree on [boundary]? I think it would make things better between us.', hint: 'Proposes rather than demands' },
+      { text: 'Would you be willing to respect [boundary]? I hope that would improve how I experience this relationship.', hint: 'Proposes rather than demands' },
     ],
   },
   feelings: {
@@ -76,7 +76,7 @@ const templates: TemplateMatrix = {
       { text: "I don't want to make this bigger than it is, but I've been feeling [emotion] and it matters to me that you know.", hint: 'Minimizes defensiveness' },
     ],
     assertive: [
-      { text: 'I felt [emotion] when [situation], and that is real for me. I am sharing it because I want us to understand each other better.', hint: 'States a personal experience' },
+      { text: 'I felt [emotion] when [situation], and that is real for me. I am sharing it because I want to be understood more clearly.', hint: 'States a personal experience' },
       { text: "Here's my honest experience: [what you felt and why]. I'm not asking you to fix it — I need it acknowledged.", hint: 'Removes pressure while being clear' },
       { text: 'I felt [emotion] and I think it is worth naming. [What caused it]. That affected me.', hint: 'Simple and complete' },
     ],
@@ -91,7 +91,7 @@ const templates: TemplateMatrix = {
       { text: 'Short version: I felt [emotion], and [reason]. I needed to tell you that.', hint: 'Explicitly brief' },
     ],
     diplomatic: [
-      { text: 'I want to share my experience without making you feel accused. I felt [emotion] when [situation]. I think that is useful for both of us to know.', hint: 'Frames it as information rather than attack' },
+      { text: 'I want to share my experience without making an accusation. I felt [emotion] when [situation]. I hope that gives useful context.', hint: 'Frames it as information rather than attack' },
       { text: 'From my end, this has left me feeling [emotion]. I am curious if you realized that, or if this came from somewhere different for you.', hint: 'Opens mutual exploration' },
       { text: 'I had a feeling come up that I think is worth sharing: [emotion and context]. How did this land for you?', hint: 'Invites their perspective' },
     ],
@@ -125,7 +125,7 @@ const templates: TemplateMatrix = {
   },
   apologize: {
     empathetic: [
-      { text: 'I have been thinking about this and I want to apologize. I said [thing] and that was wrong of me. I am sorry for how that hurt you.', hint: 'Specific rather than generic' },
+      { text: 'I have been thinking about this and I want to apologize. I said [thing] and regret saying it. I am sorry for any impact it had.', hint: 'Specific rather than generic' },
       { text: "I'm sorry. I understand now that [impact]. I did not handle that well and I want to own that.", hint: 'Takes responsibility without defensiveness' },
       { text: 'I need to apologize for [specific behavior]. Looking back, I can see how that came across. I am sorry.', hint: 'Shows understanding of impact' },
     ],
@@ -135,7 +135,7 @@ const templates: TemplateMatrix = {
       { text: 'I was wrong about [thing]. I am sorry — no excuses.', hint: 'Absolute minimum and clear' },
     ],
     deescalating: [
-      { text: 'Can I say I am sorry? I do not want to keep going in circles. I know [behavior] hurt you and I regret it.', hint: 'Breaks the cycle first' },
+      { text: 'Can I say I am sorry? I do not want to keep going in circles. I regret [behavior] and would like to understand its impact.', hint: 'Breaks the cycle first' },
       { text: 'I want to step back from the argument and apologize. I am sorry for [behavior]. Let us start from there.', hint: 'Resets before continuing' },
       { text: "I've been in defensive mode and that has not been fair to you. I am sorry for [specific thing]. Can we reset?", hint: 'Names the pattern being broken' },
     ],
@@ -145,9 +145,9 @@ const templates: TemplateMatrix = {
       { text: 'I was wrong, I am sorry for [behavior], and I want to do better.', hint: 'Past, present, and future' },
     ],
     diplomatic: [
-      { text: 'I think we both have things to apologize for, and I want to start. I am sorry for [behavior] — that was not fair.', hint: 'Initiates without waiting' },
-      { text: 'I want to take responsibility for my part in this. I am sorry for [behavior]. I hope we can both acknowledge where things went wrong.', hint: 'Opens the door to mutual accountability' },
-      { text: 'I am sorry for [behavior]. I know that affected you and I did not want to cause that.', hint: 'Names the impact' },
+      { text: 'I want to start by taking responsibility for my part. I am sorry for [behavior] — that was not fair.', hint: 'Initiates without waiting' },
+      { text: 'I want to take responsibility for my part in this. I am sorry for [behavior]. If you are open to it, I would like to hear your view too.', hint: 'Opens the door to accountability' },
+      { text: 'I am sorry for [behavior]. I regret doing that and did not want to cause harm.', hint: 'Names personal responsibility' },
     ],
   },
   request: {
@@ -162,7 +162,7 @@ const templates: TemplateMatrix = {
       { text: 'I want to make one request: [desired change]. Is that reasonable?', hint: 'Minimizes scope of the ask' },
     ],
     deescalating: [
-      { text: 'Without making this a big thing, can I ask for [specific change]? I think it would help both of us.', hint: 'Low-stakes framing' },
+      { text: 'Without making this a big thing, can I ask for [specific change]? I think it would help me.', hint: 'Low-stakes framing' },
       { text: 'I have one ask that I think would help: [request]. What do you think?', hint: 'Invites collaboration' },
       { text: 'Can I make a small but important request? [Specific change]. Would that work for you?', hint: 'Acknowledges weight without drama' },
     ],
@@ -172,9 +172,9 @@ const templates: TemplateMatrix = {
       { text: 'Going forward, I need [change]. Yes or no?', hint: 'Invites a clear answer' },
     ],
     diplomatic: [
-      { text: 'I think it would help both of us if [desired change]. Does that feel fair to you?', hint: 'Mutual benefit framing' },
+      { text: 'I think [desired change] would help me. Does that feel fair to you?', hint: 'Explains a personal benefit' },
       { text: "I'd like to suggest a change that I think would make things better: [request]. What do you think?", hint: 'Proposal rather than ultimatum' },
-      { text: 'What if we tried [desired approach]? I think that could work well for both of us.', hint: 'Hypothetical reduces pressure' },
+      { text: 'What if we tried [desired approach]? I hope that could work for me; what do you think?', hint: 'Hypothetical reduces pressure' },
     ],
   },
 };
