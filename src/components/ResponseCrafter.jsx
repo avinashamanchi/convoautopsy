@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { craftResponse, GOAL_OPTIONS, TONE_OPTIONS, getPersonSenders } from '../utils/craftResponse'
+import { getAiConsent } from './AiConsentModal'
 
 export default function ResponseCrafter({ result, conversationText }) {
   const [step, setStep] = useState(1)
@@ -10,6 +11,7 @@ export default function ResponseCrafter({ result, conversationText }) {
   const [loading, setLoading] = useState(false)
   const [copied, setCopied] = useState(null)
   const [error, setError] = useState('')
+  const [responseSource, setResponseSource] = useState(null)
 
   const senders = getPersonSenders(result)
 
@@ -18,8 +20,15 @@ export default function ResponseCrafter({ result, conversationText }) {
     setError('')
     setStep(4)
     try {
-      const r = await craftResponse({ sender, goal, tone: selectedTone, result, conversationText })
-      setResponses(r)
+      const consent = getAiConsent()
+      const r = await craftResponse(
+        { sender, goal, tone: selectedTone, result, conversationText },
+        consent
+          ? { allowRemote: true, consentVersion: consent.version, installationToken: consent.installationToken }
+          : { allowRemote: false },
+      )
+      setResponses(r.drafts)
+      setResponseSource(r)
     } catch {
       setError('Failed to generate responses. Try again.')
     }
@@ -32,7 +41,7 @@ export default function ResponseCrafter({ result, conversationText }) {
     setTimeout(() => setCopied(null), 2200)
   }
 
-  const reset = () => { setStep(1); setSender(''); setGoal(''); setTone(''); setResponses(null); setError('') }
+  const reset = () => { setStep(1); setSender(''); setGoal(''); setTone(''); setResponses(null); setResponseSource(null); setError('') }
 
   const STEP_LABELS = ['Who', 'Goal', 'Tone', 'Responses']
 
@@ -41,7 +50,7 @@ export default function ResponseCrafter({ result, conversationText }) {
       <div className="rc-header">
         <div className="rc-title-row">
           <span className="rc-title">Craft Your Response</span>
-          <span className="rc-subtitle">Get AI-tailored ideas based on the analysis</span>
+          <span className="rc-subtitle">Get tailored ideas based on the analysis</span>
         </div>
         <div className="rc-progress">
           {STEP_LABELS.map((label, i) => (
@@ -114,7 +123,14 @@ export default function ResponseCrafter({ result, conversationText }) {
             {error && <div className="rc-error">{error}</div>}
             {!loading && responses && (
               <>
-                <div className="rc-question">3 options for {sender}</div>
+                <div className="rc-question">{responses.length} {responses.length === 1 ? 'option' : 'options'} for {sender}</div>
+                <div className={`rc-source rc-source-${responseSource?.source || 'local'}`}>
+                  {responseSource?.source === 'ai'
+                    ? 'AI-assisted draft'
+                    : responseSource?.fallbackReason === 'REMOTE_UNAVAILABLE'
+                      ? 'AI service unavailable—showing on-device drafts.'
+                      : 'On-device drafts'}
+                </div>
                 <div className="rc-responses-list">
                   {responses.map(r => (
                     <div key={r.id} className="rc-response-card">

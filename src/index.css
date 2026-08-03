@@ -672,3 +672,13 @@ body::before {
   pointer-events: none;
   z-index: 9999;
 }
+/* AI consent and source labels */
+.ai-consent-backdrop { align-items: center; background: rgba(8, 10, 16, .72); display: flex; inset: 0; justify-content: center; padding: 24px; position: fixed; z-index: 100; }
+.ai-consent-modal { background: #171b28; border: 1px solid #36405f; border-radius: 18px; color: #f5f7ff; max-width: 520px; padding: 28px; }
+.ai-consent-modal h2 { margin-top: 0; }
+.ai-consent-modal p { color: #c4cade; line-height: 1.55; }
+.ai-consent-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }
+.ai-consent-actions button { background: #6577ff; border: 0; border-radius: 8px; color: white; cursor: pointer; padding: 10px 14px; }
+.ai-consent-actions button:last-child { background: transparent; border: 1px solid #6577ff; }
+.dash-ai-source, .rc-source { color: #aeb8d8; font-size: 13px; margin-bottom: 12px; }
+.dash-ai-source-ai, .rc-source-ai { color: #8fdda3; }

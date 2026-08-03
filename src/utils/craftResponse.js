@@ -1,3 +1,5 @@
+import { parseConversation, redactKnownParticipantNames } from './analyzeConversation'
+
 const TEMPLATES = {
   resolve: {
     empathetic: [
@@ -196,47 +198,105 @@ export function getPersonPattern(result, sender) {
   return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([f]) => f).join(', ')
 }
 
-function localCraftResponse({ sender, goal, tone }) {
+function localCraftResponse({ goal, tone }) {
   const templates = TEMPLATES[goal]?.[tone] || TEMPLATES.resolve.empathetic
   return templates.map((t, i) => ({ id: i + 1, text: t.text, hint: t.hint }))
 }
 
-async function groqCraftResponse({ sender, goal, tone, result }) {
-  const key = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GROQ_API_KEY) ||
-              (typeof window !== 'undefined' && window.__GROQ_API_KEY)
-  if (!key) throw new Error('No key')
-  const pattern = getPersonPattern(result, sender)
-  const goalLabel = GOAL_OPTIONS.find(g => g.id === goal)?.label || goal
-  const toneLabel = TONE_OPTIONS.find(t => t.id === tone)?.label || tone
-  const prompt = `You are an expert relationship communication coach. Generate exactly 3 response options for ${sender} based on this analysis.
+const CONSENT_VERSION = '2026-08-02'
+const MAX_MESSAGES = 100
+const MAX_MESSAGE_LENGTH = 1000
+const CONFLICT_MODES = new Set(['Competing', 'Avoiding', 'Compromising', 'Collaborating', 'Accommodating', 'Competing vs Avoiding'])
+const PATTERNS = new Set(['Criticism', 'Contempt', 'Defensiveness', 'Stonewalling', 'Neutral'])
+const EGO_STATES = new Set(['Parent', 'Adult', 'Child'])
 
-ANALYSIS:
-- Tension score: ${result.overall_tension_score}/100
-- Conflict mode: ${result.conflict_mode}
-- ${sender}'s pattern: ${pattern}
-
-PARAMETERS:
-- Goal: ${goalLabel}
-- Tone: ${toneLabel}
-
-Each response: 2-4 natural, human-sounding sentences. Match the tone exactly. Be specific and actionable.
-
-Return ONLY this JSON:
-[{"id":1,"text":"...","hint":"one brief phrase describing this approach"},{"id":2,"text":"...","hint":"..."},{"id":3,"text":"...","hint":"..."}]`
-
-  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-    body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }], temperature: 0.75, max_tokens: 700 })
-  })
-  if (!res.ok) throw new Error('Groq error')
-  const data = await res.json()
-  const json = data.choices[0].message.content.match(/\[[\s\S]*\]/)?.[0]
-  if (json) return JSON.parse(json)
-  throw new Error('No JSON')
+function remoteOptionsReady(options) {
+  return options?.allowRemote === true
+    && options.consentVersion === CONSENT_VERSION
+    && typeof options.installationToken === 'string'
+    && /^[A-Za-z0-9_-]{16,256}$/.test(options.installationToken)
 }
 
-export async function craftResponse(params) {
-  try { return await groqCraftResponse(params) }
-  catch { return localCraftResponse(params) }
+function proxyUrl(path) {
+  const endpoint = import.meta.env?.VITE_AI_PROXY_URL
+  if (!endpoint) return null
+  try {
+    const url = new URL(endpoint)
+    if (!['https:', 'http:'].includes(url.protocol)) return null
+    return new URL(path, url).toString()
+  } catch {
+    return null
+  }
+}
+
+function toProxyAnalysis(result, conversationText = '') {
+  const names = [...new Set(parseConversation(conversationText).map(message => message.rawName))]
+  if (!result || !Array.isArray(result.messages) || result.messages.length === 0 || result.messages.length > MAX_MESSAGES) return null
+  const intensityScore = Number.isInteger(result.overall_tension_score) ? result.overall_tension_score : null
+  const mode = result.analysis_mode === 'local' ? 'local' : 'ai'
+  if (intensityScore === null || intensityScore < 0 || intensityScore > 100 || !CONFLICT_MODES.has(result.conflict_mode)) return null
+  const messages = result.messages.map(message => ({
+    sender: message.sender,
+    text: redactKnownParticipantNames(message.text, names),
+    pattern: message.gottman_flag,
+    egoState: message.ego_state,
+    possibleInterpretation: message.hidden_meaning,
+  }))
+  if (messages.some(message => !/^Person [A-Z]+$/.test(message.sender)
+    || typeof message.text !== 'string' || message.text.length === 0 || message.text.length > MAX_MESSAGE_LENGTH
+    || !PATTERNS.has(message.pattern) || !EGO_STATES.has(message.egoState)
+    || typeof message.possibleInterpretation !== 'string' || message.possibleInterpretation.length === 0 || message.possibleInterpretation.length > 300)) return null
+  return { schemaVersion: 1, mode, intensityScore, conflictMode: result.conflict_mode, messages }
+}
+
+function hasOnlyKeys(value, allowed) {
+  return Object.keys(value).every(key => allowed.includes(key))
+}
+
+function isResponseDraft(value) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    && hasOnlyKeys(value, ['id', 'text', 'hint'])
+    && typeof value.id === 'string' && value.id.length > 0 && value.id.length <= 100
+    && typeof value.text === 'string' && value.text.length > 0 && value.text.length <= 1000
+    && typeof value.hint === 'string' && value.hint.length > 0 && value.hint.length <= 200
+}
+
+function isSuccessEnvelope(value) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    && hasOnlyKeys(value, ['response', 'requestId'])
+    && isResponseDraft(value.response)
+    && typeof value.requestId === 'string' && value.requestId.length > 0 && value.requestId.length <= 200
+}
+
+function requestIdMatchesHeader(response, requestId) {
+  const header = response.headers.get('x-request-id')
+  return header === null || header === requestId
+}
+
+export async function craftResponse(params, options = {}) {
+  const fallback = (fallbackReason) => ({ drafts: localCraftResponse(params), source: 'local', fallbackReason })
+  if (!remoteOptionsReady(options)) return fallback('NOT_CONFIGURED')
+  const url = proxyUrl('/v1/responses')
+  const analysis = toProxyAnalysis(params.result, params.conversationText)
+  if (!url || !analysis || !/^Person [A-Z]+$/.test(params.sender)) return fallback('NOT_CONFIGURED')
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        schemaVersion: 1,
+        consentVersion: options.consentVersion,
+        installationToken: options.installationToken,
+        sender: params.sender,
+        goal: params.goal,
+        tone: params.tone,
+        analysis,
+      }),
+    })
+    const data = await response.json()
+    if (!response.ok || !isSuccessEnvelope(data) || !requestIdMatchesHeader(response, data.requestId)) throw new Error()
+    return { drafts: [data.response], source: 'ai', fallbackReason: null }
+  } catch {
+    return fallback('REMOTE_UNAVAILABLE')
+  }
 }

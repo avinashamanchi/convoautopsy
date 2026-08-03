@@ -8,6 +8,7 @@
     "build": "vite build",
     "build:app": "VITE_CAPACITOR=true vite build",
     "lint": "eslint .",
+    "test": "vitest run",
     "preview": "vite preview",
     "ios": "npm run build:app && npx cap sync ios && npx cap open ios",
     "sync": "npm run build:app && npx cap sync"
@@ -43,6 +44,7 @@
     "gh-pages": "^6.3.0",
     "globals": "^17.4.0",
     "typescript": "^6.0.2",
-    "vite": "^8.0.1"
+    "vite": "^8.0.1",
+    "vitest": "^4.0.18"
   }
 }

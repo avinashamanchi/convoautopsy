@@ -25,9 +25,9 @@ Live site → **[avinashamanchi.github.io/convoautopsy](https://avinashamanchi.g
 |---|---|
 | Frontend | React 19 + Vite 8 |
 | 3D / Animation | Three.js · React Three Fiber · GSAP ScrollTrigger |
-| AI Analysis | Groq API (llama-3.3-70b-versatile) with local regex fallback |
+| AI Analysis | ConvoAutopsy AI proxy (Groq server-side) with local regex fallback |
 | Frameworks | Gottman Method · Thomas-Kilmann · Transactional Analysis |
-| Auth / Storage | localStorage (no backend required) |
+| Auth / Storage | localStorage; optional AI proxy for consented assistance |
 | Receipt Export | html2canvas |
 | Mobile | Expo (React Native WebView) · Capacitor iOS |
 | Deployment | GitHub Pages via GitHub Actions |
@@ -37,8 +37,8 @@ Live site → **[avinashamanchi.github.io/convoautopsy](https://avinashamanchi.g
 ## Running Locally
 
 ### Prerequisites
-- Node.js 18+
-- A Groq API key (free at [console.groq.com](https://console.groq.com)) — the app works without one via local fallback
+- Node.js 22+
+- Optional `VITE_AI_PROXY_URL` pointing at the ConvoAutopsy AI proxy — the app works without it via on-device fallback
 
 ### 1. Clone and install
 
@@ -48,13 +48,13 @@ cd convoautopsy
 npm install
 ```
 
-### 2. Add your API key (optional but recommended)
+### 2. Configure the public proxy endpoint (optional)
 
 ```bash
-echo "VITE_GROQ_API_KEY=your_key_here" > .env
+echo "VITE_AI_PROXY_URL=https://your-proxy.example" > .env
 ```
 
-Without this the app uses a built-in local analysis engine — still fully functional.
+`VITE_AI_PROXY_URL` is a public endpoint configuration, not a secret. Provider credentials remain on the server. Without this the app uses its on-device analysis and response templates.
 
 ### 3. Start the dev server
 
@@ -125,15 +125,17 @@ npm run ios   # builds, syncs, and opens Xcode automatically
 #    - Distribute App → App Store Connect
 ```
 
-### GitHub Actions Secret
+### GitHub Pages proxy configuration
 
-For the deployed site to use real AI (not just the local fallback), add this secret to your GitHub repo:
+For the deployed site to use AI assistance, set a repository **variable** (not a secret):
 
-**Settings → Secrets → Actions → New repository secret**
+**Settings → Secrets and variables → Actions → Variables → New repository variable**
 ```
-Name:  VITE_GROQ_API_KEY
-Value: your_groq_api_key
+Name:  VITE_AI_PROXY_URL
+Value: https://your-proxy.example
 ```
+
+The browser never receives provider credentials. Before AI use, the site asks for consent and explains that anonymized message text is sent through the ConvoAutopsy server to Groq; on-device analysis remains available without sharing.
 
 ---
 
@@ -154,8 +156,8 @@ convoautopsy/
 │   │   ├── ResponseCrafter.jsx # 4-step response wizard
 │   │   └── Onboarding.jsx      # First-run walkthrough modal
 │   ├── utils/
-│   │   ├── analyzeConversation.js  # Groq API + local regex fallback
-│   │   ├── craftResponse.js        # Response generation (30 template sets)
+│   │   ├── analyzeConversation.js  # Proxy client + local regex fallback
+│   │   ├── craftResponse.js        # Proxy client + local response templates
 │   │   └── storage.js              # localStorage auth + conversation history
 │   └── index.css               # Global styles + all component styles
 ├── native/                     # Expo app (live phone preview)

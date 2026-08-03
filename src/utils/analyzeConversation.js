@@ -34,25 +34,42 @@ function classify(text) {
   return { gottman_flag, ego_state, hidden_meaning: HIDDEN[gottman_flag] }
 }
 
+function personLabel(index) {
+  let value = index
+  let label = ''
+  do {
+    label = String.fromCharCode(65 + (value % 26)) + label
+    value = Math.floor(value / 26) - 1
+  } while (value >= 0)
+  return `Person ${label}`
+}
+
 export function parseConversation(raw) {
   const lines = raw.split('\n').filter(l => l.trim())
   const map = {}
   const messages = []
   for (const line of lines) {
-    const m = line.match(/^([^:\-\n]{1,40})[\:\-]\s*(.+)$/)
+    const m = line.match(/^([^:\n-]{1,40})[:-]\s*(.+)$/)
     if (!m) continue
     const name = m[1].trim(), text = m[2].trim()
     if (!name || !text) continue
-    if (!map[name]) map[name] = Object.keys(map).length === 0 ? 'Person A' : 'Person B'
+    if (!map[name]) map[name] = personLabel(Object.keys(map).length)
     messages.push({ sender: map[name], rawName: name, text })
   }
   return messages
 }
 
-function localAnalyze(text) {
+export function redactKnownParticipantNames(text, names) {
+  return names.reduce((redacted, name) => {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    return redacted.replace(new RegExp(`(^|[^\\w])${escaped}(?=$|[^\\w])`, 'gi'), '$1[Person]')
+  }, text)
+}
+
+export function localAnalyze(text) {
   const messages = parseConversation(text)
   if (!messages.length) return null
-  const analyzed = messages.map(m => ({ ...m, ...classify(m.text) }))
+  const analyzed = messages.map(({ sender, text: messageText }) => ({ sender, text: messageText, ...classify(messageText) }))
   const total = analyzed.reduce((s, m) => s + WEIGHTS[m.gottman_flag], 0)
   const max = Math.max(analyzed.length * 30, 1)
   const overall_tension_score = Math.min(100, Math.round((total / max) * 140))
@@ -62,26 +79,104 @@ function localAnalyze(text) {
   return { messages: analyzed, overall_tension_score, conflict_mode }
 }
 
-export async function analyzeConversation(text) {
-  const key = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GROQ_API_KEY) ||
-              (typeof window !== 'undefined' && window.__GROQ_API_KEY)
-  if (!key) return localAnalyze(text)
+const CONSENT_VERSION = '2026-08-02'
+const MAX_MESSAGES = 100
+const MAX_MESSAGE_LENGTH = 1000
+const MODES = new Set(['local', 'ai'])
+const CONFLICT_MODES = new Set(['Competing', 'Avoiding', 'Compromising', 'Collaborating', 'Accommodating', 'Competing vs Avoiding'])
+const PATTERNS = new Set(['Criticism', 'Contempt', 'Defensiveness', 'Stonewalling', 'Neutral'])
+const EGO_STATES = new Set(['Parent', 'Adult', 'Child'])
+
+export function toLegacyResult(result) {
+  return {
+    overall_tension_score: result.intensityScore,
+    conflict_mode: result.conflictMode,
+    messages: result.messages.map(message => ({
+      sender: message.sender,
+      text: message.text,
+      gottman_flag: message.pattern,
+      ego_state: message.egoState,
+      hidden_meaning: message.possibleInterpretation,
+    })),
+    analysis_mode: result.mode,
+  }
+}
+
+function remoteOptionsReady(options) {
+  return options?.allowRemote === true
+    && options.consentVersion === CONSENT_VERSION
+    && typeof options.installationToken === 'string'
+    && /^[A-Za-z0-9_-]{16,256}$/.test(options.installationToken)
+}
+
+function proxyUrl(path) {
+  const endpoint = import.meta.env?.VITE_AI_PROXY_URL
+  if (!endpoint) return null
   try {
-    const parsed = parseConversation(text)
-    if (!parsed.length) return null
-    const prompt = `Analyze this conversation using Gottman's Four Horsemen, Thomas-Kilmann conflict modes, and Transactional Analysis. Return ONLY valid JSON:\n{"overall_tension_score":<0-100 integer>,"conflict_mode":"<Competing|Avoiding|Compromising|Collaborating|Accommodating|Competing vs Avoiding>","messages":[{"sender":"<Person A or Person B>","text":"<exact message text>","gottman_flag":"<Criticism|Contempt|Defensiveness|Stonewalling|Neutral>","ego_state":"<Parent|Adult|Child>","hidden_meaning":"<1 sentence what they really mean>"}]}\n\nConversation:\n${parsed.map(m => `${m.sender}: ${m.text}`).join('\n')}`
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-      body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }], temperature: 0.3, max_tokens: 2000 })
-    })
-    if (!res.ok) throw new Error()
-    const data = await res.json()
-    const json = data.choices[0].message.content.match(/\{[\s\S]*\}/)?.[0]
-    if (json) return JSON.parse(json)
-    throw new Error()
+    const url = new URL(endpoint)
+    if (!['https:', 'http:'].includes(url.protocol)) return null
+    return new URL(path, url).toString()
   } catch {
-    return localAnalyze(text)
+    return null
+  }
+}
+
+function anonymousMessages(text) {
+  const parsed = parseConversation(text)
+  if (!parsed.length || parsed.length > MAX_MESSAGES || parsed.some(message => message.text.length > MAX_MESSAGE_LENGTH)) return null
+  const names = [...new Set(parsed.map(message => message.rawName))]
+  return parsed.map(({ sender, text: messageText }) => ({ sender, text: redactKnownParticipantNames(messageText, names) }))
+}
+
+function isRequestId(value) {
+  return typeof value === 'string' && value.length > 0 && value.length <= 200
+}
+
+function hasOnlyKeys(value, allowed) {
+  return Object.keys(value).every(key => allowed.includes(key))
+}
+
+function isAnalysisResult(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !hasOnlyKeys(value, ['schemaVersion', 'mode', 'intensityScore', 'conflictMode', 'messages'])) return false
+  if (value.schemaVersion !== 1 || !MODES.has(value.mode) || !Number.isInteger(value.intensityScore) || value.intensityScore < 0 || value.intensityScore > 100 || !CONFLICT_MODES.has(value.conflictMode) || !Array.isArray(value.messages) || value.messages.length === 0 || value.messages.length > MAX_MESSAGES) return false
+  return value.messages.every(message => message && typeof message === 'object' && !Array.isArray(message)
+    && hasOnlyKeys(message, ['sender', 'text', 'pattern', 'egoState', 'possibleInterpretation'])
+    && /^Person [A-Z]+$/.test(message.sender)
+    && typeof message.text === 'string' && message.text.length > 0 && message.text.length <= MAX_MESSAGE_LENGTH
+    && PATTERNS.has(message.pattern)
+    && EGO_STATES.has(message.egoState)
+    && typeof message.possibleInterpretation === 'string' && message.possibleInterpretation.length > 0 && message.possibleInterpretation.length <= 300)
+}
+
+function isSuccessEnvelope(value) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    && hasOnlyKeys(value, ['analysis', 'requestId'])
+    && isRequestId(value.requestId)
+    && isAnalysisResult(value.analysis)
+}
+
+function requestIdMatchesHeader(response, requestId) {
+  const header = response.headers.get('x-request-id')
+  return header === null || header === requestId
+}
+
+export async function analyzeConversation(text, options = {}) {
+  const fallback = (fallbackReason) => ({ result: localAnalyze(text), source: 'local', fallbackReason })
+  if (!remoteOptionsReady(options)) return fallback('NOT_CONFIGURED')
+  const url = proxyUrl('/v1/analyses')
+  const messages = anonymousMessages(text)
+  if (!url || !messages) return fallback('NOT_CONFIGURED')
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ schemaVersion: 1, consentVersion: options.consentVersion, installationToken: options.installationToken, messages }),
+    })
+    const data = await res.json()
+    if (!res.ok || !isSuccessEnvelope(data) || !requestIdMatchesHeader(res, data.requestId) || data.analysis.mode !== 'ai') throw new Error()
+    return { result: toLegacyResult(data.analysis), source: 'ai', fallbackReason: null }
+  } catch {
+    return fallback('REMOTE_UNAVAILABLE')
   }
 }
 

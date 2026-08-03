@@ -7,6 +7,7 @@ import { analyzeConversation, DEMO_TEXT, DEMO_RESULT } from '../utils/analyzeCon
 import AnalysisResult from '../components/AnalysisResult'
 import Onboarding from '../components/Onboarding'
 import ResponseCrafter from '../components/ResponseCrafter'
+import AiConsentModal, { getAiConsent, grantAiConsent } from '../components/AiConsentModal'
 
 function formatDate(ts) {
   const d = new Date(ts)
@@ -21,11 +22,11 @@ function formatDate(ts) {
 
 function generateTitle(text) {
   const firstMsg = text.split('\n').find(l => {
-    const m = l.match(/^[^:\-\n]{1,40}[\:\-]\s*(.+)$/)
+    const m = l.match(/^[^:\n-]{1,40}[:-]\s*(.+)$/)
     return m && m[1].trim().length > 0
   })
   if (!firstMsg) return 'Untitled Analysis'
-  const m = firstMsg.match(/^[^:\-\n]{1,40}[\:\-]\s*(.+)$/)
+  const m = firstMsg.match(/^[^:\n-]{1,40}[:-]\s*(.+)$/)
   const txt = m ? m[1].trim() : firstMsg.trim()
   return txt.length > 36 ? txt.slice(0, 36) + '…' : txt
 }
@@ -40,6 +41,8 @@ export default function Dashboard({ user, onLogout }) {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [deleteConfirm, setDeleteConfirm] = useState(null)
   const [dragOver, setDragOver] = useState(false)
+  const [showAiConsent, setShowAiConsent] = useState(false)
+  const [pendingText, setPendingText] = useState('')
   const fileInputRef = useRef(null)
 
   useEffect(() => {
@@ -47,38 +50,72 @@ export default function Dashboard({ user, onLogout }) {
     if (!hasOnboarded(user.username)) setShowOnboarding(true)
   }, [user.username])
 
+  const saveAnalysis = (txt, result, source, fallbackReason, title = generateTitle(txt)) => {
+    const convo = {
+      id: Date.now(),
+      timestamp: Date.now(),
+      text: txt,
+      result,
+      title,
+      source,
+      fallbackReason,
+      analysis_mode: result.analysis_mode,
+    }
+    saveConversation(user.username, convo)
+    setConversations(getConversations(user.username))
+    setActiveConvo(convo)
+    setInputText('')
+  }
+
+  const runAnalysis = async (txt, options) => {
+    setAnalyzing(true)
+    try {
+      const { result, source, fallbackReason } = await analyzeConversation(txt, options)
+      if (!result || !result.messages?.length) {
+        setError("Couldn't parse the conversation. Use format: Name: Message")
+        return
+      }
+      saveAnalysis(txt, result, source, fallbackReason)
+    } catch {
+      setError('Analysis failed. Please try again.')
+    } finally {
+      setAnalyzing(false)
+    }
+  }
+
   const handleAnalyze = async (text = inputText, preResult = null) => {
     const txt = text.trim()
     if (!txt) { setError('Paste a conversation first'); return }
     setError('')
 
     if (preResult) {
-      // Demo mode: instant result
-      const convo = { id: Date.now(), timestamp: Date.now(), text: txt, result: preResult, title: 'Demo Analysis' }
-      saveConversation(user.username, convo)
-      setConversations(getConversations(user.username))
-      setActiveConvo(convo)
-      setInputText('')
+      saveAnalysis(txt, { ...preResult, analysis_mode: 'local' }, 'local', 'NOT_CONFIGURED', 'Demo Analysis')
       return
     }
-
-    setAnalyzing(true)
-    try {
-      const result = await analyzeConversation(txt)
-      if (!result || !result.messages?.length) {
-        setError("Couldn't parse the conversation. Use format: Name: Message")
-        setAnalyzing(false)
-        return
-      }
-      const convo = { id: Date.now(), timestamp: Date.now(), text: txt, result, title: generateTitle(txt) }
-      saveConversation(user.username, convo)
-      setConversations(getConversations(user.username))
-      setActiveConvo(convo)
-      setInputText('')
-    } catch {
-      setError('Analysis failed. Please try again.')
+    const consent = getAiConsent()
+    if (!consent) {
+      setPendingText(txt)
+      setShowAiConsent(true)
+      return
     }
-    setAnalyzing(false)
+    await runAnalysis(txt, { allowRemote: true, consentVersion: consent.version, installationToken: consent.installationToken })
+  }
+
+  const handleConsent = async () => {
+    const consent = grantAiConsent()
+    setShowAiConsent(false)
+    const txt = pendingText
+    setPendingText('')
+    await runAnalysis(txt, consent
+      ? { allowRemote: true, consentVersion: consent.version, installationToken: consent.installationToken }
+      : { allowRemote: false })
+  }
+
+  const handleDecline = async () => {
+    setShowAiConsent(false)
+    const txt = pendingText
+    setPendingText('')
+    await runAnalysis(txt, { allowRemote: false })
   }
 
   const handleDelete = (id) => {
@@ -118,6 +155,9 @@ export default function Dashboard({ user, onLogout }) {
     <div className="dash-root">
       {showOnboarding && (
         <Onboarding username={user.username} onDone={() => setShowOnboarding(false)} />
+      )}
+      {showAiConsent && (
+        <AiConsentModal onAgree={handleConsent} onDecline={handleDecline} isRunning={analyzing} />
       )}
 
       {/* ── Top nav ── */}
@@ -185,6 +225,11 @@ export default function Dashboard({ user, onLogout }) {
         <main className="dash-main">
           {activeConvo ? (
             <div className="dash-result-view">
+              <div className={`dash-ai-source dash-ai-source-${activeConvo.source || 'local'}`}>
+                {activeConvo.source === 'ai'
+                  ? 'AI-assisted analysis'
+                  : 'AI service unavailable—showing the on-device estimate.'}
+              </div>
               <AnalysisResult
                 result={activeConvo.result}
                 timestamp={activeConvo.timestamp}
