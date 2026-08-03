@@ -7,7 +7,7 @@ describe('deleteAllAppData', () => {
     const outcome = await deleteAllAppData({
       repository: { deleteAll: async () => { calls.push('reports'); } },
       preferences: { deleteAll: async () => { calls.push('preferences'); } },
-      consent: { clearRemoteAnalysisData: async () => { calls.push('secureStore'); } },
+      secureStore: { clearInstallationToken: async () => { calls.push('secureStore'); } },
       cache: { deleteAllConvoAutopsyArtifacts: async () => { calls.push('cache'); } },
       session: { reset: () => { calls.push('session'); } },
     });
@@ -22,12 +22,24 @@ describe('deleteAllAppData', () => {
     const outcome = await deleteAllAppData({
       repository: { deleteAll: async () => { calls.push('reports'); throw new Error('locked'); } },
       preferences: { deleteAll: async () => { calls.push('preferences'); } },
-      consent: { clearRemoteAnalysisData: async () => { calls.push('secureStore'); throw new Error('unavailable'); } },
+      secureStore: { clearInstallationToken: async () => { calls.push('secureStore'); throw new Error('unavailable'); } },
       cache: { deleteAllConvoAutopsyArtifacts: async () => { calls.push('cache'); throw new Error('read-only'); } },
       session: { reset: () => { calls.push('session'); } },
     });
 
     expect(outcome).toEqual({ ok: false, failed: ['reports', 'secureStore', 'cache'] });
     expect(calls).toEqual(['reports', 'preferences', 'secureStore', 'cache', 'session']);
+  });
+
+  it('labels a preference failure independently while still attempting token deletion', async () => {
+    const calls: string[] = [];
+    const outcome = await deleteAllAppData({
+      repository: { deleteAll: async () => {} },
+      preferences: { deleteAll: async () => { calls.push('preferences'); throw new Error('locked'); } },
+      secureStore: { clearInstallationToken: async () => { calls.push('secureStore'); } },
+      cache: { deleteAllConvoAutopsyArtifacts: async () => {} }, session: { reset: () => {} },
+    });
+    expect(outcome).toEqual({ ok: false, failed: ['preferences'] });
+    expect(calls).toEqual(['preferences', 'secureStore']);
   });
 });

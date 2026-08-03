@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import type { ResponseDraft } from '../domain/analysis';
 import type { DraftShareOutcome } from '../services/exportReport';
 import { tokens } from '../theme/tokens';
@@ -12,6 +12,7 @@ type ResponseDraftCardProps = {
 };
 
 export function ResponseDraftCard({ draft, onCopy, onShare }: ResponseDraftCardProps) {
+  const { fontScale } = useWindowDimensions();
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState<'copy' | 'share' | null>(null);
 
@@ -38,7 +39,7 @@ export function ResponseDraftCard({ draft, onCopy, onShare }: ResponseDraftCardP
       <Text selectable style={styles.text}>{draft.text}</Text>
       <Text style={styles.hint}>{draft.hint}</Text>
       {message ? <Text accessibilityRole={message.startsWith('Could not') ? 'alert' : undefined} style={styles.message}>{message}</Text> : null}
-      <View style={styles.actions}>
+      <View style={[styles.actions, fontScale >= 2 && styles.stackedActions]}>
         <PrimaryButton label="Copy draft" disabled={busy !== null} onPress={() => { void runAction('copy'); }} />
         <PrimaryButton label="Share draft" disabled={busy !== null} onPress={() => { void runAction('share'); }} />
       </View>
@@ -52,5 +53,5 @@ const styles = StyleSheet.create({
   text: { color: tokens.colors.textPrimary, fontSize: 16, lineHeight: 24 },
   hint: { color: tokens.colors.textSecondary, fontSize: 14, lineHeight: 20 },
   message: { color: tokens.colors.textSecondary, fontSize: 14, lineHeight: 20 },
-  actions: { flexDirection: 'row', gap: tokens.spacing.sm },
+  actions: { flexDirection: 'row', gap: tokens.spacing.sm }, stackedActions: { alignItems: 'stretch', flexDirection: 'column' },
 });

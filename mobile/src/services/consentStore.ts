@@ -26,6 +26,7 @@ export type ConsentStore = {
   getConsent(): Promise<ConsentRecord | null>;
   grantConsent(): Promise<ConsentRecord>;
   revokeConsent(): Promise<void>;
+  clearInstallationToken(): Promise<void>;
   getInstallationToken(): Promise<string>;
   clearRemoteAnalysisData(): Promise<void>;
 };
@@ -71,7 +72,15 @@ export function createConsentStore({
       return record;
     },
     async revokeConsent() {
-      await preferences.delete(CONSENT_KEY);
+      const results = await Promise.allSettled([
+        preferences.delete(CONSENT_KEY),
+        secureStore.deleteItemAsync(INSTALLATION_TOKEN_KEY),
+      ]);
+      if (results.some((result) => result.status === 'rejected')) throw new SecureStorageUnavailableError();
+    },
+    async clearInstallationToken() {
+      try { await secureStore.deleteItemAsync(INSTALLATION_TOKEN_KEY); }
+      catch { throw new SecureStorageUnavailableError(); }
     },
     async getInstallationToken() {
       try {
@@ -85,12 +94,7 @@ export function createConsentStore({
       }
     },
     async clearRemoteAnalysisData() {
-      await preferences.delete(CONSENT_KEY);
-      try {
-        await secureStore.deleteItemAsync(INSTALLATION_TOKEN_KEY);
-      } catch {
-        throw new SecureStorageUnavailableError();
-      }
+      await this.revokeConsent();
     },
   };
 }

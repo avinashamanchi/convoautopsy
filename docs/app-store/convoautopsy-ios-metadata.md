@@ -19,6 +19,7 @@ Suggested full description: Reflect on difficult conversations with on-device pa
 - Declare a pseudonymous Device ID for App Functionality and Fraud Prevention (the local installation token used by proxy rate limiting).
 - Mark both declarations as not used for tracking.
 - Do not claim data is linked to the user’s identity.
+- Rate limiting HMAC-derives a per-route pseudonymous digest from the local token and network signal; its Durable Object retains only an integer count/window for 60 seconds and cannot be claimed deleted from Cloudflare or Groq by local deletion.
 
 ## Age rating
 

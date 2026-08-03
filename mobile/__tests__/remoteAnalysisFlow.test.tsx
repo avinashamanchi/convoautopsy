@@ -46,7 +46,7 @@ beforeEach(() => {
     grantConsent,
     revokeConsent: jest.fn(),
     getInstallationToken: jest.fn(),
-    clearRemoteAnalysisData: jest.fn(),
+    clearRemoteAnalysisData: jest.fn(), clearInstallationToken: jest.fn(),
   });
 });
 

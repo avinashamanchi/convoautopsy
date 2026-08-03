@@ -55,7 +55,7 @@ beforeEach(() => {
     grantConsent: jest.fn().mockResolvedValue({ version: '2026-08-02', grantedAt: '2026-08-02T00:00:00.000Z', provider: 'Groq' }),
     revokeConsent: jest.fn(),
     getInstallationToken: jest.fn(),
-    clearRemoteAnalysisData: jest.fn(),
+    clearRemoteAnalysisData: jest.fn(), clearInstallationToken: jest.fn(),
   });
 });
 

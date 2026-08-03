@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { PrimaryButton } from './PrimaryButton';
 import { tokens } from '../theme/tokens';
 
@@ -21,6 +21,7 @@ export function ConversationEditor({
   onImportFile,
   onImportScreenshot,
 }: ConversationEditorProps) {
+  const { fontScale } = useWindowDimensions();
   return (
     <View style={styles.container}>
       <Text style={styles.label}>Conversation</Text>
@@ -43,7 +44,7 @@ export function ConversationEditor({
         label="Review conversation"
         onPress={onReview}
       />
-      <View style={styles.imports}>
+      <View style={[styles.imports, fontScale >= 2 && styles.stackedActions]}>
         <Pressable accessibilityLabel="Import conversation file" accessibilityRole="button" disabled={disabled} onPress={onImportFile} style={styles.importButton}>
           <Text style={styles.importText}>Import file</Text>
         </Pressable>
@@ -71,7 +72,7 @@ const styles = StyleSheet.create({
   },
   count: { color: tokens.colors.textSecondary, fontSize: 13, textAlign: 'right' },
   error: { color: tokens.colors.error, fontSize: 14, lineHeight: 20 },
-  imports: { flexDirection: 'row', gap: tokens.spacing.sm, justifyContent: 'center' },
-  importButton: { minHeight: tokens.minTouchTarget, justifyContent: 'center', paddingHorizontal: tokens.spacing.sm },
+  imports: { flexDirection: 'row', gap: tokens.spacing.sm, justifyContent: 'center' }, stackedActions: { alignItems: 'stretch', flexDirection: 'column' },
+  importButton: { flexShrink: 1, minHeight: tokens.minTouchTarget, justifyContent: 'center', paddingHorizontal: tokens.spacing.sm },
   importText: { color: tokens.colors.textSecondary, fontSize: 14, textDecorationLine: 'underline' },
 });

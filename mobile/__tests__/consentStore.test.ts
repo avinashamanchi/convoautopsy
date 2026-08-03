@@ -53,6 +53,21 @@ it('removes consent when it is revoked', async () => {
   await store.revokeConsent();
 
   await expect(store.getConsent()).resolves.toBeNull();
+  expect(secureStore.deleteItemAsync).toHaveBeenCalledWith('convoautopsy.installation-token.v1');
+});
+
+it('attempts token deletion when consent preference deletion fails and a later remote use gets a new token', async () => {
+  const preferences = createPreferences();
+  preferences.delete = async () => { throw new Error('locked'); };
+  let token: string | null = 'old-token';
+  secureStore.getItemAsync.mockImplementation(async () => token);
+  secureStore.deleteItemAsync.mockImplementation(async () => { token = null; });
+  secureStore.setItemAsync.mockImplementation(async (_key, value) => { token = value; });
+  const store = createConsentStore({ preferences, createToken: () => 'new-token' });
+
+  await expect(store.revokeConsent()).rejects.toEqual(new SecureStorageUnavailableError());
+  expect(secureStore.deleteItemAsync).toHaveBeenCalled();
+  expect(await store.getInstallationToken()).toBe('new-token');
 });
 
 it('uses the same secure installation token on later requests', async () => {

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState, useEffect } from 'react';
 import { router } from 'expo-router';
 import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { PrimaryButton } from '../../src/components/PrimaryButton';
@@ -18,17 +18,23 @@ export default function SettingsScreen() {
   const [phrase, setPhrase] = useState('');
   const [deleteStatus, setDeleteStatus] = useState<DeleteStatus>('idle');
   const [consentStatus, setConsentStatus] = useState<'idle' | 'revoked' | 'failed'>('idle');
+  const deletingRef = useRef(false);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   const deleteData = async () => {
+    if (deletingRef.current) return;
+    deletingRef.current = true;
     setDeleteStatus('deleting');
     const outcome = await deleteAllAppData({
       repository,
       preferences,
-      consent,
+      secureStore: consent,
       cache: nativeCacheArtifactStore,
       session,
     });
-    setDeleteStatus(outcome.ok ? 'success' : { failed: outcome });
+    deletingRef.current = false;
+    if (mountedRef.current) setDeleteStatus(outcome.ok ? 'success' : { failed: outcome });
   };
 
   const revokeConsent = async () => {

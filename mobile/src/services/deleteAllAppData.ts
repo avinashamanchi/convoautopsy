@@ -15,7 +15,7 @@ export type CacheArtifactStore = {
 export type DeleteAllAppDataDependencies = {
   repository: Pick<ReportRepository, 'deleteAll'>;
   preferences: Pick<PreferenceStore, 'deleteAll'>;
-  consent: Pick<ConsentStore, 'clearRemoteAnalysisData'>;
+  secureStore: Pick<ConsentStore, 'clearInstallationToken'>;
   cache: CacheArtifactStore;
   session: { reset(): void };
 };
@@ -33,11 +33,11 @@ export const nativeCacheArtifactStore: CacheArtifactStore = {
   },
 };
 
-export async function deleteAllAppData({ repository, preferences, consent, cache, session }: DeleteAllAppDataDependencies): Promise<DeleteAllOutcome> {
+export async function deleteAllAppData({ repository, preferences, secureStore, cache, session }: DeleteAllAppDataDependencies): Promise<DeleteAllOutcome> {
   const operations: [Exclude<DeleteSubsystem, 'session'>, () => Promise<void>][] = [
     ['reports', () => repository.deleteAll()],
     ['preferences', () => preferences.deleteAll()],
-    ['secureStore', () => consent.clearRemoteAnalysisData()],
+    ['secureStore', () => secureStore.clearInstallationToken()],
     ['cache', () => cache.deleteAllConvoAutopsyArtifacts()],
   ];
   const settled = await Promise.allSettled(operations.map(([, operation]) => operation()));

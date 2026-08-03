@@ -23,7 +23,7 @@ const config: ExpoConfig = {
       NSPhotoLibraryUsageDescription: 'Choose a conversation screenshot for private on-device text extraction.'
     }
   },
-  plugins: ['expo-router', 'expo-sqlite', 'expo-secure-store', 'expo-document-picker', 'expo-image-picker'],
+  plugins: ['expo-router', 'expo-sqlite', ['expo-secure-store', { faceIDPermission: false }], 'expo-document-picker', ['expo-image-picker', { cameraPermission: false, microphonePermission: false }]],
   experiments: { typedRoutes: true },
   extra: {
     privacyPolicyUrl: 'https://avinashamanchi.github.io/convoautopsy/privacy.html',
