@@ -1,4 +1,4 @@
-import { AccessibilityInfo, Modal, PixelRatio } from 'react-native';
+import { AccessibilityInfo, Modal } from 'react-native';
 import { act, render, screen, waitFor } from '@testing-library/react-native';
 import { renderRouter } from 'expo-router/testing-library';
 import { ConversationEditor } from '../src/components/ConversationEditor';
@@ -62,14 +62,23 @@ it('gives the destructive cancel action a specific name', async () => {
   await act(async () => { await Promise.resolve(); });
 });
 
-it('keeps critical result content available at a 200 percent font scale', () => {
-  const scale = jest.spyOn(PixelRatio, 'getFontScale').mockReturnValue(2);
+it('stacks action groups at a 200 percent font scale without clipping critical content', () => {
+  const dimensions = jest.spyOn(require('react-native'), 'useWindowDimensions').mockReturnValue({ fontScale: 2, height: 800, scale: 2, width: 390 });
+  render(<ConversationEditor disabled={false} error={null} onChange={() => {}} onImportFile={() => {}} onImportScreenshot={() => {}} onReview={() => {}} value="Alex: Hi" />);
+  expect(screen.getByTestId('editor-import-actions').props.style).toEqual(expect.arrayContaining([expect.objectContaining({ flexDirection: 'column' })]));
+  expect(screen.getByRole('button', { name: 'Import conversation file' }).props.style).toEqual(expect.objectContaining({ minHeight: 48 }));
+  screen.unmount();
+  render(<ResponseDraftCard draft={{ id: 'boundary', text: 'I need a pause.', hint: 'Sets a boundary' }} onCopy={async () => {}} onShare={async () => ({ ok: true })} />);
+  expect(screen.getByTestId('draft-actions').props.style).toEqual(expect.arrayContaining([expect.objectContaining({ flexDirection: 'column' })]));
+  expect(screen.getByRole('button', { name: 'Copy draft' })).toBeOnTheScreen();
+  screen.unmount();
   render(<ResultSummary result={result} />);
 
   expect(screen.getByText('Intensity score (estimate): 42/100')).toBeOnTheScreen();
   expect(screen.getByText('Pattern: Neutral')).toBeOnTheScreen();
   expect(screen.getByText('This educational estimate is not a factual conclusion about people or relationships.')).toBeOnTheScreen();
-  scale.mockRestore();
+  expect(screen.getByLabelText('Pattern for Person A: Neutral').props.style).not.toEqual(expect.objectContaining({ height: expect.any(Number), overflow: 'hidden' }));
+  dimensions.mockRestore();
 });
 
 it('removes the nonessential delete-sheet transition when Reduce Motion is enabled', async () => {

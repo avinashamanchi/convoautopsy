@@ -44,7 +44,7 @@ export function ConversationEditor({
         label="Review conversation"
         onPress={onReview}
       />
-      <View style={[styles.imports, fontScale >= 2 && styles.stackedActions]}>
+      <View testID="editor-import-actions" style={[styles.imports, fontScale >= 2 && styles.stackedActions]}>
         <Pressable accessibilityLabel="Import conversation file" accessibilityRole="button" disabled={disabled} onPress={onImportFile} style={styles.importButton}>
           <Text style={styles.importText}>Import file</Text>
         </Pressable>

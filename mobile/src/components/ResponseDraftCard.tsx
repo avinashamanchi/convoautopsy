@@ -39,7 +39,7 @@ export function ResponseDraftCard({ draft, onCopy, onShare }: ResponseDraftCardP
       <Text selectable style={styles.text}>{draft.text}</Text>
       <Text style={styles.hint}>{draft.hint}</Text>
       {message ? <Text accessibilityRole={message.startsWith('Could not') ? 'alert' : undefined} style={styles.message}>{message}</Text> : null}
-      <View style={[styles.actions, fontScale >= 2 && styles.stackedActions]}>
+      <View testID="draft-actions" style={[styles.actions, fontScale >= 2 && styles.stackedActions]}>
         <PrimaryButton label="Copy draft" disabled={busy !== null} onPress={() => { void runAction('copy'); }} />
         <PrimaryButton label="Share draft" disabled={busy !== null} onPress={() => { void runAction('share'); }} />
       </View>
