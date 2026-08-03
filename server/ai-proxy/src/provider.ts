@@ -67,7 +67,12 @@ async function requestCompletion(
       signal: controller.signal,
     });
     if (!response.ok) throw new ProviderUnavailableError();
-    const result = await response.json() as { choices?: Array<{ message?: { content?: unknown } }> };
+    let result: { choices?: Array<{ message?: { content?: unknown } }> };
+    try {
+      result = await response.json() as { choices?: Array<{ message?: { content?: unknown } }> };
+    } catch {
+      throw new ProviderInvalidResponseError();
+    }
     const content = result.choices?.[0]?.message?.content;
     if (typeof content !== 'string') throw new ProviderInvalidResponseError();
     try {

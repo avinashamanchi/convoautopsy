@@ -142,6 +142,20 @@ describe('AI proxy routes', () => {
     expect(allowed.headers.get('vary')).toBe('Origin');
   });
 
+  it('only grants successful CORS preflight to known routes', async () => {
+    const known = await app().fetch(new Request('https://proxy.example/v1/analyses', {
+      method: 'OPTIONS', headers: { Origin: 'https://avinashamanchi.github.io' },
+    }), env as unknown as Env);
+    const unknown = await app().fetch(new Request('https://proxy.example/v1/nope', {
+      method: 'OPTIONS', headers: { Origin: 'https://avinashamanchi.github.io' },
+    }), env as unknown as Env);
+
+    expect(known.status).toBe(204);
+    expect(known.headers.get('access-control-allow-origin')).toBe('https://avinashamanchi.github.io');
+    expect(unknown.status).toBe(404);
+    expect(unknown.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
   it('returns a response draft from POST /v1/responses', async () => {
     const input: CraftResponseRequest = {
       schemaVersion: 1,

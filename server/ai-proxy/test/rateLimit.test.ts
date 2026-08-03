@@ -1,28 +1,33 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import { checkRateLimit, deriveRateLimitKey } from '../src/rateLimit';
+import { checkRateLimit, deriveRateLimitKey, evaluateWindow } from '../src/rateLimit';
 
 describe('rate limits', () => {
-  it('stores only an HMAC digest and blocks the eleventh analysis request for 60 seconds', async () => {
+  it('uses one Durable Object per HMAC digest and atomically allows exactly ten concurrent analyses', async () => {
     const token = 'installation-token-which-is-long-enough';
-    const key = await deriveRateLimitKey(token, '203.0.113.10', 'test-hmac-key');
+    const digest = await deriveRateLimitKey(token, '203.0.113.10', 'test-hmac-key', '/v1/analyses');
 
-    expect(key).toMatch(/^[a-f0-9]{64}$/);
-    expect(key).not.toContain(token);
-    expect(key).not.toContain('203.0.113.10');
-    for (let index = 0; index < 10; index += 1) {
-      await expect(checkRateLimit(env.RATE_LIMITS, key, 10)).resolves.toMatchObject({ allowed: true });
-    }
-    await expect(checkRateLimit(env.RATE_LIMITS, key, 10)).resolves.toEqual({ allowed: false, retryAfterSeconds: 60 });
-    expect(await env.RATE_LIMITS.get(key)).toBe('11');
+    expect(digest).toMatch(/^[a-f0-9]{64}$/);
+    expect(digest).not.toContain(token);
+    expect(digest).not.toContain('203.0.113.10');
+    const results = await Promise.all(Array.from({ length: 40 }, () => checkRateLimit(env.RATE_LIMITER, digest, '/v1/analyses')));
+
+    expect(results.filter((result) => result.allowed)).toHaveLength(10);
+    expect(results.filter((result) => !result.allowed)).toHaveLength(30);
+    expect(results.filter((result) => !result.allowed).every((result) => !result.allowed && result.retryAfterSeconds >= 1 && result.retryAfterSeconds <= 60)).toBe(true);
   });
 
-  it('uses the independent 20 request response-route limit', async () => {
-    const key = await deriveRateLimitKey('other-installation-token-long-enough', '203.0.113.11', 'test-hmac-key');
+  it('keeps response route objects independent and atomically allows exactly twenty concurrent drafts', async () => {
+    const digest = await deriveRateLimitKey('other-installation-token-long-enough', '203.0.113.11', 'test-hmac-key', '/v1/responses');
+    const results = await Promise.all(Array.from({ length: 50 }, () => checkRateLimit(env.RATE_LIMITER, digest, '/v1/responses')));
 
-    for (let index = 0; index < 20; index += 1) await checkRateLimit(env.RATE_LIMITS, key, 20);
+    expect(results.filter((result) => result.allowed)).toHaveLength(20);
+    expect(results.filter((result) => !result.allowed)).toHaveLength(30);
+  });
 
-    await expect(checkRateLimit(env.RATE_LIMITS, key, 20)).resolves.toEqual({ allowed: false, retryAfterSeconds: 60 });
+  it('resets an expired fixed window deterministically', () => {
+    expect(evaluateWindow({ windowStart: 1_000, count: 10 }, 61_000, 10)).toEqual({ windowStart: 61_000, count: 1, allowed: true, retryAfterSeconds: 0 });
+    expect(evaluateWindow({ windowStart: 61_000, count: 10 }, 61_500, 10)).toEqual({ windowStart: 61_000, count: 11, allowed: false, retryAfterSeconds: 60 });
   });
 });

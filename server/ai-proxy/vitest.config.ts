@@ -8,7 +8,7 @@ export default defineWorkersConfig({
         main: './src/index.ts',
         miniflare: {
           compatibilityDate: '2026-08-02',
-          kvNamespaces: ['RATE_LIMITS'],
+          durableObjects: { RATE_LIMITER: { className: 'RateLimitDurableObject', useSQLite: true } },
         },
       },
     },

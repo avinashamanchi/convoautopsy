@@ -12,9 +12,10 @@ import { createGroqProvider, type AiProvider } from './provider';
 import { checkRateLimit, deriveRateLimitKey } from './rateLimit';
 
 export type { AiProvider } from './provider';
+export { RateLimitDurableObject } from './rateLimit';
 
 export interface Env {
-  RATE_LIMITS: KVNamespace;
+  RATE_LIMITER: DurableObjectNamespace;
   GROQ_API_KEY: string;
   RATE_LIMIT_HMAC_SECRET: string;
 }
@@ -49,7 +50,7 @@ export function createApp(options: AppOptions = {}) {
         const publicError = asPublicError(error);
         status = publicError.status;
         code = publicError.code;
-        return errorResponse(publicError, requestId, request.headers.get('origin'));
+        return errorResponse(publicError, requestId, route === 'unknown' ? null : request.headers.get('origin'));
       } finally {
         const record: SafeLog = { requestId, route, status, latencyBucket: bucket(Date.now() - started) };
         if (code) record.code = code;
@@ -61,9 +62,9 @@ export function createApp(options: AppOptions = {}) {
 
 async function handle(request: Request, env: Env, route: SafeLog['route'], requestId: string, options: AppOptions): Promise<Response> {
   const origin = request.headers.get('origin');
+  if (route === 'unknown') throw new PublicError('INVALID_REQUEST', 404);
   if (request.method === 'OPTIONS') return corsResponse(origin);
   if (request.method !== 'POST') throw new PublicError('INVALID_REQUEST', 405);
-  if (route === 'unknown') throw new PublicError('INVALID_REQUEST', 404);
 
   const body = await readBoundedJson(request);
   if (hasConsentMismatch(body)) throw new PublicError('CONSENT_REQUIRED', 403);
@@ -79,7 +80,7 @@ async function handle(request: Request, env: Env, route: SafeLog['route'], reque
     secret,
     route,
   );
-  const rate = await checkRateLimit(env.RATE_LIMITS, key, route === '/v1/analyses' ? 10 : 20);
+  const rate = await checkRateLimit(env.RATE_LIMITER, key, route);
   if (!rate.allowed) throw new PublicError('RATE_LIMITED', 429, rate.retryAfterSeconds);
 
   const provider = options.provider ?? createGroqProvider(env.GROQ_API_KEY);
