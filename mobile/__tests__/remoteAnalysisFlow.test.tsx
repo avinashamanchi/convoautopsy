@@ -1,0 +1,119 @@
+jest.mock('../src/services/consentStore', () => ({
+  CONSENT_VERSION: '2026-08-02',
+  SECURE_STORAGE_UNAVAILABLE_MESSAGE: 'Secure device storage is unavailable. On-device analysis still works.',
+  createConsentStore: jest.fn(),
+}));
+
+jest.mock('../src/services/aiClient', () => ({ createAiClient: jest.fn() }));
+
+import { fireEvent, screen } from '@testing-library/react-native';
+import { renderRouter } from 'expo-router/testing-library';
+import { createAiClient } from '../src/services/aiClient';
+import { createConsentStore } from '../src/services/consentStore';
+import type { AnalysisResult } from '../src/domain/analysis';
+
+const aiResult: AnalysisResult = {
+  schemaVersion: 1,
+  mode: 'ai',
+  intensityScore: 19,
+  conflictMode: 'Collaborating',
+  messages: [
+    { sender: 'Person A', text: 'Can we talk?', pattern: 'Neutral', egoState: 'Adult', possibleInterpretation: 'A possible interpretation.' },
+    { sender: 'Person B', text: 'Not now.', pattern: 'Neutral', egoState: 'Adult', possibleInterpretation: 'A possible interpretation.' },
+  ],
+};
+
+const mockedCreateAiClient = createAiClient as jest.MockedFunction<typeof createAiClient>;
+const mockedCreateConsentStore = createConsentStore as jest.MockedFunction<typeof createConsentStore>;
+let remoteAnalysis: jest.Mock;
+
+async function renderPreview() {
+  renderRouter('./app', { initialUrl: '/' });
+  fireEvent.changeText(await screen.findByLabelText('Conversation text'), 'Alex: Can we talk?\nJordan: Not now.');
+  fireEvent.press(screen.getByRole('button', { name: 'Review conversation' }));
+}
+
+beforeEach(() => {
+  remoteAnalysis = jest.fn();
+  mockedCreateAiClient.mockReturnValue(remoteAnalysis);
+  mockedCreateConsentStore.mockReturnValue({
+    getConsent: jest.fn().mockResolvedValue(null),
+    grantConsent: jest.fn().mockResolvedValue({ version: '2026-08-02', grantedAt: '2026-08-02T00:00:00.000Z', provider: 'Groq' }),
+    revokeConsent: jest.fn(),
+    getInstallationToken: jest.fn(),
+    clearRemoteAnalysisData: jest.fn(),
+  });
+});
+
+it('shows the first-use disclosure before requesting AI analysis', async () => {
+  await renderPreview();
+  await screen.findByText('Person A');
+
+  fireEvent.press(screen.getByRole('button', { name: 'Use AI-assisted analysis' }));
+
+  expect(await screen.findByText(/Names are replaced with Person labels/)).toBeOnTheScreen();
+  expect(remoteAnalysis).not.toHaveBeenCalled();
+});
+
+it('declining the disclosure makes no remote request', async () => {
+  await renderPreview();
+  await screen.findByText('Person A');
+  fireEvent.press(screen.getByRole('button', { name: 'Use AI-assisted analysis' }));
+  await screen.findByText(/Names are replaced with Person labels/);
+
+  fireEvent.press(screen.getByRole('button', { name: 'Cancel' }));
+
+  expect(remoteAnalysis).not.toHaveBeenCalled();
+  expect(screen.queryByText(/Names are replaced with Person labels/)).toBeNull();
+});
+
+it('deduplicates agreement presses and labels the successful result as AI-assisted', async () => {
+  remoteAnalysis.mockResolvedValue(aiResult);
+  await renderPreview();
+  await screen.findByText('Person A');
+  fireEvent.press(screen.getByRole('button', { name: 'Use AI-assisted analysis' }));
+  await screen.findByText(/Names are replaced with Person labels/);
+
+  const agree = screen.getByRole('button', { name: 'Agree and continue' });
+  fireEvent.press(agree);
+  fireEvent.press(agree);
+
+  expect(await screen.findByText('AI-assisted estimate')).toBeOnTheScreen();
+  expect(remoteAnalysis).toHaveBeenCalledTimes(1);
+});
+
+it('cancels the active request and ignores a late success', async () => {
+  let resolveRemote: ((result: AnalysisResult) => void) | undefined;
+  let remoteSignal: AbortSignal | undefined;
+  remoteAnalysis.mockImplementation((_messages: unknown, signal: AbortSignal) => new Promise<AnalysisResult>((resolve) => {
+    resolveRemote = resolve;
+    remoteSignal = signal;
+    signal.addEventListener('abort', () => undefined);
+  }));
+  await renderPreview();
+  await screen.findByText('Person A');
+  fireEvent.press(screen.getByRole('button', { name: 'Use AI-assisted analysis' }));
+  await screen.findByText(/Names are replaced with Person labels/);
+  fireEvent.press(screen.getByRole('button', { name: 'Agree and continue' }));
+
+  fireEvent.press(await screen.findByRole('button', { name: 'Cancel AI analysis' }));
+  expect(remoteSignal?.aborted).toBe(true);
+  resolveRemote?.(aiResult);
+
+  expect(await screen.findByText('Review your conversation')).toBeOnTheScreen();
+  expect(screen.queryByText('AI-assisted estimate')).toBeNull();
+});
+
+it('keeps the draft and offers a manual on-device alternative after an AI failure', async () => {
+  remoteAnalysis.mockRejectedValue(new Error('network details must not reach the screen'));
+  await renderPreview();
+  await screen.findByText('Person A');
+  fireEvent.press(screen.getByRole('button', { name: 'Use AI-assisted analysis' }));
+  await screen.findByText(/Names are replaced with Person labels/);
+  fireEvent.press(screen.getByRole('button', { name: 'Agree and continue' }));
+
+  expect(await screen.findByRole('button', { name: 'Run on-device analysis instead' })).toBeOnTheScreen();
+  fireEvent.press(screen.getByRole('button', { name: 'Run on-device analysis instead' }));
+
+  expect(await screen.findByText('On-device estimate')).toBeOnTheScreen();
+});

@@ -70,7 +70,7 @@ it('keeps the draft available for editing from the preview', async () => {
   expect(await screen.findByText('Person B')).toBeOnTheScreen();
 });
 
-it('keeps AI-assisted analysis inert until the secure service is configured', async () => {
+it('shows the AI-sharing disclosure before attempting AI-assisted analysis', async () => {
   renderRouter('./app', { initialUrl: '/' });
 
   fireEvent.changeText(await screen.findByLabelText('Conversation text'), 'Alex: Hello\nJordan: Hi');
@@ -80,7 +80,7 @@ it('keeps AI-assisted analysis inert until the secure service is configured', as
   fireEvent.press(screen.getByRole('button', { name: 'Use AI-assisted analysis' }));
   expect(
     await screen.findByText(
-      'AI-assisted analysis will be connected after the secure service is configured.',
+      /Names are replaced with Person labels. Message text is sent to Groq through ConvoAutopsy's server./,
     ),
   ).toBeOnTheScreen();
 });

@@ -1,23 +1,40 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { router } from 'expo-router';
 import { ScrollView, StyleSheet, Text } from 'react-native';
+import { AiConsentSheet } from '../src/components/AiConsentSheet';
 import { AnalysisModePicker } from '../src/components/AnalysisModePicker';
 import { ParsedMessageList } from '../src/components/ParsedMessageList';
 import { PrimaryButton } from '../src/components/PrimaryButton';
 import { Screen } from '../src/components/Screen';
 import type { ParseResult } from '../src/domain/analysis';
 import { parserErrorMessage } from '../src/domain/parserErrors';
+import { createAiClient } from '../src/services/aiClient';
+import { SECURE_STORAGE_UNAVAILABLE_MESSAGE, createConsentStore } from '../src/services/consentStore';
+import { useReportRepository } from '../src/services/reportRepositoryContext';
 import { useAnalysisSession } from '../src/state/AnalysisSession';
 import { tokens } from '../src/theme/tokens';
 
 const NO_MESSAGES_ERROR = "Couldn't find any messages. Use Name: Message on each line.";
-const AI_NOTICE = 'AI-assisted analysis will be connected after the secure service is configured.';
+const AI_FAILURE = "AI-assisted analysis couldn't be completed. Your conversation is still available.";
 
 export default function PreviewScreen() {
-  const { draft, parsed, preparePreview, runLocal } = useAnalysisSession();
+  const { draft, parsed, preparePreview, runLocal, startRemote, setRemoteResult, cancel } = useAnalysisSession();
+  const { preferences } = useReportRepository();
   const [preview, setPreview] = useState<ParseResult | null>(null);
   const [aiNotice, setAiNotice] = useState<string | null>(null);
+  const [consentVisible, setConsentVisible] = useState(false);
+  const [aiRunning, setAiRunning] = useState(false);
   const preparedDraft = useRef<string | null>(null);
+  const activeRemoteRunRef = useRef<number | null>(null);
+  const remoteRunCounterRef = useRef(0);
+  const consentStore = useMemo(() => createConsentStore({ preferences }), [preferences]);
+  const analyzeRemotely = useMemo(
+    () => createAiClient({
+      getConsent: consentStore.getConsent,
+      getInstallationToken: consentStore.getInstallationToken,
+    }),
+    [consentStore],
+  );
 
   useEffect(() => {
     if (preparedDraft.current === draft) {
@@ -42,14 +59,65 @@ export default function PreviewScreen() {
   if (!activePreview || activePreview.messages.length === 0) {
     return null;
   }
+  const messagesForAi = activePreview.messages;
 
   function runLocalAndOpenResult() {
     runLocal();
     router.replace('/result');
   }
 
-  function startConsentFlow() {
-    setAiNotice(AI_NOTICE);
+  function finishRemoteRun(run: number) {
+    if (activeRemoteRunRef.current === run) {
+      activeRemoteRunRef.current = null;
+      setAiRunning(false);
+    }
+  }
+
+  async function runAiAnalysis(grantConsent: boolean) {
+    if (activeRemoteRunRef.current !== null) return;
+    const run = ++remoteRunCounterRef.current;
+    activeRemoteRunRef.current = run;
+    setAiRunning(true);
+    setAiNotice(null);
+
+    try {
+      if (grantConsent) await consentStore.grantConsent();
+      const attempt = startRemote();
+      const result = await analyzeRemotely(messagesForAi, attempt.signal);
+      if (attempt.signal.aborted || activeRemoteRunRef.current !== run) return;
+      setRemoteResult(result, attempt.requestId);
+      setConsentVisible(false);
+      router.replace('/result');
+    } catch (error) {
+      if (activeRemoteRunRef.current !== run) return;
+      cancel();
+      setConsentVisible(false);
+      setAiNotice(error instanceof Error && error.message === SECURE_STORAGE_UNAVAILABLE_MESSAGE
+        ? SECURE_STORAGE_UNAVAILABLE_MESSAGE
+        : AI_FAILURE);
+    } finally {
+      finishRemoteRun(run);
+    }
+  }
+
+  async function startConsentFlow() {
+    setAiNotice(null);
+    try {
+      if (await consentStore.getConsent()) {
+        void runAiAnalysis(false);
+      } else {
+        setConsentVisible(true);
+      }
+    } catch {
+      setAiNotice(AI_FAILURE);
+    }
+  }
+
+  function cancelAiAnalysis() {
+    activeRemoteRunRef.current = null;
+    cancel();
+    setAiRunning(false);
+    setConsentVisible(false);
   }
 
   return (
@@ -59,7 +127,15 @@ export default function PreviewScreen() {
         <Text style={styles.description}>Check the parsed messages before choosing an analysis mode.</Text>
         <ParsedMessageList parsed={activePreview} />
         <PrimaryButton label="Edit conversation" onPress={() => router.back()} />
-        <AnalysisModePicker aiNotice={aiNotice} onRunLocal={runLocalAndOpenResult} onStartAi={startConsentFlow} />
+        <AnalysisModePicker aiNotice={aiNotice} onRunLocal={runLocalAndOpenResult} onStartAi={() => { void startConsentFlow(); }} />
+        {consentVisible ? (
+          <AiConsentSheet
+            isRunning={aiRunning}
+            onAgree={() => { void runAiAnalysis(true); }}
+            onCancel={cancelAiAnalysis}
+          />
+        ) : null}
+        {aiNotice ? <PrimaryButton label="Run on-device analysis instead" onPress={runLocalAndOpenResult} /> : null}
       </ScrollView>
     </Screen>
   );
