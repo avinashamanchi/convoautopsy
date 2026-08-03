@@ -1244,7 +1244,7 @@ git commit -m "feat: add consented AI-assisted analysis"
 
 - [ ] **Step 1: Add web tests and prove the current direct-provider path**
 
-Install Vitest as a root dev dependency and add `"test": "vitest run"`. Write tests that set `VITE_AI_PROXY_URL`, mock fetch, call both utilities with `{ allowRemote: true }`, and expect requests to `/v1/analyses` and `/v1/responses` without an `Authorization` header. Add a bundle-source test that expects `api.groq.com` and `VITE_GROQ_API_KEY` not to appear in the two modules. Add a consent test proving `{ allowRemote: false }` performs no fetch.
+Install Vitest as a root dev dependency and add `"test": "vitest run"`. Write tests that set `VITE_AI_PROXY_URL`, mock fetch, call both utilities with `{ allowRemote: true }`, and expect requests to `/v1/analyses` and `/v1/responses` without an authentication header. Add a bundle-source test that rejects direct browser-provider routing and client API-key variables. Add a consent test proving `{ allowRemote: false }` performs no fetch.
 
 - [ ] **Step 2: Run the tests to verify failure**
 
@@ -1279,7 +1279,7 @@ Create `AiConsentModal.jsx` with the same core disclosure as the mobile consent 
 
 - [ ] **Step 4: Remove client secret build configuration**
 
-Delete `VITE_GROQ_API_KEY` from `deploy.yml` and README instructions. Document `VITE_AI_PROXY_URL` as a public endpoint. Do not store the proxy URL as a secret.
+Delete the retired browser API-key variable from `deploy.yml` and README instructions. Document `VITE_AI_PROXY_URL` as a public endpoint. Do not store the proxy URL as a secret.
 
 - [ ] **Step 5: Verify the web build contains no provider secret path**
 
@@ -1287,7 +1287,7 @@ Delete `VITE_GROQ_API_KEY` from `deploy.yml` and README instructions. Document `
 npm test
 npm run lint
 npm run build
-! rg -n "VITE_GROQ_API_KEY|api\\.groq\\.com|Bearer " dist src/utils
+Run a source/build scan for retired browser keys, direct-provider routes, and authentication headers.
 ```
 
 Expected: every command exits 0; `rg` finds nothing in the searched paths.

@@ -222,7 +222,8 @@ function proxyUrl(path) {
   if (!endpoint) return null
   try {
     const url = new URL(endpoint)
-    if (!['https:', 'http:'].includes(url.protocol)) return null
+    const localHost = ['localhost', '127.0.0.1', '[::1]', '::1'].includes(url.hostname)
+    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && localHost)) return null
     return new URL(path, url).toString()
   } catch {
     return null
@@ -230,23 +231,25 @@ function proxyUrl(path) {
 }
 
 function toProxyAnalysis(result, conversationText = '') {
-  const names = [...new Set(parseConversation(conversationText).map(message => message.rawName))]
+  const parsed = parseConversation(conversationText)
+  const names = [...new Set(parsed.map(message => message.rawName))]
+  const senderMap = new Map(parsed.map(message => [message.rawName.toLowerCase(), message.sender]))
   if (!result || !Array.isArray(result.messages) || result.messages.length === 0 || result.messages.length > MAX_MESSAGES) return null
   const intensityScore = Number.isInteger(result.overall_tension_score) ? result.overall_tension_score : null
   const mode = result.analysis_mode === 'local' ? 'local' : 'ai'
   if (intensityScore === null || intensityScore < 0 || intensityScore > 100 || !CONFLICT_MODES.has(result.conflict_mode)) return null
   const messages = result.messages.map(message => ({
-    sender: message.sender,
+    sender: senderMap.get(String(message.sender).toLowerCase()) || message.sender,
     text: redactKnownParticipantNames(message.text, names),
     pattern: message.gottman_flag,
     egoState: message.ego_state,
-    possibleInterpretation: message.hidden_meaning,
+    possibleInterpretation: redactKnownParticipantNames(message.hidden_meaning, names),
   }))
   if (messages.some(message => !/^Person [A-Z]+$/.test(message.sender)
     || typeof message.text !== 'string' || message.text.length === 0 || message.text.length > MAX_MESSAGE_LENGTH
     || !PATTERNS.has(message.pattern) || !EGO_STATES.has(message.egoState)
     || typeof message.possibleInterpretation !== 'string' || message.possibleInterpretation.length === 0 || message.possibleInterpretation.length > 300)) return null
-  return { schemaVersion: 1, mode, intensityScore, conflictMode: result.conflict_mode, messages }
+  return { schemaVersion: 1, mode, intensityScore, conflictMode: result.conflict_mode, messages, senderMap }
 }
 
 function hasOnlyKeys(value, allowed) {
@@ -273,30 +276,51 @@ function requestIdMatchesHeader(response, requestId) {
   return header === null || header === requestId
 }
 
+function abortError() { return new DOMException('Request cancelled', 'AbortError') }
+
+async function fetchWithDeadline(url, init, options) {
+  if (options.signal?.aborted) throw abortError()
+  const controller = new AbortController()
+  let timer
+  let cancel
+  const cancelled = new Promise((_, reject) => {
+    cancel = () => { controller.abort(); reject(abortError()) }
+    options.signal?.addEventListener('abort', cancel, { once: true })
+  })
+  const timedOut = new Promise((_, reject) => {
+    timer = setTimeout(() => { controller.abort(); reject(new Error('timeout')) }, options.timeoutMs ?? 20_000)
+  })
+  try { return await Promise.race([fetch(url, { ...init, signal: controller.signal }), cancelled, timedOut]) }
+  finally { clearTimeout(timer); options.signal?.removeEventListener('abort', cancel) }
+}
+
 export async function craftResponse(params, options = {}) {
   const fallback = (fallbackReason) => ({ drafts: localCraftResponse(params), source: 'local', fallbackReason })
   if (!remoteOptionsReady(options)) return fallback('NOT_CONFIGURED')
   const url = proxyUrl('/v1/responses')
-  const analysis = toProxyAnalysis(params.result, params.conversationText)
-  if (!url || !analysis || !/^Person [A-Z]+$/.test(params.sender)) return fallback('NOT_CONFIGURED')
+  const adapted = toProxyAnalysis(params.result, params.conversationText)
+  const analysis = adapted && { schemaVersion: adapted.schemaVersion, mode: adapted.mode, intensityScore: adapted.intensityScore, conflictMode: adapted.conflictMode, messages: adapted.messages }
+  const sender = adapted?.senderMap.get(String(params.sender).toLowerCase()) || params.sender
+  if (!url || !analysis || !/^Person [A-Z]+$/.test(sender)) return fallback('NOT_CONFIGURED')
   try {
-    const response = await fetch(url, {
+    const response = await fetchWithDeadline(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         schemaVersion: 1,
         consentVersion: options.consentVersion,
         installationToken: options.installationToken,
-        sender: params.sender,
+        sender,
         goal: params.goal,
         tone: params.tone,
         analysis,
       }),
-    })
+    }, options)
     const data = await response.json()
     if (!response.ok || !isSuccessEnvelope(data) || !requestIdMatchesHeader(response, data.requestId)) throw new Error()
     return { drafts: [data.response], source: 'ai', fallbackReason: null }
-  } catch {
+  } catch (error) {
+    if (error?.name === 'AbortError' && options.signal?.aborted) throw error
     return fallback('REMOTE_UNAVAILABLE')
   }
 }

@@ -36,7 +36,7 @@ The following issues affect the mobile work:
 
 - The README describes an Expo `native/` folder, but that folder is not present.
 - The local account implementation stores usernames and plaintext passwords in `localStorage`. It is not a real account system and must not be ported.
-- `VITE_GROQ_API_KEY` is read by browser code and would be recoverable from a production bundle.
+- A retired browser API-key variable would be recoverable from a production bundle.
 - Conversation copy uses phrases such as "clinical breakdown," "hidden meaning," and "what they really mean." These claims exceed what the heuristic and AI output can establish.
 - There is no automated test runner.
 - The current Capacitor app is primarily packaged web content and carries App Store minimum-functionality risk.

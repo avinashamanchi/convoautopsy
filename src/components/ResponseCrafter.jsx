@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { craftResponse, GOAL_OPTIONS, TONE_OPTIONS, getPersonSenders } from '../utils/craftResponse'
-import { getAiConsent } from './AiConsentModal'
+import { getAiConsent } from '../utils/aiConsent'
 
 export default function ResponseCrafter({ result, conversationText }) {
   const [step, setStep] = useState(1)
@@ -12,10 +12,18 @@ export default function ResponseCrafter({ result, conversationText }) {
   const [copied, setCopied] = useState(null)
   const [error, setError] = useState('')
   const [responseSource, setResponseSource] = useState(null)
+  const requestRef = useRef(null)
+  const requestGeneration = useRef(0)
+
+  useEffect(() => () => requestRef.current?.abort(), [])
 
   const senders = getPersonSenders(result)
 
   const generate = async (selectedTone) => {
+    requestRef.current?.abort()
+    const controller = new AbortController()
+    requestRef.current = controller
+    const generation = ++requestGeneration.current
     setLoading(true)
     setError('')
     setStep(4)
@@ -24,15 +32,17 @@ export default function ResponseCrafter({ result, conversationText }) {
       const r = await craftResponse(
         { sender, goal, tone: selectedTone, result, conversationText },
         consent
-          ? { allowRemote: true, consentVersion: consent.version, installationToken: consent.installationToken }
-          : { allowRemote: false },
+          ? { allowRemote: true, consentVersion: consent.version, installationToken: consent.installationToken, signal: controller.signal }
+          : { allowRemote: false, signal: controller.signal },
       )
+      if (generation !== requestGeneration.current || controller.signal.aborted) return
       setResponses(r.drafts)
       setResponseSource(r)
-    } catch {
+    } catch (error) {
+      if (generation !== requestGeneration.current || controller.signal.aborted || error?.name === 'AbortError') return
       setError('Failed to generate responses. Try again.')
     }
-    setLoading(false)
+    if (generation === requestGeneration.current) setLoading(false)
   }
 
   const handleCopy = (id, text) => {

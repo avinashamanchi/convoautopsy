@@ -67,7 +67,31 @@ describe('analyzeConversation', () => {
     const output = await analyzeConversation('Alice: Please listen.', { allowRemote: false })
 
     expect(fetch).not.toHaveBeenCalled()
-    expect(output).toMatchObject({ source: 'local', fallbackReason: 'NOT_CONFIGURED' })
+    expect(output).toMatchObject({ source: 'local', fallbackReason: 'NOT_CONFIGURED', result: { analysis_mode: 'local' } })
+  })
+
+  it('rejects public cleartext proxy URLs without fetching while allowing localhost development', async () => {
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+    vi.stubEnv('VITE_AI_PROXY_URL', 'http://proxy.example')
+    await expect(analyzeConversation('Alice: Hi', options)).resolves.toMatchObject({ fallbackReason: 'NOT_CONFIGURED' })
+    expect(fetch).not.toHaveBeenCalled()
+
+    vi.stubEnv('VITE_AI_PROXY_URL', 'http://localhost:8787')
+    fetch.mockResolvedValueOnce(new Response(JSON.stringify({ analysis: { schemaVersion: 1, mode: 'ai', intensityScore: 1, conflictMode: 'Collaborating', messages: [{ sender: 'Person A', text: 'Hi', pattern: 'Neutral', egoState: 'Adult', possibleInterpretation: 'Calm.' }] }, requestId: 'id' }), { status: 200 }))
+    await analyzeConversation('Alice: Hi', options)
+    expect(fetch).toHaveBeenCalledWith('http://localhost:8787/v1/analyses', expect.any(Object))
+  })
+
+  it('returns a remote-unavailable local result on a hung request but propagates caller cancellation', async () => {
+    vi.stubEnv('VITE_AI_PROXY_URL', 'https://proxy.example')
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+    await expect(analyzeConversation('Alice: Hi', { ...options, timeoutMs: 1 })).resolves.toMatchObject({ source: 'local', fallbackReason: 'REMOTE_UNAVAILABLE', result: { analysis_mode: 'local' } })
+
+    const controller = new AbortController()
+    const pending = analyzeConversation('Alice: Hi', { ...options, signal: controller.signal, timeoutMs: 50 })
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
   })
 
   it('contains no browser-provider endpoint or client key reference', async () => {

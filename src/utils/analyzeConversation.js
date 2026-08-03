@@ -76,7 +76,7 @@ export function localAnalyze(text) {
   const c = analyzed.filter(m => ['Criticism','Contempt'].includes(m.gottman_flag)).length
   const a = analyzed.filter(m => m.gottman_flag === 'Stonewalling').length
   const conflict_mode = c > 0 && a > 0 ? 'Competing vs Avoiding' : c > 0 ? 'Competing' : a > 0 ? 'Avoiding' : 'Collaborating'
-  return { messages: analyzed, overall_tension_score, conflict_mode }
+  return { messages: analyzed, overall_tension_score, conflict_mode, analysis_mode: 'local' }
 }
 
 const CONSENT_VERSION = '2026-08-02'
@@ -114,7 +114,8 @@ function proxyUrl(path) {
   if (!endpoint) return null
   try {
     const url = new URL(endpoint)
-    if (!['https:', 'http:'].includes(url.protocol)) return null
+    const localHost = ['localhost', '127.0.0.1', '[::1]', '::1'].includes(url.hostname)
+    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && localHost)) return null
     return new URL(path, url).toString()
   } catch {
     return null
@@ -160,6 +161,24 @@ function requestIdMatchesHeader(response, requestId) {
   return header === null || header === requestId
 }
 
+function abortError() { return new DOMException('Request cancelled', 'AbortError') }
+
+async function fetchWithDeadline(url, init, options) {
+  if (options.signal?.aborted) throw abortError()
+  const controller = new AbortController()
+  let timer
+  let cancel
+  const cancelled = new Promise((_, reject) => {
+    cancel = () => { controller.abort(); reject(abortError()) }
+    options.signal?.addEventListener('abort', cancel, { once: true })
+  })
+  const timedOut = new Promise((_, reject) => {
+    timer = setTimeout(() => { controller.abort(); reject(new Error('timeout')) }, options.timeoutMs ?? 20_000)
+  })
+  try { return await Promise.race([fetch(url, { ...init, signal: controller.signal }), cancelled, timedOut]) }
+  finally { clearTimeout(timer); options.signal?.removeEventListener('abort', cancel) }
+}
+
 export async function analyzeConversation(text, options = {}) {
   const fallback = (fallbackReason) => ({ result: localAnalyze(text), source: 'local', fallbackReason })
   if (!remoteOptionsReady(options)) return fallback('NOT_CONFIGURED')
@@ -167,15 +186,16 @@ export async function analyzeConversation(text, options = {}) {
   const messages = anonymousMessages(text)
   if (!url || !messages) return fallback('NOT_CONFIGURED')
   try {
-    const res = await fetch(url, {
+    const res = await fetchWithDeadline(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ schemaVersion: 1, consentVersion: options.consentVersion, installationToken: options.installationToken, messages }),
-    })
+    }, options)
     const data = await res.json()
     if (!res.ok || !isSuccessEnvelope(data) || !requestIdMatchesHeader(res, data.requestId) || data.analysis.mode !== 'ai') throw new Error()
     return { result: toLegacyResult(data.analysis), source: 'ai', fallbackReason: null }
-  } catch {
+  } catch (error) {
+    if (error?.name === 'AbortError' && options.signal?.aborted) throw error
     return fallback('REMOTE_UNAVAILABLE')
   }
 }

@@ -7,7 +7,8 @@ import { analyzeConversation, DEMO_TEXT, DEMO_RESULT } from '../utils/analyzeCon
 import AnalysisResult from '../components/AnalysisResult'
 import Onboarding from '../components/Onboarding'
 import ResponseCrafter from '../components/ResponseCrafter'
-import AiConsentModal, { getAiConsent, grantAiConsent } from '../components/AiConsentModal'
+import AiConsentModal from '../components/AiConsentModal'
+import { getAiConsent, grantAiConsent } from '../utils/aiConsent'
 
 function formatDate(ts) {
   const d = new Date(ts)
@@ -44,6 +45,11 @@ export default function Dashboard({ user, onLogout }) {
   const [showAiConsent, setShowAiConsent] = useState(false)
   const [pendingText, setPendingText] = useState('')
   const fileInputRef = useRef(null)
+  const requestRef = useRef(null)
+  const requestGeneration = useRef(0)
+  const consentBusy = useRef(false)
+
+  useEffect(() => () => requestRef.current?.abort(), [])
 
   useEffect(() => {
     setConversations(getConversations(user.username))
@@ -68,18 +74,24 @@ export default function Dashboard({ user, onLogout }) {
   }
 
   const runAnalysis = async (txt, options) => {
+    requestRef.current?.abort()
+    const controller = new AbortController()
+    requestRef.current = controller
+    const generation = ++requestGeneration.current
     setAnalyzing(true)
     try {
-      const { result, source, fallbackReason } = await analyzeConversation(txt, options)
+      const { result, source, fallbackReason } = await analyzeConversation(txt, { ...options, signal: controller.signal })
+      if (generation !== requestGeneration.current || controller.signal.aborted) return
       if (!result || !result.messages?.length) {
         setError("Couldn't parse the conversation. Use format: Name: Message")
         return
       }
       saveAnalysis(txt, result, source, fallbackReason)
-    } catch {
+    } catch (error) {
+      if (generation !== requestGeneration.current || controller.signal.aborted || error?.name === 'AbortError') return
       setError('Analysis failed. Please try again.')
     } finally {
-      setAnalyzing(false)
+      if (generation === requestGeneration.current) setAnalyzing(false)
     }
   }
 
@@ -102,6 +114,8 @@ export default function Dashboard({ user, onLogout }) {
   }
 
   const handleConsent = async () => {
+    if (consentBusy.current || !pendingText) return
+    consentBusy.current = true
     const consent = grantAiConsent()
     setShowAiConsent(false)
     const txt = pendingText
@@ -109,13 +123,17 @@ export default function Dashboard({ user, onLogout }) {
     await runAnalysis(txt, consent
       ? { allowRemote: true, consentVersion: consent.version, installationToken: consent.installationToken }
       : { allowRemote: false })
+    consentBusy.current = false
   }
 
   const handleDecline = async () => {
+    if (consentBusy.current || !pendingText) return
+    consentBusy.current = true
     setShowAiConsent(false)
     const txt = pendingText
     setPendingText('')
     await runAnalysis(txt, { allowRemote: false })
+    consentBusy.current = false
   }
 
   const handleDelete = (id) => {

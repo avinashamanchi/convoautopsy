@@ -31,7 +31,7 @@
 - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm test` — 2 files / 7 tests passed.
 - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run lint` — passed.
 - `PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run build` — passed; Vite reports the pre-existing large-chunk advisory.
-- `! rg -n "VITE_GROQ_API_KEY|api\\.groq\\.com|Bearer " dist src/utils .github/workflows/deploy.yml README.md` — passed.
+- Provider-route/key/header source scan over the website build, source, workflow, and README — passed.
 - `git diff --check` — passed before staging; staged diff check is recorded with the commit verification.
 - `server/ai-proxy`: `npm test` — 5 files / 24 tests passed; `npm run lint` passed. Worker runtime emitted compatibility-date fallback warnings.
 - `mobile`: `npm test -- aiClient.test.ts consentStore.test.ts` — 2 suites / 24 tests passed.
@@ -45,3 +45,20 @@
 ## Commit
 
 - `fix: keep AI provider secrets server-side`
+
+## Fix Round 1
+
+- Added HTTPS-only proxy enforcement, with HTTP allowed solely for `localhost`, `127.0.0.1`, and loopback IPv6 development endpoints.
+- Local analysis/fallback results now carry `analysis_mode: 'local'`; response payload adaptation preserves that provenance.
+- Response requests normalize legacy participant senders and redact participant names from messages and possible interpretations before serialization.
+- Both web utilities now support caller cancellation and a bounded request deadline that covers non-compliant/hung fetches; caller aborts are propagated rather than converted to a fallback.
+- Dashboard and Response Crafter cancel superseded/unmounted work and use generation checks to ignore stale completion. Consent handlers reject duplicate invocation.
+- Replaced disabled root lint rules with recommended/error rules for the actively linted web utilities/components and root JS configs; native/Worker packages retain their own lint commands.
+- Moved Capacitor CLI/iOS build tooling to dev dependencies. `npm audit fix --package-lock-only` and both full/production audits report zero vulnerabilities.
+- Updated `CLAUDE.md` for Node 22, root tests, and the public proxy URL only.
+
+### Fix Round 1 RED/GREEN and checks
+
+- RED: public cleartext proxy, missing local analysis mode, unredacted response interpretation/sender, and hung request tests failed against the prior implementation.
+- GREEN: root Vitest passes 11 tests after the fixes.
+- Node 22 root lint, build, and audit (`npm audit`, `npm audit --omit=dev`) pass. Build retains Vite's non-failing large-chunk advisory.
