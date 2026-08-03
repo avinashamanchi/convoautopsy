@@ -6,7 +6,7 @@ export function ResultSummary({ result }: { result: AnalysisResult }) {
   const modeLabel = result.mode === 'local' ? 'On-device (local)' : 'AI-assisted (remote)';
 
   return (
-    <View style={styles.container}>
+    <View testID="result-summary" style={styles.container}>
       <Text accessibilityRole="header" style={styles.title}>
         {result.mode === 'local' ? 'On-device estimate' : 'AI-assisted estimate'}
       </Text>
@@ -14,7 +14,7 @@ export function ResultSummary({ result }: { result: AnalysisResult }) {
       <Text style={styles.metric}>Conflict-style estimate: {result.conflictMode}</Text>
       <Text style={styles.mode}>Analysis mode: {modeLabel}</Text>
       {result.messages.map((message, index) => (
-        <View accessibilityLabel={`Pattern for ${message.sender}: ${message.pattern}`} key={`${message.sender}-${index}`} style={styles.message}>
+        <View accessibilityLabel={`Pattern for ${message.sender}: ${message.pattern}`} key={`${message.sender}-${index}`} testID="pattern-card" style={styles.message}>
           <Text style={styles.sender}>{message.sender}</Text>
           <Text style={styles.text}>{message.text}</Text>
           <Text style={styles.pattern}>Pattern: {message.pattern}</Text>
@@ -22,7 +22,7 @@ export function ResultSummary({ result }: { result: AnalysisResult }) {
           <Text style={styles.interpretation}>{message.possibleInterpretation}</Text>
         </View>
       ))}
-      <Text style={styles.limitation}>
+      <Text testID="result-limitation" style={styles.limitation}>
         This educational estimate is not a factual conclusion about people or relationships.
       </Text>
     </View>

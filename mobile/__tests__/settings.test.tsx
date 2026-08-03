@@ -30,10 +30,10 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function renderSettings() {
+function renderSettings(onDeleteStatusCommit?: (status: string) => void) {
   return render(
     <ReportRepositoryProvider repository={repository} preferenceStore={preferences}>
-      <SettingsScreen />
+      <SettingsScreen onDeleteStatusCommit={onDeleteStatusCommit} />
     </ReportRepositoryProvider>,
   );
 }
@@ -110,4 +110,18 @@ it('finishes pending cleanup after unmount without a late state update', async (
   expect(mockedDeleteAllAppData).toHaveBeenCalledTimes(1);
   expect(error).not.toHaveBeenCalled();
   error.mockRestore();
+});
+
+it('commits deleting but never a completion status after unmount', async () => {
+  const pending = deferred<{ ok: true }>();
+  const commits: string[] = [];
+  mockedDeleteAllAppData.mockReturnValueOnce(pending.promise);
+  const view = renderSettings((status) => commits.push(status));
+  fireEvent.changeText(await screen.findByLabelText('Type DELETE to confirm'), 'DELETE');
+  fireEvent.press(screen.getByRole('button', { name: 'Delete all app data' }));
+  expect(commits).toEqual(['deleting']);
+  view.unmount();
+  pending.resolve({ ok: true });
+  await Promise.resolve();
+  expect(commits).toEqual(['deleting']);
 });

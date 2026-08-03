@@ -10,8 +10,9 @@ import { useAnalysisSession } from '../../src/state/AnalysisSession';
 import { tokens } from '../../src/theme/tokens';
 
 type DeleteStatus = 'idle' | 'deleting' | 'success' | { failed: DeleteAllOutcome & { ok: false } };
+type SettingsScreenProps = { onDeleteStatusCommit?: (status: 'deleting' | 'success' | 'failed') => void };
 
-export default function SettingsScreen() {
+export default function SettingsScreen({ onDeleteStatusCommit }: SettingsScreenProps) {
   const { repository, preferences } = useReportRepository();
   const session = useAnalysisSession();
   const consent = useMemo(() => createConsentStore({ preferences }), [preferences]);
@@ -26,6 +27,7 @@ export default function SettingsScreen() {
     if (deletingRef.current) return;
     deletingRef.current = true;
     setDeleteStatus('deleting');
+    onDeleteStatusCommit?.('deleting');
     const outcome = await deleteAllAppData({
       repository,
       preferences,
@@ -34,7 +36,10 @@ export default function SettingsScreen() {
       session,
     });
     deletingRef.current = false;
-    if (mountedRef.current) setDeleteStatus(outcome.ok ? 'success' : { failed: outcome });
+    if (mountedRef.current) {
+      setDeleteStatus(outcome.ok ? 'success' : { failed: outcome });
+      onDeleteStatusCommit?.(outcome.ok ? 'success' : 'failed');
+    }
   };
 
   const revokeConsent = async () => {

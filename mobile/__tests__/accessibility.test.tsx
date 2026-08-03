@@ -66,11 +66,15 @@ it('stacks action groups at a 200 percent font scale without clipping critical c
   const dimensions = jest.spyOn(require('react-native'), 'useWindowDimensions').mockReturnValue({ fontScale: 2, height: 800, scale: 2, width: 390 });
   render(<ConversationEditor disabled={false} error={null} onChange={() => {}} onImportFile={() => {}} onImportScreenshot={() => {}} onReview={() => {}} value="Alex: Hi" />);
   expect(screen.getByTestId('editor-import-actions').props.style).toEqual(expect.arrayContaining([expect.objectContaining({ flexDirection: 'column' })]));
+  expect(screen.getByRole('button', { name: 'Review conversation' }).props.style).toEqual(expect.arrayContaining([expect.objectContaining({ minHeight: 48 })]));
   expect(screen.getByRole('button', { name: 'Import conversation file' }).props.style).toEqual(expect.objectContaining({ minHeight: 48 }));
   screen.unmount();
   render(<ResponseDraftCard draft={{ id: 'boundary', text: 'I need a pause.', hint: 'Sets a boundary' }} onCopy={async () => {}} onShare={async () => ({ ok: true })} />);
   expect(screen.getByTestId('draft-actions').props.style).toEqual(expect.arrayContaining([expect.objectContaining({ flexDirection: 'column' })]));
   expect(screen.getByRole('button', { name: 'Copy draft' })).toBeOnTheScreen();
+  expect(screen.getByRole('button', { name: 'Share draft' })).toBeOnTheScreen();
+  expect(screen.getByRole('button', { name: 'Copy draft' }).props.style).toEqual(expect.arrayContaining([expect.objectContaining({ minHeight: 48 })]));
+  expect(screen.getByRole('button', { name: 'Share draft' }).props.style).toEqual(expect.arrayContaining([expect.objectContaining({ minHeight: 48 })]));
   screen.unmount();
   render(<ResultSummary result={result} />);
 
@@ -78,6 +82,12 @@ it('stacks action groups at a 200 percent font scale without clipping critical c
   expect(screen.getByText('Pattern: Neutral')).toBeOnTheScreen();
   expect(screen.getByText('This educational estimate is not a factual conclusion about people or relationships.')).toBeOnTheScreen();
   expect(screen.getByLabelText('Pattern for Person A: Neutral').props.style).not.toEqual(expect.objectContaining({ height: expect.any(Number), overflow: 'hidden' }));
+  for (const item of [screen.getByTestId('result-summary'), screen.getByTestId('pattern-card'), screen.getByTestId('result-limitation')]) {
+    const style = item.props.style;
+    expect(style.height).toBeUndefined();
+    expect(style.maxHeight).toBeUndefined();
+    expect(style.overflow).not.toBe('hidden');
+  }
   dimensions.mockRestore();
 });
 
