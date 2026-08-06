@@ -5,6 +5,8 @@ import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { analysisSourceMessage } from '../utils/analysisSourceMessage'
 
+globalThis.IS_REACT_ACT_ENVIRONMENT = true
+
 const analyzeConversation = vi.fn()
 const grantAiConsent = vi.fn()
 const getAiConsent = vi.fn(() => null)
@@ -43,6 +45,7 @@ const roots = []
 afterEach(() => {
   act(() => roots.splice(0).forEach((root) => root.unmount()))
   vi.clearAllMocks()
+  vi.unstubAllGlobals()
   getAiConsent.mockReturnValue(null)
   getConversations.mockReturnValue([])
 })
@@ -184,16 +187,24 @@ describe('analysisSourceMessage', () => {
   })
 
   it('rejects imported files above the 100,000-character limit', async () => {
+    const oversizedText = '🫠'.repeat(100_001)
+    const readAsText = vi.fn(function readFixture() {
+      this.onload?.({ target: { result: oversizedText } })
+    })
+    class ImmediateFileReader {
+      readAsText = readAsText
+    }
+    vi.stubGlobal('FileReader', ImmediateFileReader)
     const { container, root } = renderDashboard()
     const Dashboard = (await import('./Dashboard')).default
     await act(async () => { root.render(<Dashboard user={{ username: 'avi' }} onLogout={vi.fn()} />) })
     const input = container.querySelector('input[type="file"]')
-    const file = new File(['🫠'.repeat(100_001)], 'conversation.txt', { type: 'text/plain' })
+    const file = new File(['test fixture'], 'conversation.txt', { type: 'text/plain' })
     Object.defineProperty(input, 'files', { configurable: true, value: [file] })
 
     await act(async () => {
-      input.dispatchEvent(new Event('change', { bubbles: true }))
-      await new Promise((resolve) => setTimeout(resolve, 0))
+      input.dispatchEvent(new window.Event('change', { bubbles: true }))
+      expect(readAsText).toHaveBeenCalledWith(file)
     })
 
     expect(container.textContent).toContain('Conversation must be 100,000 characters or fewer')

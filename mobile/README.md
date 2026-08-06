@@ -22,7 +22,8 @@ npm test
 npm run typecheck
 npm run lint
 npm run export:ios
-npx expo-doctor
+npm run expo:doctor
+npm audit --audit-level=high
 ```
 
 `npm run export:ios` proves that Expo can produce the static iOS JavaScript bundle. It does not compile the native Xcode project, install on a device, create a TestFlight build, or publish to the App Store.

@@ -4,10 +4,12 @@
   "version": "1.0.0",
   "scripts": {
     "start": "expo start",
+    "ios": "expo run:ios",
     "test": "jest --runInBand",
     "test:watch": "jest --watch",
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
+    "expo:doctor": "npx --yes expo-doctor",
     "export:ios": "expo export --platform ios"
   },
   "dependencies": {
@@ -61,6 +63,10 @@
   },
   "engines": {
     "node": "22.x"
+  },
+  "overrides": {
+    "postcss": "8.5.26",
+    "uuid": "11.1.1"
   },
   "jest": {
     "preset": "jest-expo",

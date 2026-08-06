@@ -40,6 +40,9 @@ jobs:
       - name: Lint web
         run: npm run lint
 
+      - name: Audit web
+        run: npm audit --audit-level=high
+
       - name: Build web
         env:
           VITE_AI_PROXY_URL: ${{ vars.VITE_AI_PROXY_URL }}
@@ -61,8 +64,16 @@ jobs:
         run: npm run lint
         working-directory: mobile
 
+      - name: Check Expo project health
+        run: npm run expo:doctor
+        working-directory: mobile
+
       - name: Export iOS bundle
         run: npm run export:ios
+        working-directory: mobile
+
+      - name: Audit mobile
+        run: npm audit --audit-level=high
         working-directory: mobile
 
       - name: Install Worker dependencies
@@ -83,6 +94,10 @@ jobs:
 
       - name: Build Worker bundle
         run: npm run build
+        working-directory: server/ai-proxy
+
+      - name: Audit Worker
+        run: npm audit --audit-level=high
         working-directory: server/ai-proxy
 
       - name: Scan tracked tree and built bundles for secrets

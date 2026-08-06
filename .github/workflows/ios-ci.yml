@@ -23,7 +23,11 @@ jobs:
         working-directory: mobile
       - run: npm run lint
         working-directory: mobile
+      - run: npm run expo:doctor
+        working-directory: mobile
       - run: npm run export:ios
+        working-directory: mobile
+      - run: npm audit --audit-level=high
         working-directory: mobile
 
   worker:
@@ -43,6 +47,10 @@ jobs:
         working-directory: server/ai-proxy
       - run: npm run lint
         working-directory: server/ai-proxy
+      - run: npm run build
+        working-directory: server/ai-proxy
+      - run: npm audit --audit-level=high
+        working-directory: server/ai-proxy
 
   web:
     runs-on: ubuntu-latest
@@ -56,3 +64,5 @@ jobs:
       - run: npm test
       - run: npm run lint
       - run: npm run build
+      - run: npm run scan:secrets
+      - run: npm audit --audit-level=high

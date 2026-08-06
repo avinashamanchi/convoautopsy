@@ -10,3 +10,14 @@ dist
 *.local
 .claude/settings.local.json
 mobile/.expo/
+mobile/ios/
+mobile/android/
+mobile/*.ipa
+mobile/*.apk
+mobile/*.aab
+mobile/eas-build-*.tar.gz
+*.p8
+*.p12
+*.mobileprovision
+AuthKey_*.p8
+GoogleService-Info.plist

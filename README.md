@@ -43,7 +43,7 @@ Live site → **[avinashamanchi.github.io/convoautopsy](https://avinashamanchi.g
 ```bash
 git clone https://github.com/avinashamanchi/convoautopsy.git
 cd convoautopsy
-npm install
+npm ci
 ```
 
 ### 2. Configure the public proxy endpoint (optional)
@@ -80,8 +80,9 @@ npm ci
 npm test
 npm run typecheck
 npm run lint
-npx expo-doctor
+npm run expo:doctor
 npm run export:ios
+npm audit --audit-level=high
 ```
 
 For a bounded Expo Go smoke test on the same network, run `npx expo start --lan --clear`, scan the generated QR code with Expo Go, and stop the server when finished. Expo Go does not compile the local Swift Vision OCR module; its screenshot import fallback is expected there. Physical-device navigation, input, history, accessibility, offline, and share observations remain a user-run release checkpoint.
@@ -139,7 +140,8 @@ convoautopsy/
 ├── server/ai-proxy/            # Cloudflare Worker and Durable Object limiter
 ├── .github/workflows/
 │   ├── deploy.yml              # GitHub Actions → GitHub Pages
-│   └── ios-ci.yml              # Node 22 web, mobile, and Worker gates
+│   ├── ios-ci.yml              # Node 22 web, mobile, and Worker gates
+│   └── release-readiness.yml   # Manual local gates; never deploys or submits
 └── vite.config.js              # Vite config for the web application
 ```
 
