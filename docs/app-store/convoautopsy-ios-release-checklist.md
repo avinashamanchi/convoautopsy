@@ -19,9 +19,16 @@
 
 ## Automated verification record
 
-The ignored task scratch report is supplemental only and is not release evidence. Historical clean-clone evidence is limited to `2c797813611ddb8277566da8422f9a6e3f5a3482` and does not validate later commits.
+The ignored task scratch report is supplemental only and is not release evidence. Historical evidence does not validate later commits.
 
-The consolidated final-review candidate passed under Node 22 in the working tree: root test (8 files / 37 tests), lint, build, and full/production audits with 0 vulnerabilities; mobile test (29 suites / 203 tests), typecheck, lint, Expo Doctor 18/18, and iOS export; and Worker test (5 files / 34 tests), typecheck, lint, dry-run bundle, and full/production audits with 0 vulnerabilities. The Worker test integration is on Vitest 4 and reads the pinned `2025-09-06` Wrangler compatibility date without a runtime fallback warning. The mobile audit still reports 15 full-tree vulnerabilities (14 moderate, 1 high) and 14 production-tree vulnerabilities (13 moderate, 1 high); npm's proposed corrections require the deferred breaking Expo 57 migration. Authoritative final-SHA clean-clone evidence belongs in the task handoff rather than this checklist.
+The exact committed candidate `d2a02edbced8d3984058ebc0814b97612824ac22` passed from a fresh `git clone --no-hardlinks` under Node 22:
+
+- Root web: 8 test files / 39 tests, lint, production build, and production dependency audit with 0 vulnerabilities.
+- Mobile: 29 suites / 203 tests, typecheck, lint, Expo Doctor 18/18, iOS export (1,445 modules; 4.43 MB Hermes bundle), and production dependency audit with 0 vulnerabilities.
+- Worker: 5 test files / 34 tests, typecheck, lint, Wrangler dry-run bundle (165.96 KiB / 30.57 KiB gzip), and production dependency audit with 0 vulnerabilities.
+- Release structure: all workflow YAML parsed, the redacted tracked/bundle secret scan passed, the icon was confirmed as an opaque 1024×1024 RGB PNG, and a clean iOS Expo prebuild completed without changing tracked files.
+
+The web build still emits a non-blocking 1,466.83 kB chunk-size warning. That optimization should be measured separately and is not hidden by this release record.
 
 ## Physical-device checkpoint (user observation required)
 
@@ -49,7 +56,7 @@ The consolidated final-review candidate passed under Node 22 in the working tree
 - [ ] The AI proxy is undeployed; no Cloudflare or Groq credential has been entered. The current tree is credential-free.
 - [ ] Historical GitHub token revocation and an authorized history purge remain pending; history scans must not print candidate values.
 - [ ] Swift OCR is uncompiled, Expo Go physical observations are pending, and the current machine has only Command Line Tools selected rather than a usable Xcode installation.
-- [x] Automated @2x/@3x report-capture tests target 1080×1920 pixels, and the configured app icon is a 1024×1024 PNG. Physical share-output and App Store screenshot review remain pending.
-- [ ] The deferred Expo 57 audit correction and a risky web chunk rewrite were intentionally not attempted in this repair wave.
+- [x] Automated @2x/@3x report-capture tests target 1080×1920 pixels, and the configured app icon is an opaque 1024×1024 RGB PNG. Physical share-output and App Store screenshot review remain pending; the required capture set is documented in `convoautopsy-screenshot-matrix.md`.
+- [x] Current production dependency audits are clean without a breaking Expo 57 migration. The web chunk-size warning remains documented rather than suppressed.
 
 No App Store acceptance or publication is claimed by this checklist.
