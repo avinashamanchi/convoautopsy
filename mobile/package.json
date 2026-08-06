@@ -5,6 +5,7 @@
   "scripts": {
     "start": "expo start",
     "ios": "expo run:ios",
+    "android": "expo run:android",
     "test": "jest --runInBand",
     "test:watch": "jest --watch",
     "typecheck": "tsc --noEmit",
