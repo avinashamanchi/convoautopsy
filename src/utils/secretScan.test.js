@@ -90,4 +90,53 @@ describe('redacted secret scanner', () => {
       { path: 'mobile/.env.example', content: 'EXPO_PUBLIC_REVENUECAT_IOS_API_KEY=appl_example_public_sdk_key\nEXPO_PUBLIC_AI_PROXY_URL=https://your-worker.example' },
     ])).toEqual([])
   })
+
+  it('rejects every client-public secret-shaped variable except the exact RevenueCat Apple SDK variable', () => {
+    const names = [
+      ['EXPO', 'PUBLIC', 'REVENUECAT', 'SECRET', 'API', 'KEY'].join('_'),
+      ['EXPO', 'PUBLIC', 'CLOUDFLARE', 'API', 'TOKEN'].join('_'),
+      ['VITE', 'STRIPE', 'SECRET', 'KEY'].join('_'),
+      ['NEXT', 'PUBLIC', 'ACCOUNT', 'PASSWORD'].join('_'),
+      ['REACT', 'APP', 'SIGNING', 'PRIVATE', 'KEY'].join('_'),
+      ['VITE', 'UNAPPROVED', 'API', 'KEY'].join('_'),
+    ]
+    const entries = names.flatMap((name, index) => [
+      { path: `mobile/src/config-${index}.ts`, content: `process.env.${name}` },
+      { path: `mobile/dist/_expo/config-${index}.js`, content: `process.env.${name}` },
+    ])
+
+    expect(scanEntries(entries)).toEqual(entries
+      .map(({ path }) => ({ path, rule: 'client-public-secret-name' }))
+      .sort((left, right) => left.path.localeCompare(right.path)))
+  })
+
+  it('detects recognizable RevenueCat secret and Expo or EAS token literals in source and built artifacts without printing candidates', () => {
+    const candidates = [
+      ['sk', 'A'.repeat(32)].join('_'),
+      ['expo', 'B'.repeat(32)].join('_'),
+      ['eas', 'C'.repeat(32)].join('_'),
+    ]
+    const entries = [
+      { path: 'mobile/src/first.ts', content: candidates[0] },
+      { path: 'mobile/dist/_expo/second.js', content: candidates[1] },
+      { path: 'dist/assets/third.js', content: candidates[2] },
+    ]
+    const findings = scanEntries(entries)
+    const output = formatFindings(findings)
+
+    expect(findings).toEqual([
+      { path: 'dist/assets/third.js', rule: 'expo-token' },
+      { path: 'mobile/dist/_expo/second.js', rule: 'expo-token' },
+      { path: 'mobile/src/first.ts', rule: 'revenuecat-token' },
+    ])
+    for (const candidate of candidates) expect(output).not.toContain(candidate)
+  })
+
+  it('allows a literal public RevenueCat appl key in source and a built artifact', () => {
+    const publicKey = ['appl', 'Q7mP2xR9kL4vN8sT6yW3'].join('_')
+    expect(scanEntries([
+      { path: 'mobile/src/billing.ts', content: publicKey },
+      { path: 'mobile/dist/_expo/billing.js', content: publicKey },
+    ])).toEqual([])
+  })
 })

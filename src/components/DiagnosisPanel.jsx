@@ -3,10 +3,10 @@ import { gsap } from 'gsap'
 import './DiagnosisPanel.css'
 
 const MESSAGES = [
-  { sender: 'Person A', text: 'Whatever, do what you want.', tag: 'Stonewalling', ego: 'Child', hidden: 'I am hurt but refuse to engage.' },
-  { sender: 'Person B', text: 'You always do this.', tag: 'Criticism', ego: 'Parent', hidden: 'I feel unheard and resort to blame.' },
-  { sender: 'Person A', text: "I don't even care anymore.", tag: 'Contempt', ego: 'Child', hidden: 'I care deeply but feel powerless.' },
-  { sender: 'Person B', text: "That's not what I said.", tag: 'Defensiveness', ego: 'Adult', hidden: 'I feel attacked and shut down.' },
+  { sender: 'Person A', text: 'Whatever, do what you want.', tag: 'Stonewalling', ego: 'Child', hidden: 'This wording may reflect hurt or reluctance to engage.' },
+  { sender: 'Person B', text: 'You always do this.', tag: 'Criticism', ego: 'Parent', hidden: 'This wording may reflect feeling unheard.' },
+  { sender: 'Person A', text: "I don't even care anymore.", tag: 'Contempt', ego: 'Child', hidden: 'This wording may reflect frustration or distance.' },
+  { sender: 'Person B', text: "That's not what I said.", tag: 'Defensiveness', ego: 'Adult', hidden: 'This wording may reflect disagreement or feeling challenged.' },
 ]
 
 const TAG_COLORS = {
@@ -54,13 +54,13 @@ export default function DiagnosisPanel({ visible }) {
       {/* Header */}
       <div className="dp-header">
         <div className="dp-title-row">
-          <span className="dp-label">autopsy report</span>
+          <span className="dp-label">educational estimate</span>
           <span className="dp-timestamp">just now</span>
         </div>
         <div className="dp-scores">
           <div className="dp-score-card tension">
             <div className="dp-score-num" ref={scoreRef}>0</div>
-            <div className="dp-score-label">tension score</div>
+            <div className="dp-score-label">intensity estimate</div>
             <div className="dp-score-bar">
               <div className="dp-score-fill" style={{ width: visible ? '85%' : '0%' }} />
             </div>
@@ -90,7 +90,7 @@ export default function DiagnosisPanel({ visible }) {
                   <span className="dp-ego" style={{ color: EGO_COLORS[msg.ego] }}>{msg.ego} state</span>
                 </div>
                 <div className="dp-hidden">
-                  <span className="dp-hidden-label">hidden meaning</span>
+                  <span className="dp-hidden-label">possible interpretation</span>
                   <span className="dp-hidden-text">{msg.hidden}</span>
                 </div>
               </div>
@@ -102,7 +102,7 @@ export default function DiagnosisPanel({ visible }) {
       {/* Footer */}
       <div className="dp-footer">
         <button className="dp-share-btn">Download receipt</button>
-        <span className="dp-powered">powered by claude + gottman</span>
+        <span className="dp-powered">Educational estimate; may be incomplete or wrong.</span>
       </div>
     </div>
   )

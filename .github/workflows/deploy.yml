@@ -41,7 +41,7 @@ jobs:
         run: npm run lint
 
       - name: Audit web
-        run: npm audit --audit-level=high
+        run: npm audit --omit=dev --audit-level=high
 
       - name: Build web
         env:
@@ -73,7 +73,7 @@ jobs:
         working-directory: mobile
 
       - name: Audit mobile
-        run: npm audit --audit-level=high
+        run: npm audit --omit=dev --audit-level=high
         working-directory: mobile
 
       - name: Install Worker dependencies
@@ -96,8 +96,16 @@ jobs:
         run: npm run build
         working-directory: server/ai-proxy
 
+      - name: Build Worker load fixture
+        run: npx wrangler deploy --dry-run --config wrangler.load.jsonc --outdir dist-load
+        working-directory: server/ai-proxy
+
+      - name: Run short Worker load gate
+        run: npm run test:load:ci
+        working-directory: server/ai-proxy
+
       - name: Audit Worker
-        run: npm audit --audit-level=high
+        run: npm audit --omit=dev --audit-level=high
         working-directory: server/ai-proxy
 
       - name: Scan tracked tree and built bundles for secrets

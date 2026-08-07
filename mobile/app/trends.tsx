@@ -1,7 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { router, useFocusEffect } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useBilling } from '../src/billing/BillingProvider';
 import { PrimaryButton } from '../src/components/PrimaryButton';
 import { Screen } from '../src/components/Screen';
 import type { TrendSummary } from '../src/services/reportRepository';
@@ -12,7 +11,6 @@ const WINDOW_MILLISECONDS = 30 * 24 * 60 * 60 * 1_000;
 const systemNow = () => new Date();
 
 export default function TrendsScreen({ now = systemNow }: Readonly<{ now?: () => Date }>) {
-  const { entitlementActive } = useBilling();
   const { repository, revision, deletingAll } = useReportRepository();
   const [summary, setSummary] = useState<TrendSummary | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -30,7 +28,7 @@ export default function TrendsScreen({ now = systemNow }: Readonly<{ now?: () =>
     void attempt;
     void revision;
     const generation = ++generationRef.current;
-    if (!entitlementActive || deletingAll) {
+    if (deletingAll) {
       setSummary(null);
       setStatus('ready');
       return () => { generationRef.current += 1; };
@@ -47,18 +45,7 @@ export default function TrendsScreen({ now = systemNow }: Readonly<{ now?: () =>
       },
     );
     return () => { if (generationRef.current === generation) generationRef.current += 1; };
-  }, [attempt, deletingAll, entitlementActive, repository, revision, window.fromInclusive, window.toExclusive]));
-
-  if (!entitlementActive) {
-    return (
-      <Screen>
-        <Text accessibilityRole="header" style={styles.title}>Private Trends</Text>
-        <Text style={styles.message}>Private Trends is a Convo Pro feature.</Text>
-        <Text style={styles.message}>Summaries are computed only from analyses saved on this device.</Text>
-        <PrimaryButton label="Unlock Private Trends" onPress={() => router.push('/upgrade?source=trends')} />
-      </Screen>
-    );
-  }
+  }, [attempt, deletingAll, repository, revision, window.fromInclusive, window.toExclusive]));
 
   return (
     <Screen>

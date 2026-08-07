@@ -5,9 +5,8 @@ import HistoryScreen from '../app/(tabs)/history';
 import { ReportRepositoryProvider } from '../src/services/reportRepositoryContext';
 import type { PreferenceStore, ReportPage, ReportRepository, SavedReport, TrendSummary } from '../src/services/reportRepository';
 
-let mockPro = false;
 jest.mock('../src/billing/BillingProvider', () => ({
-  useBilling: () => ({ entitlementActive: mockPro }),
+  useBilling: () => ({ entitlementActive: false }),
 }));
 
 jest.mock('expo-router', () => ({
@@ -48,22 +47,22 @@ function renderScreen(node: React.ReactElement, repository: ReportRepository) {
 }
 
 beforeEach(() => {
-  mockPro = false;
   jest.clearAllMocks();
 });
 
-it('keeps trends local and opens the upgrade route for free users without querying reports', async () => {
+it('keeps Private Trends free and local while querying saved reports for free users', async () => {
   const repository = new TrendRepository();
   renderScreen(<TrendsScreen now={() => new Date('2026-08-07T12:00:00.000Z')} />, repository);
 
-  expect(await screen.findByText('Private Trends is a Convo Pro feature.')).toBeOnTheScreen();
-  expect(repository.calls).toEqual([]);
-  fireEvent.press(screen.getByRole('button', { name: 'Unlock Private Trends' }));
-  expect(router.push).toHaveBeenCalledWith('/upgrade?source=trends');
+  expect(await screen.findByLabelText('Loading private trends')).toBeOnTheScreen();
+  expect(repository.calls).toEqual([['2026-07-08T12:00:00.000Z', '2026-08-07T12:00:00.000Z']]);
+  expect(screen.queryByText('Private Trends is a Convo Pro feature.')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Unlock Private Trends' })).toBeNull();
+  await act(async () => repository.next.resolve({ reportCount: 0, averageIntensity: null, conflictModes: {}, patterns: {} }));
+  expect(await screen.findByText('No saved analyses in this window.')).toBeOnTheScreen();
 });
 
-it('shows the exact local time window, bounded summary, and limitation for Pro', async () => {
-  mockPro = true;
+it('shows the exact local time window, bounded summary, and limitation', async () => {
   const repository = new TrendRepository();
   renderScreen(<TrendsScreen now={() => new Date('2026-08-07T12:00:00.000Z')} />, repository);
   expect(await screen.findByLabelText('Loading private trends')).toBeOnTheScreen();
@@ -81,7 +80,6 @@ it('shows the exact local time window, bounded summary, and limitation for Pro',
 });
 
 it('retries a failed trend read without hiding the error from assistive technology', async () => {
-  mockPro = true;
   const repository = new TrendRepository();
   renderScreen(<TrendsScreen now={() => new Date('2026-08-07T12:00:00.000Z')} />, repository);
   await act(async () => repository.next.reject(new Error('unavailable')));
@@ -101,7 +99,6 @@ it('makes Private Trends discoverable from History', async () => {
 });
 
 it('keeps the default trend window stable after the summary rerenders', async () => {
-  mockPro = true;
   const repository = new TrendRepository();
   repository.next.resolve({ reportCount: 1, averageIntensity: 20, conflictModes: { Collaborating: 1 }, patterns: { Neutral: 1 } });
   renderScreen(<TrendsScreen />, repository);

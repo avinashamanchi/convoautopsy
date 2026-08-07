@@ -84,3 +84,42 @@ Task 8B did not change Worker or rate-limit code in response. The candidate rema
 ## Pending external evidence
 
 Apple membership/agreements/tax/banking/D-U-N-S-if-organization, App Store record/products/forms, RevenueCat offering/transfer/webhook state, Cloudflare resources/secrets/domain/deployment, EAS project/env/build, legal URL HTTP 200, signed native purchase/restore/OCR/accessibility/offline/device tests, screenshots, TestFlight, upload, review, publication, and live-listing verification all remain pending.
+
+## Reviewer follow-up and controller closure
+
+The independent controller first verified commit `8b4388fb3c8746f87ae1b9583eb6dbde4a1afed8`: root 45/45, mobile 333/333, Worker 126/126, Expo Doctor 18/18, iOS export, production and fixture dry builds, scans, audits, configuration guards, and workflow checks passed. It also ran three consecutive identical short 100/101 gates successfully. That evidence qualifies the original short gate while retaining the first 65-request anomaly above.
+
+Review then identified release-truth gaps. This follow-up preserved and did not stage the user-owned `server/ai-proxy/src/rateLimit.ts` edit or the untracked readiness plan.
+
+### Follow-up RED evidence before production edits
+
+- Root focused: 22 tests, 7 failed and 15 passed. The failures covered two scanner rules, two customer-copy truth checks, two legacy-release identity checks, and the Pages pre-upload load gate.
+- Mobile focused: 43 tests, 12 failed and 31 passed. The failures covered six adversarial proxy-origin cases, four free-Trends behaviors, and two retained/save/share copy checks.
+- Incremental controller findings were also driven red before edits: customer copy had 1 failure / 1 pass for rendered signup and interpretation wording; proxy config had 7 failures / 31 passes for special-use DNS suffixes.
+
+### Follow-up implementation
+
+- Hardened the production proxy-origin allow boundary against trailing-dot and single-label hosts, subdomains of example domains, private/reserved/documentation addresses, literal IPv6, and local/special-use suffixes including `.arpa`, `.internal`, `.lan`, `.home`, `.corp`, and `.onion`. Errors remain value-free.
+- Hardened the scanner for any secret-shaped client-public variable except the exact public RevenueCat Apple SDK variable, recognizable RevenueCat `sk_` and Expo/EAS token literals, and source/built artifacts. Public `appl_` keys remain allowed; output remains path/rule-only.
+- Replaced anonymity overclaims with pseudonymous-label and residual-identifier disclosures. Saving without the original source still truthfully discloses that parsed message text is retained; exported report images omit message text.
+- Replaced clinical, intent, certainty, verdict, and guaranteed-response claims with educational estimate, possible-interpretation, and reflection wording across landing, onboarding, signup, result, and demo-panel copy. The explicit negative limitation that output is not a clinical diagnosis or factual finding remains.
+- Made Private Trends free and local, removed its entitlement gate and upgrade CTA, and retained its deletion/race/retry behavior. Paid value remains unlimited saved reports plus the disclosed remote fair-use allowances.
+- Hard-disabled the historical Capacitor release scripts with a deterministic guard that points to `mobile/` Expo/EAS as the only iOS release target, without changing the old target ID.
+- Added fixture dry build, short load gate, production-only audits, and `dist-load` scanning to the Pages workflow before artifact upload.
+
+### Fresh follow-up verification
+
+- Focused green: root 4 files / 22 tests; mobile 3 suites / 43 tests; incremental copy/config checks 3/3 and 38/38.
+- Full root: 10 files / 52 tests, zero-warning lint, and production build passed under Node 22. The existing 1,466.75 kB large-chunk warning remains visible.
+- Full mobile: 38 suites / 356 tests, TypeScript, declared lint, Expo Doctor 18/18, and iOS export passed under Node 22. Export bundled 1,494 modules into a 5.96 MB Hermes bundle.
+- Full Worker: 10 files / 126 tests, TypeScript, zero-warning lint, production dry build at 195.00 KiB / 36.24 KiB gzip, and fixture dry build at 202.35 KiB / 38.75 KiB gzip passed under Node 22.
+- The redacted tracked plus web/mobile/production-Worker/fixture-Worker scan passed. Root, mobile, and Worker production audits each returned 0 vulnerabilities.
+- Missing and sanitized-example production configs exited nonzero. A synthetic valid production config passed with the authoritative bundle ID and neither public value in Expo `extra`.
+- All three workflow YAML files parsed. Publication/workflow/identity regressions passed.
+- A fresh exact short gate passed with 100 active reservations, 165 allowed requests, one expected `SERVICE_BUSY`, zero non-injected failures, and zero leaked reservations:
+
+```json
+{"gate":"pass","failureCodes":[],"capacityPeakReservations":100,"requests":166,"nonInjectedRequests":165,"nonInjectedFailures":0,"nonInjectedFailureRate":0,"statusCounts":{"200":165,"503":1},"codeCounts":{"allowed":165,"SERVICE_BUSY":1},"latencyMs":{"p50":1569.9429999999993,"p95":1585.0259999999998,"p99":1835.8948330000003},"activeReservations":0}
+```
+
+No credential, deployment, signed build, device purchase, TestFlight action, App Store submission, review outcome, publication, or external URL availability is inferred from this follow-up.

@@ -44,10 +44,15 @@ const appStoreConnectCredentialAssignment = credentialAssignmentPattern([
   ['ASC', 'API', 'KEY'].join('_'),
   ['ASC', 'PRIVATE', 'KEY'].join('_'),
 ])
+const allowedClientPublicVariable = 'EXPO_PUBLIC_REVENUECAT_IOS_API_KEY'
+const clientPublicVariable = /\b(?:EXPO_PUBLIC|VITE|NEXT_PUBLIC|REACT_APP)_[A-Z0-9_]+\b/g
+const secretShapedVariable = /(?:^|_)(?:SECRET|TOKEN|PASSWORD|PRIVATE_KEY|API_KEY)(?:_|$)/
 
 const contentRules = [
   { rule: 'github-token', pattern: /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/ },
   { rule: 'provider-token', pattern: /\b(?:gsk_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{20,})\b/ },
+  { rule: 'revenuecat-token', pattern: /\bsk_[A-Za-z0-9_-]{20,}\b/ },
+  { rule: 'expo-token', pattern: /\b(?:expo|eas)_[A-Za-z0-9_-]{20,}\b/ },
   { rule: 'private-key', pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----/ },
   { rule: 'revenuecat-secret', pattern: revenueCatSecretAssignment },
   { rule: 'cloudflare-credential', pattern: cloudflareCredentialAssignment },
@@ -55,7 +60,6 @@ const contentRules = [
   { rule: 'apple-credential', pattern: appleCredentialAssignment },
   { rule: 'app-store-connect-credential', pattern: appStoreConnectCredentialAssignment },
   { rule: 'secret-assignment', pattern: sensitiveAssignment },
-  { rule: 'public-provider-secret-name', pattern: /(?:VITE|EXPO_PUBLIC)_(?:GROQ|OPENAI)_API_KEY/ },
 ]
 
 export function scanEntries(entries) {
@@ -67,6 +71,11 @@ export function scanEntries(entries) {
     for (const { rule, pattern } of contentRules) {
       pattern.lastIndex = 0
       if (pattern.test(entry.content)) findings.push({ path: entry.path, rule })
+    }
+    clientPublicVariable.lastIndex = 0
+    if ([...entry.content.matchAll(clientPublicVariable)]
+      .some(([name]) => name !== allowedClientPublicVariable && secretShapedVariable.test(name))) {
+      findings.push({ path: entry.path, rule: 'client-public-secret-name' })
     }
     if (isClientPath(entry.path) && /api\.groq\.com|Authorization\s*:\s*[`'"]Bearer\s+/i.test(entry.content)) {
       findings.push({ path: entry.path, rule: 'client-direct-provider' })

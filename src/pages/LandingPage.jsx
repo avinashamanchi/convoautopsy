@@ -71,17 +71,17 @@ function HeroSection({ user, onGetStarted }) {
       <div className="lp-hero-left">
         <div className="lp-eyebrow">
           <span className="lp-eyebrow-dot" />
-          AI-powered conversation diagnostics
+          Educational conversation reflection
         </div>
 
         <h1 ref={headRef} className="lp-h1">
-          Know exactly<br />
-          <span className="lp-gradient-text">what went wrong.</span>
+          See wording patterns.<br />
+          <span className="lp-gradient-text">Reflect before replying.</span>
         </h1>
 
         <p ref={subRef} className="lp-hero-sub">
-          ConvoAutopsy analyzes any conversation and tells you who escalated it,
-          why it broke down — and exactly what to say next.
+          ConvoAutopsy offers educational estimates of conversation patterns,
+          then helps you draft options to review and edit before sending.
         </p>
 
         <div ref={ctaRef} className="lp-hero-ctas">
@@ -96,22 +96,22 @@ function HeroSection({ user, onGetStarted }) {
         <div ref={statsRef} className="lp-hero-stats">
           <div className="lp-stat">
             <span className="lp-stat-num">4</span>
-            <span className="lp-stat-label">Frameworks</span>
+            <span className="lp-stat-label">Pattern lenses</span>
           </div>
           <div className="lp-stat-divider" />
           <div className="lp-stat">
             <span className="lp-stat-num">100</span>
-            <span className="lp-stat-label">Point Scale</span>
+            <span className="lp-stat-label">Estimate scale</span>
           </div>
           <div className="lp-stat-divider" />
           <div className="lp-stat">
-            <span className="lp-stat-num">∞</span>
-            <span className="lp-stat-label">Instant Analysis</span>
+            <span className="lp-stat-num">Local</span>
+            <span className="lp-stat-label">Private mode</span>
           </div>
           <div className="lp-stat-divider" />
           <div className="lp-stat">
             <span className="lp-stat-num">3×</span>
-            <span className="lp-stat-label">Tailored Responses</span>
+            <span className="lp-stat-label">Editable drafts</span>
           </div>
         </div>
       </div>
@@ -124,9 +124,9 @@ function HeroSection({ user, onGetStarted }) {
 
 // ── How It Works ───────────────────────────────────────────────────
 const STEPS = [
-  { n: '01', icon: '📋', title: 'Paste Your Conversation', body: 'Format as Name: Message, one per line. Texts, DMs, emails — anything works. Names are anonymized to Person A and B automatically.' },
-  { n: '02', icon: '🧠', title: 'AI Analyzes Patterns', body: "Powered by Gottman's Four Horsemen, Thomas-Kilmann conflict modes, and Transactional Analysis — the same frameworks therapists use in session." },
-  { n: '03', icon: '📊', title: 'Get Your Diagnosis', body: 'Every message gets flagged. Tension scored 0–100. Hidden meanings revealed. Then craft the perfect response in 3 steps.' },
+  { n: '01', icon: '📋', title: 'Paste Your Conversation', body: 'Format as Name: Message, one per line. Participant labels become pseudonymous Person A and B labels, but message text can still contain identifying details.' },
+  { n: '02', icon: '🧠', title: 'Estimate Patterns', body: "Review educational labels inspired by Gottman's Four Horsemen, Thomas-Kilmann conflict modes, and Transactional Analysis." },
+  { n: '03', icon: '📊', title: 'Reflect and Draft', body: 'Messages may receive descriptive labels and a 0–100 intensity estimate. Interpretations are possibilities, not intent. Drafts remain yours to review and edit.' },
 ]
 
 function HowItWorksSection() {
@@ -149,7 +149,7 @@ function HowItWorksSection() {
         <div className="lp-section-header">
           <span className="lp-eyebrow">how it works</span>
           <h2 className="lp-h2">Three steps to clarity</h2>
-          <p className="lp-section-sub">From raw conversation to clinical breakdown in under 10 seconds.</p>
+          <p className="lp-section-sub">From raw conversation to an educational estimate for reflection.</p>
         </div>
         <div className="lp-three-col">
           {STEPS.map(s => (
@@ -300,7 +300,7 @@ function LiveDemoSection({ onGetStarted }) {
             {!result && !loading && (
               <div className="demo-empty-state">
                 <div className="demo-empty-icon">🔬</div>
-                <p>Clinical analysis appears here.<br />Scroll down slightly to trigger the live demo.</p>
+                <p>An educational estimate appears here.<br />Scroll down slightly to start the live demo.</p>
               </div>
             )}
             {loading && (
@@ -318,7 +318,7 @@ function LiveDemoSection({ onGetStarted }) {
                   <span className="demo-step-sep">→</span>
                   <span>Ego states</span>
                   <span className="demo-step-sep">→</span>
-                  <span>Tension score</span>
+                  <span>Intensity estimate</span>
                 </div>
               </div>
             )}
@@ -326,12 +326,12 @@ function LiveDemoSection({ onGetStarted }) {
               <>
                 <div className="demo-result-inner">
                   <div className="demo-result-header">
-                    <span className="demo-result-tag">autopsy report</span>
+                    <span className="demo-result-tag">educational estimate</span>
                     <span className="demo-live-badge">● LIVE</span>
                   </div>
                   <div className="demo-score-row">
                     <div>
-                      <div className="demo-score-label">tension score</div>
+                      <div className="demo-score-label">intensity estimate</div>
                       <div className="demo-score-big" style={{ color: sc }}>{scoreDisplay}</div>
                     </div>
                     <div className="demo-right-meta">
@@ -386,7 +386,7 @@ const USE_CASES = [
     score: 82,
     mode: 'Competing vs Avoiding',
     scoreColor: '#f87171',
-    insight: "Jordan opens with a Four Horsemen-level criticism ('you never'), triggering Alex's defensive ego state. The conversation collapses into stonewalling before any real issue gets addressed.",
+    insight: "Possible reflection: repeated 'never' and 'always' wording resembles criticism labels, while 'whatever' may resemble disengagement. This estimate cannot establish motives or events outside the excerpt.",
   },
   {
     id: 'workplace',
@@ -401,7 +401,7 @@ const USE_CASES = [
     score: 71,
     mode: 'Competing',
     scoreColor: '#fbbf24',
-    insight: "The manager leads with criticism rather than inquiry, triggering employee defensiveness. 'That's not an excuse' signals contempt — the most toxic Gottman pattern. The 'Fine' response is classic stonewalling under pressure.",
+    insight: "Possible reflection: the opening may read as criticism rather than inquiry, and 'Fine' may read as withdrawal. These labels are descriptive possibilities, not facts about either person's intent.",
   },
   {
     id: 'dating',
@@ -416,7 +416,7 @@ const USE_CASES = [
     score: 58,
     mode: 'Avoiding',
     scoreColor: '#fbbf24',
-    insight: "Sam's question contains an embedded accusation ('just going through the motions'), which triggers Riley's Adult-state defensiveness. Sam's third message is actually healthy — but it arrives too late after Riley has already shut down.",
+    insight: "Possible reflection: the opening question may feel accusatory, while the final request to pause may resemble avoidance. Only the participants can explain what they intended.",
   },
   {
     id: 'family',
@@ -431,7 +431,7 @@ const USE_CASES = [
     score: 76,
     mode: 'Competing vs Avoiding',
     scoreColor: '#f87171',
-    insight: "Parent opens from a critical Parent ego state ('you need to grow up') which activates the Child's defensive response. Both parties then compete in criticism before the Child stonewalls — a generational conflict pattern.",
+    insight: "Possible reflection: several absolute statements resemble criticism labels, and the final 'whatever' may resemble withdrawal. The excerpt is not enough to determine blame or a family pattern.",
   },
 ]
 
@@ -466,8 +466,8 @@ function UseCasesSection() {
       <div className="lp-container">
         <div className="lp-section-header">
           <span className="lp-eyebrow">use cases</span>
-          <h2 className="lp-h2">Works for every kind of conflict</h2>
-          <p className="lp-section-sub">Real conversation patterns. Real psychological frameworks. Real insights.</p>
+          <h2 className="lp-h2">Explore different conversation contexts</h2>
+          <p className="lp-section-sub">Educational examples show estimates that may be incomplete or wrong.</p>
         </div>
 
         <div className="uc-tabs">
@@ -506,11 +506,11 @@ function UseCasesSection() {
 
             <div className="uc-analysis-col">
               <div className="uc-analysis-header">
-                <div className="uc-analysis-label">autopsy report</div>
+                <div className="uc-analysis-label">educational estimate</div>
                 <div className="uc-score-row">
                   <div className="uc-score-block">
                     <span className="uc-score-num" style={{ color: current.scoreColor }}>{current.score}</span>
-                    <span className="uc-score-sub">tension</span>
+                    <span className="uc-score-sub">intensity estimate</span>
                   </div>
                   <div className="uc-mode-pill">{current.mode}</div>
                 </div>
@@ -519,7 +519,7 @@ function UseCasesSection() {
                 </div>
               </div>
               <div className="uc-insight">
-                <div className="uc-insight-label">clinical insight</div>
+                <div className="uc-insight-label">possible reflection</div>
                 <p className="uc-insight-text">{current.insight}</p>
               </div>
               <div className="uc-flags-row">
@@ -539,9 +539,9 @@ function UseCasesSection() {
 
 // ── Why Section ────────────────────────────────────────────────────
 const WHY = [
-  { icon: '💬', title: 'Stop going in circles', body: 'Understand what actually happened in any argument. Get the clinical verdict with specific message-by-message breakdowns — not just a gut feeling.' },
-  { icon: '🪞', title: 'See your own patterns', body: "Identify your conflict mode before it repeats. Find out if you're the one stonewalling, criticizing, or avoiding — and what to do about it." },
-  { icon: '✍️', title: 'Know what to say next', body: 'The Response Crafter turns your analysis into 3 tailored message options — matched to your goal, tone, and the specific patterns detected.' },
+  { icon: '💬', title: 'Slow down the replay', body: 'Review message-by-message wording estimates and consider more than one possible interpretation.' },
+  { icon: '🪞', title: 'Reflect on your wording', body: 'Notice recurring labels in saved analyses without treating them as facts, intent, or blame.' },
+  { icon: '✍️', title: 'Draft before sending', body: 'Create three editable message options based on the goal and tone you choose, then review them yourself.' },
 ]
 
 function WhySection() {
@@ -563,8 +563,8 @@ function WhySection() {
       <div className="lp-container">
         <div className="lp-section-header">
           <span className="lp-eyebrow">why it matters</span>
-          <h2 className="lp-h2">More than pattern matching</h2>
-          <p className="lp-section-sub">ConvoAutopsy applies the same frameworks therapists use — to the texts you've been staring at all night.</p>
+          <h2 className="lp-h2">Structured reflection, with limits</h2>
+          <p className="lp-section-sub">ConvoAutopsy uses educational, framework-inspired estimates that may miss context and cannot determine intent.</p>
         </div>
         <div className="lp-three-col">
           {WHY.map(c => (
@@ -640,13 +640,13 @@ function ResponseCrafterShowcase({ onGetStarted }) {
       )
     },
     {
-      step: 4, label: 'Get 3 tailored responses',
+      step: 4, label: 'Review 3 editable drafts',
       preview: (
         <div className="rcs-preview-responses">
           {[
-            { hint: "Drops defenses first", text: "Let's both slow down. I don't want to fight — I care about this, which is why I'm still here." },
-            { hint: "Breaks the attack-defend cycle", text: "I'm going to stop defending myself. I think we're both hurt. What if we focused on what we need?" },
-            { hint: "Buys time without abandoning", text: "Can we take a short pause and come back? I'm not walking away — I want this to go somewhere." },
+            { hint: "Opens with a pause", text: "Let's both slow down. I don't want to fight — I care about this, which is why I'm still here." },
+            { hint: "Names a possible cycle", text: "I'm going to stop defending myself. I think we're both hurt. What if we focused on what we need?" },
+            { hint: "Requests a clear pause", text: "Can we take a short pause and come back? I'm not walking away — I want this to go somewhere." },
           ].map((r, i) => (
             <div key={i} className="rcs-response">
               <div className="rcs-response-top">
@@ -666,8 +666,8 @@ function ResponseCrafterShowcase({ onGetStarted }) {
       <div className="lp-container">
         <div className="lp-section-header">
           <span className="lp-eyebrow">response crafter</span>
-          <h2 className="lp-h2">Know exactly what to say.</h2>
-          <p className="lp-section-sub">After the analysis, a 4-step wizard generates 3 tailored response options — matched to your goal and tone.</p>
+          <h2 className="lp-h2">Draft before you reply.</h2>
+          <p className="lp-section-sub">After the estimate, a 4-step wizard offers three editable drafts based on the goal and tone you choose.</p>
         </div>
 
         <div className="rcs-layout">
@@ -708,21 +708,21 @@ const FRAMEWORKS = [
   {
     tag: 'Gottman', tagColor: '#f87171', tagBg: 'rgba(248,113,113,0.12)',
     name: "Four Horsemen",
-    desc: "John Gottman's research-backed predictors of relationship failure — each identified in your messages.",
+    desc: "Educational labels inspired by published relationship research; they do not predict outcomes or establish facts.",
     flags: ['Criticism','Contempt','Defensiveness','Stonewalling'],
     flagColor: '#f87171',
   },
   {
     tag: 'TKI', tagColor: '#fbbf24', tagBg: 'rgba(251,191,36,0.1)',
     name: "Conflict Modes",
-    desc: "Thomas-Kilmann Instrument identifies your conflict style from five possible modes of engagement.",
+    desc: "Educational conflict-style estimates across five possible modes of engagement; context may change the result.",
     flags: ['Competing','Avoiding','Accommodating','Collaborating','Compromising'],
     flagColor: '#fbbf24',
   },
   {
     tag: 'TA', tagColor: '#a78bfa', tagBg: 'rgba(167,139,250,0.12)',
     name: "Ego States",
-    desc: "Transactional Analysis reveals which ego state drives each message — and the hidden transaction beneath it.",
+    desc: "Educational ego-state labels for reflection; they do not determine a sender's state, motive, or intent.",
     flags: ['Parent','Adult','Child'],
     flagColor: '#a78bfa',
   },
@@ -746,9 +746,9 @@ function FrameworksSection() {
     <section className="lp-section lp-section-dark" ref={ref}>
       <div className="lp-container">
         <div className="lp-section-header">
-          <span className="lp-eyebrow">peer-reviewed frameworks</span>
-          <h2 className="lp-h2">Not vibes. Science.</h2>
-          <p className="lp-section-sub">The same frameworks therapists use in session — applied to your conversations, automatically.</p>
+          <span className="lp-eyebrow">framework-inspired reflection</span>
+          <h2 className="lp-h2">Structured lenses, not facts.</h2>
+          <p className="lp-section-sub">Educational estimates inspired by communication frameworks may be incomplete or wrong.</p>
         </div>
         <div className="lp-frameworks">
           {FRAMEWORKS.map(fw => (
@@ -812,9 +812,9 @@ function CTABanner({ user, onGetStarted }) {
       <div className="lp-container">
         <h2 className="lp-h2">
           Your situationship<br />
-          <span className="lp-gradient-text">needs a diagnosis.</span>
+          <span className="lp-gradient-text">deserves a second look.</span>
         </h2>
-        <p>Stop analyzing screenshots alone. Get the actual science-backed breakdown — and know exactly what to say next.</p>
+        <p>Review educational pattern estimates, consider their limits, and edit a draft before deciding what to send.</p>
         <div className="lp-cta-btns">
           <button className="lp-btn-primary lp-btn-large" onClick={onGetStarted}>
             {user ? 'Back to dashboard' : 'Start for free →'}

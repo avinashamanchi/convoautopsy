@@ -11,11 +11,14 @@ This packet records the repository-controlled choices and the credentialed work 
 | Monthly product | `com.avinashamanchi.convoautopsy.pro.monthly` |
 | Annual product | `com.avinashamanchi.convoautopsy.pro.annual` |
 | Free local usage | Unlimited on-device analyses and drafts; up to 10 saved reports |
+| Private Trends | Free on both tiers; computed locally from reports saved on the device |
 | Free remote fair use | 3 analyses and 6 AI-assisted drafts per rolling 30 days |
 | Pro local usage | Unlimited on-device analyses, drafts, and saved reports |
 | Pro remote fair use | 75 analyses and 150 AI-assisted drafts per UTC calendar month |
 
 Remote allowances are service fair-use limits, not credits, and do not roll over. The app derives monthly/annual labels from the configured product IDs and renders the App Store localized price supplied by RevenueCat. No price belongs in source code or this packet.
+
+Private Trends is not a subscription benefit. The paid value proposition is unlimited saved reports instead of the 10-report Free cap, plus the larger disclosed remote fair-use allowances.
 
 ## Repository configuration map
 
@@ -24,6 +27,7 @@ Remote allowances are service fair-use limits, not credits, and do not roll over
 - `mobile/src/billing/contracts.ts`: entitlement and product IDs plus billing periods.
 - `mobile/src/billing/revenueCatService.ts`: current-offering lookup, purchase, restore, and entitlement listener.
 - `mobile/app/upgrade.tsx`: localized offer presentation, allowances, renewal/cancellation disclosure, restore, and Continue Free.
+- `mobile/app/trends.tsx`: free, on-device summaries with no entitlement gate or upgrade route.
 - `server/ai-proxy/src/entitlements.ts`: server-side `convo_pro` verification and five-minute content-free entitlement cache.
 - `server/ai-proxy/wrangler.jsonc`: production bindings and content-free daily provider budget; it contains no credentials.
 
@@ -60,6 +64,7 @@ Remote allowances are service fair-use limits, not credits, and do not roll over
 | Restore/transfer | Same Apple account restores on a fresh install under the recorded transfer setting | Revert the RevenueCat transfer setting only after impact review; tell testers which receipt/app-user ID owns access |
 | Renewal/cancel/refund | Renewal, expiration, billing retry, cancellation, and refund/revocation update access | Use RevenueCat customer evidence and Apple transaction state; do not manually fabricate client entitlement |
 | Provider cost/capacity | Short CI gate and manual 5 RPS/3,600 s, 20 RPS/300 s, then 100/101 local fixture gate | Lower the reviewed daily budget/circuit-open, roll back the Worker deployment, and retain local features |
+| Private Trends | Free users can read local summaries without a purchase or network request | Keep Trends local and free; do not use it as a subscription-restoration signal |
 | Mobile release | Signed purchase, restore, OCR, offline, VoiceOver, Dynamic Type, and legal-link checks | Stop phased release or remove the build from sale in App Store Connect; local data must remain readable |
 
 ## Release-state labels

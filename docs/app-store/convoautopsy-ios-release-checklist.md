@@ -5,16 +5,18 @@ This checklist separates repository state from credentialed and externally obser
 ## Code-complete repository gates
 
 - [x] Bundle and Maestro app ID are `com.avinashamanchi.convoautopsy`; the app is iPhone-only and declares `ios.usesAppleSignIn: false` because it offers no account or Apple sign-in.
-- [x] Production Expo config fails closed unless the AI proxy is a credential-free HTTPS production origin and the RevenueCat value is a non-placeholder Apple public SDK key. Error messages name only the variable; neither value is copied into Expo `extra`.
+- [x] The Expo app under `mobile/` is the only supported iOS release target. Root `ios`, `sync`, and `build:app` commands deterministically reject the historical Capacitor path; its old target ID remains historical rather than being presented as a second candidate.
+- [x] Production Expo config fails closed unless the AI proxy is a credential-free HTTPS production DNS origin and the RevenueCat value is a non-placeholder Apple public SDK key. It rejects trailing-dot/single-label hosts, example and special-use suffixes, local/private/reserved/documentation addresses, and literal IPv6. Error messages name only the variable; neither value is copied into Expo `extra`.
 - [x] EAS configuration is credential-free, store-distributed, remote-versioned, auto-incrementing, and contains no submit profile or Apple credentials.
 - [x] Billing maps the exact monthly/annual products to their periods while preserving RevenueCat/StoreKit localized prices.
 - [x] The paywall truthfully states Free and Pro local, report, analysis, and draft allowances; UTC/rolling windows; no-rollover fair-use status; renewal/cancellation timing; restore behavior; and deletion-versus-cancellation.
+- [x] Private Trends is free and computed from reports saved on the device. Paid value remains removal of the 10-report cap plus the disclosed remote fair-use allowances; Trends has no entitlement gate or upgrade CTA.
 - [x] Continue Free, Restore Purchases, Privacy, and Terms remain available when offerings fail. Expo Go is identified as preview-only for purchases.
 - [x] Local reports, drafts, preferences, consent, installation token, cache artifacts, and session state have a coordinated best-effort deletion path with visible partial failure and retry.
 - [x] In-app and public Privacy, Terms, and Support content covers local/device/iCloud storage; reviewed Cloudflare-to-Groq processing after confirmation/consent; RevenueCat purchase data; five-minute entitlement cache; HMAC-derived quota/rate identifiers; bounded usage/budget/lease/metric state; and deletion limitations.
 - [x] Legal and marketing copy uses `reviewed` or `pseudonymous` where data has not been proven anonymous. It makes no Pro-only trends claim and no promise to eliminate lawful liability or user rights.
-- [x] The redacted scanner detects provider, RevenueCat secret, Cloudflare, Expo, Apple, App Store Connect, private-key, certificate, and provisioning material while allowing the public RevenueCat Apple SDK variable and sanitized examples.
-- [x] Each isolated iOS CI job scans the tracked tree plus only its own built artifacts and audits production dependencies. Worker CI also performs production/fixture dry builds and the short 100/101 load gate.
+- [x] The redacted scanner denies secret-shaped client-public variables except the exact RevenueCat Apple SDK variable, recognizes RevenueCat `sk_` and Expo/EAS token literals in source or built artifacts, and detects provider, Cloudflare, Apple, App Store Connect, private-key, certificate, and provisioning material. It reports only paths and rule IDs while allowing public `appl_` keys and sanitized examples.
+- [x] Each isolated iOS CI job scans the tracked tree plus only its own built artifacts and audits production dependencies. Worker CI and the Pages pre-upload build both perform production/fixture dry builds, scan `dist-load`, and run the short 100/101 load gate.
 - [x] Manual release readiness is `workflow_dispatch` only, cannot deploy or submit, and specifies the local fixture profile: 5 RPS for 3,600 seconds, 20 RPS for 300 seconds, then 100/101 capacity.
 - [x] The monetization packet records exact IDs, config/secret locations, recommended restore-transfer behavior, setup, rollback, test matrix, and state labels.
 - [x] Screenshot planning targets a valid 6.9-inch iPhone size with synthetic scenes, short customer-language overlays, native-pixel/alpha/clarity checks, and reviewed wording. It does not claim screenshots exist.
@@ -23,15 +25,22 @@ This checklist separates repository state from credentialed and externally obser
 
 Do not reuse an earlier commit’s results for a later candidate. Record fresh evidence here only after all commands complete.
 
-- [x] Full root: 8 test files / 45 tests, zero-warning source lint, and production build passed locally under Node 22. The documented large-chunk warning remains visible.
-- [x] Full mobile: 38 suites / 333 tests, TypeScript, declared lint, zero-warning Phase B lint, Expo Doctor 18/18, and iOS Expo export passed locally under Node 22.
+- [x] Full root: 10 test files / 52 tests, zero-warning source lint, and production build passed locally under Node 22. The documented large-chunk warning remains visible.
+- [x] Full mobile: 38 suites / 356 tests, TypeScript, declared lint, Expo Doctor 18/18, and iOS Expo export passed locally under Node 22.
 - [x] Full Worker: 10 files / 126 tests, TypeScript, zero-warning lint, production dry build, and local-fixture dry build passed locally under Node 22.
 - [x] Redacted scan of tracked files plus web, mobile, production Worker, and fixture Worker outputs passed.
 - [x] Production dependency audits with `--omit=dev --audit-level=high` returned 0 vulnerabilities for all three lockfiles.
-- [ ] The first exact short local fixture run stopped at `LOAD_GATE_CAPACITY` after 65 successful scheduled samples. Four identical subsequent runs passed 100/101 with zero leaks. Keep this gate unqualified until an independent controller run; all content-free JSON is preserved in the Task 8B report.
+- [x] Missing and sanitized-example production Expo configs exited nonzero; a synthetic valid config passed with the authoritative bundle ID and neither public value in `extra`.
+- [x] The first exact short local fixture run stopped at `LOAD_GATE_CAPACITY` after 65 successful scheduled samples. Four identical subsequent runs passed 100/101 with zero leaks. The independent controller then ran three more consecutive identical 100/101 gates successfully, and the review-fix candidate added another successful 100/101 run. The original anomaly remains preserved verbatim in the Task 8B report rather than being erased.
 - [x] Workflow/publication tests, YAML structure checks, `git diff --check`, and explicit exclusion checks are part of the final candidate verification. The ignored report preserves commands and results.
 
 Historical note: commit `d2a02edbced8d3984058ebc0814b97612824ac22` had a separate clean baseline, but it predates the paid allowance, current legal/configuration work, and new load gates. It is not evidence for this candidate. The web build historically emitted a non-blocking large-chunk warning; do not suppress or misrepresent it.
+
+## Review closure record
+
+- The independent controller rechecked the original Task 8B candidate: root 45/45, mobile 333/333, Worker 126/126, Expo Doctor 18/18, iOS export, both Worker dry builds, scans, audits, production-config guards, workflow tests, and three consecutive short load gates passed.
+- Reviewer follow-up then found release-truth gaps in proxy-origin validation, client-secret scanning, retained-text wording, marketing claims, the Trends paywall, the legacy Capacitor commands, and the Pages pre-upload workflow. Focused regressions were observed red before each fix category; the appended Task 8B report preserves the counts.
+- The follow-up does not change any external-state label: signed builds, device tests, purchases, TestFlight, App Store review, and publication remain pending until directly observed.
 
 ## External configuration pending — all unchecked
 

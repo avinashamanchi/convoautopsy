@@ -101,6 +101,16 @@ it('opens a report share sheet only after the current-result user presses share'
   expect(await screen.findByText('Share sheet opened. This does not confirm completion.')).toBeOnTheScreen();
 });
 
+it('accurately warns what a save retains even when original source text is off', async () => {
+  renderWithRepository(<ResultScreen />);
+
+  fireEvent.press(await screen.findByRole('button', { name: 'Save analysis' }));
+  expect(screen.getByText(/saved parsed messages retain the message text/i)).toBeOnTheScreen();
+  expect(screen.getByText(/Participant labels are pseudonymous, not anonymous/i)).toBeOnTheScreen();
+  expect(screen.getByText(/emails, phone numbers, names, and context/i)).toBeOnTheScreen();
+  expect(screen.queryByText(/anonymized parsed messages/i)).toBeNull();
+});
+
 it('opens a report share sheet from a saved result and gives a recoverable failure', async () => {
   mockedCaptureAndShare.mockResolvedValueOnce({ ok: false, code: 'SHARE_FAILED' });
   renderWithRepository(<ReportScreen />, {
@@ -159,6 +169,8 @@ it('keeps six bounded redacted rows and the educational limitation inside the ca
   expect(screen.getAllByTestId('shareable-report-row', { includeHiddenElements: true })).toHaveLength(6);
   expect(screen.getByText('Participant 6', { includeHiddenElements: true })).toBeOnTheScreen();
   expect(screen.getAllByText('[Message content redacted]', { includeHiddenElements: true })).toHaveLength(6);
+  expect(screen.getByText('Participant labels are pseudonymous. Message contents are omitted from this exported image.', { includeHiddenElements: true })).toBeOnTheScreen();
+  expect(screen.queryByText(/Participant labels are anonymized/, { includeHiddenElements: true })).toBeNull();
   expect(screen.getByText('Pattern label: Stonewalling', { includeHiddenElements: true })).toBeOnTheScreen();
   expect(screen.getByTestId('shareable-report-limitation', { includeHiddenElements: true })).toBeOnTheScreen();
   expect(screen.getByTestId('shareable-report-canvas', { includeHiddenElements: true }).props.style).toMatchObject({ height: 640, overflow: 'hidden', width: 360 });

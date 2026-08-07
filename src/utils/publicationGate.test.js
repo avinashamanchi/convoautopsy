@@ -20,17 +20,23 @@ describe('publication gate', () => {
       '- name: Typecheck Worker',
       '- name: Lint Worker',
       '- name: Build Worker bundle',
+      '- name: Build Worker load fixture',
+      '- name: Run short Worker load gate',
       '- name: Scan tracked tree and built bundles for secrets',
     ]) {
       expect(workflow.indexOf(step)).toBeGreaterThan(-1)
       expect(workflow.indexOf(step)).toBeLessThan(upload)
     }
     expect(workflow).toMatch(/- name: Build Worker bundle\s+run: npm run build\s+working-directory: server\/ai-proxy/)
+    expect(workflow).toMatch(/- name: Build Worker load fixture\s+run: npx wrangler deploy --dry-run --config wrangler\.load\.jsonc --outdir dist-load\s+working-directory: server\/ai-proxy/)
+    expect(workflow).toMatch(/- name: Run short Worker load gate\s+run: npm run test:load:ci\s+working-directory: server\/ai-proxy/)
+    expect(workflow.indexOf('- name: Build Worker load fixture')).toBeLessThan(workflow.indexOf('- name: Run short Worker load gate'))
 
     const workerPackage = JSON.parse(await fromRoot('server/ai-proxy/package.json'))
     expect(workerPackage.scripts.build).toMatch(/wrangler deploy --dry-run --outdir dist/)
     const rootPackage = JSON.parse(await fromRoot('package.json'))
-    expect(rootPackage.scripts['scan:secrets']).toContain('server/ai-proxy/dist')
+    expect(rootPackage.scripts['scan:secrets']).toContain('server/ai-proxy/dist server/ai-proxy/dist-load')
+    expect(workflow.match(/npm audit --omit=dev --audit-level=high/g)).toHaveLength(3)
   })
 
   it('ignores local secret files while retaining sanitized examples', async () => {

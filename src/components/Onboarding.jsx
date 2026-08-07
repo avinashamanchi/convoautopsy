@@ -5,8 +5,8 @@ const STEPS = [
   {
     step: '01',
     title: 'Welcome to ConvoAutopsy',
-    body: 'The only tool that diagnoses your conversations like a clinician. No judgment — just science.',
-    detail: 'Powered by Gottman\'s Four Horsemen, Thomas-Kilmann conflict modes, and Transactional Analysis ego states. The same frameworks therapists use, applied to your texts.',
+    body: 'An educational tool for reflecting on wording patterns before you reply.',
+    detail: 'It offers estimates inspired by communication frameworks. Results may be incomplete or wrong and do not determine intent or relationship facts.',
     icon: '🔬',
   },
   {
@@ -19,21 +19,21 @@ const STEPS = [
   },
   {
     step: '03',
-    title: 'Get the full diagnosis',
-    body: 'Every message is analyzed for:',
+    title: 'Review an educational estimate',
+    body: 'Messages may receive descriptive labels for:',
     bullets: [
       'Gottman flag — Criticism, Contempt, Defensiveness, or Stonewalling',
       'Ego state — Parent, Adult, or Child mode',
-      'Hidden meaning — what they actually meant',
-      'Tension score — 0 to 100',
+      'Possible interpretation — one reflection to review, not the sender\'s intent',
+      'Intensity estimate — 0 to 100',
     ],
     icon: '📊',
   },
   {
     step: '04',
-    title: 'Your receipts never expire',
-    body: 'Every autopsy is saved to your account automatically.',
-    detail: 'Come back weeks later and your analyses are still here. Build a case. Track patterns. Know exactly who the problem is.',
+    title: 'Choose what to save',
+    body: 'Saved analyses stay in this browser until you delete its data.',
+    detail: 'Revisit descriptive pattern estimates for reflection. They do not establish blame or facts about another person.',
     icon: '💾',
   },
 ]

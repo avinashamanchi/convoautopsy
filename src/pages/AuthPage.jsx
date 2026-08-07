@@ -40,7 +40,7 @@ export default function AuthPage({ onAuth, onBack }) {
           {mode === 'login' ? 'Welcome back' : 'Create your account'}
         </h2>
         <p className="auth-sub">
-          {mode === 'login' ? 'Access your saved analyses' : 'Start diagnosing conversations'}
+          {mode === 'login' ? 'Access your saved analyses' : 'Start reflecting on conversations'}
         </p>
 
         <form className="auth-form" onSubmit={handleSubmit}>

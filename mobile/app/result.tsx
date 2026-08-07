@@ -91,7 +91,7 @@ export default function ResultScreen({ createReportId = createNativeUuid }: Resu
               value={title}
             />
             <Text style={styles.privacyTitle}>Keep original conversation text?</Text>
-            <Text style={styles.privacyCopy}>Off by default. Saving without it keeps only the analysis and anonymized parsed messages.</Text>
+            <Text style={styles.privacyCopy}>Off by default. Even without the original source, saved parsed messages retain the message text you analyzed. Participant labels are pseudonymous, not anonymous. Message text may still include emails, phone numbers, names, and context unless you review and redact it first.</Text>
             <Switch
               accessibilityLabel="Keep original conversation text"
               onValueChange={setRetainSourceText}

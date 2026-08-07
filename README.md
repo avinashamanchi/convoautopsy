@@ -93,7 +93,7 @@ The repeatable Maestro flow is [`mobile/e2e/analyze-flow.yaml`](mobile/e2e/analy
 
 ## iOS Release Path (Expo/EAS)
 
-The iOS release path is the Expo app in `mobile/`, not the legacy Capacitor project. App Store uploads currently require Xcode 26 or later using the iOS 26 SDK or later. Apple Developer membership, Expo login, EAS initialization, development-build OCR verification, production build, TestFlight, App Store Connect record, review, and publication are not complete.
+The only supported iOS release target is `mobile/` through Expo/EAS. The legacy Capacitor target is historical and its root `ios`, `sync`, and `build:app` scripts now fail deterministically instead of producing a second candidate. App Store uploads currently require Xcode 26 or later using the iOS 26 SDK or later. Apple Developer membership, Expo login, EAS initialization, development-build OCR verification, production build, TestFlight, App Store Connect record, review, and publication are not complete.
 
 After the user has personally completed the Apple and Expo credential steps, the user-owned release process uses EAS from `mobile/` to create a development build, verify native OCR on a physical iPhone, and only then create a production build and submit it. Do not treat an Expo Go export or a submission as App Store publication.
 
@@ -107,7 +107,7 @@ Name:  VITE_AI_PROXY_URL
 Value: https://your-proxy.example
 ```
 
-The browser never receives provider credentials. Before AI use, the site asks for consent and explains that anonymized message text is sent through the ConvoAutopsy server to Groq; on-device analysis remains available without sharing.
+The browser never receives provider credentials. Before AI use, the site asks for consent and explains that reviewed message text is sent through the ConvoAutopsy server to Groq; on-device analysis remains available without sharing. Participant labels are pseudonymous, not anonymous, and message text may still contain emails, phone numbers, third-party names, and context unless it is reviewed and redacted first.
 
 ---
 
@@ -158,7 +158,7 @@ Alex: That's not what I said. Stop twisting my words.
 Jordan: Whatever. I'm done with this conversation.
 ```
 
-Names are automatically anonymized to Person A / Person B before any AI processing.
+Participant labels are pseudonymous Person A / Person B labels, not proof of anonymity. Parsed and saved message text may still contain emails, phone numbers, third-party names, and context unless it is reviewed and redacted before analysis. Turning off original-source retention does not remove the parsed message text stored inside a saved analysis.
 
 ---
 

@@ -2,8 +2,11 @@ import type { ExpoConfig } from 'expo/config';
 
 type Environment = Readonly<Record<string, string | undefined>>;
 
-const RESERVED_DOMAIN_ENDINGS = ['.example', '.invalid', '.localhost', '.local', '.test'];
-const PLACEHOLDER_DOMAINS = new Set(['example.com', 'example.net', 'example.org', 'localhost']);
+const RESERVED_DOMAIN_ENDINGS = [
+  '.example', '.invalid', '.localhost', '.local', '.test',
+  '.home.arpa', '.arpa', '.internal', '.lan', '.home', '.corp', '.onion',
+];
+const PLACEHOLDER_DOMAIN_BASES = ['example.com', 'example.net', 'example.org'];
 
 function invalidProductionVariable(name: string): Error {
   return new Error(`Invalid ${name} for production.`);
@@ -27,17 +30,15 @@ function isReservedIpv4(hostname: string): boolean {
 }
 
 function isReservedHost(rawHostname: string): boolean {
-  const hostname = rawHostname.toLowerCase().replace(/^\[|\]$/g, '');
-  if (PLACEHOLDER_DOMAINS.has(hostname)
+  const hostname = rawHostname.toLowerCase();
+  if (hostname.endsWith('.') || hostname.startsWith('[') || hostname.endsWith(']') || hostname.includes(':')) return true;
+  if (!hostname.includes('.')
+    || hostname.split('.').some((label) => !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))) return true;
+  if (PLACEHOLDER_DOMAIN_BASES.some((base) => hostname === base || hostname.endsWith(`.${base}`))
     || RESERVED_DOMAIN_ENDINGS.some((ending) => hostname.endsWith(ending))
     || hostname.includes('placeholder')
     || hostname.startsWith('your-')) return true;
-  if (isReservedIpv4(hostname)) return true;
-  if (!hostname.includes(':')) return false;
-  return hostname === '::' || hostname === '::1' || hostname.startsWith('::ffff:')
-    || hostname.startsWith('fc') || hostname.startsWith('fd')
-    || /^fe[89ab]/.test(hostname) || hostname.startsWith('ff')
-    || hostname.startsWith('2001:db8:') || hostname.startsWith('2001:10:');
+  return isReservedIpv4(hostname);
 }
 
 function isProductionProxyOrigin(value: string | undefined): boolean {

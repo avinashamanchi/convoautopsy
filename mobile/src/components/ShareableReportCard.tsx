@@ -32,7 +32,7 @@ export const ShareableReportCard = forwardRef<View, ShareableReportCardProps>(fu
       </View>
 
       <Text numberOfLines={1} style={styles.sectionTitle}>Message overview</Text>
-      <Text numberOfLines={1} style={styles.redactionNote}>Participant labels are anonymized. Message contents are redacted.</Text>
+      <Text numberOfLines={1} style={styles.redactionNote}>Participant labels are pseudonymous. Message contents are omitted from this exported image.</Text>
       {result.messages.slice(0, 6).map((message, index) => (
         <View key={`${message.sender}-${index}`} style={styles.messageRow} testID="shareable-report-row">
           <Text numberOfLines={1} style={styles.participant}>{labelFor(message.sender)}</Text>
