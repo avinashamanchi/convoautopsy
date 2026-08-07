@@ -28,7 +28,7 @@ function request(overrides: Partial<AdmissionRequest> = {}): AdmissionRequest {
   return {
     plan: 'pro',
     route: '/v1/responses',
-    now: Date.parse('2026-08-07T12:00:00Z'),
+    now: Date.parse('2099-08-07T12:00:00Z'),
     ...overrides,
     subjectDigest,
   };
@@ -90,7 +90,7 @@ describe('atomic AI admission', () => {
   it('reports only active reservations and removes expired leases before counting', async () => {
     const activeLease = await reserveAllowed({ subjectDigest: 'diagnostic-active' });
     const expiredLease = await reserveAllowed({ subjectDigest: 'diagnostic-expired' });
-    const now = Date.parse('2026-08-07T12:01:00Z');
+    const now = Date.parse('2099-08-07T12:01:00Z');
     await runInDurableObject(stub(), (_instance, state) => {
       state.storage.sql.exec('UPDATE inflight SET expires_at = ? WHERE lease_id = ?', now - 1, expiredLease);
       state.storage.sql.exec('UPDATE inflight SET expires_at = ? WHERE lease_id = ?', now + 60_000, activeLease);
@@ -149,7 +149,7 @@ describe('atomic AI admission', () => {
     { route: '/v1/responses' as const, limit: 6 },
   ])('allows Free $limit times for $route over rolling 30 UTC-day buckets', async ({ route, limit }) => {
     const subjectDigest = `digest-free-${route}`;
-    const now = Date.parse('2026-08-01T12:00:00Z');
+    const now = Date.parse('2099-08-01T12:00:00Z');
     for (let index = 0; index < limit; index += 1) {
       await release(await reserveAllowed({ plan: 'free', subjectDigest, route, now: now + index }));
     }
@@ -169,7 +169,7 @@ describe('atomic AI admission', () => {
     { route: '/v1/responses' as const, limit: 150 },
   ])('allows Pro $limit times for $route and resets at the next UTC calendar month', async ({ route, limit }) => {
     const subjectDigest = `digest-pro-${route}`;
-    const now = Date.parse('2026-08-31T23:00:00Z');
+    const now = Date.parse('2099-08-31T23:00:00Z');
     for (let index = 0; index < limit; index += 1) {
       await release(await reserveAllowed({ plan: 'pro', subjectDigest, route, now: now + index }));
     }
@@ -178,14 +178,14 @@ describe('atomic AI admission', () => {
       allowed: false,
       code: 'PLAN_LIMIT_REACHED',
     });
-    const september = await reserve({ plan: 'pro', subjectDigest, route, now: Date.parse('2026-09-01T00:00:00Z') });
+    const september = await reserve({ plan: 'pro', subjectDigest, route, now: Date.parse('2099-09-01T00:00:00Z') });
     expect(september.allowed).toBe(true);
     if (september.allowed) await release(september.leaseId);
   });
 
   it('preserves Pro capacity after 95 percent while rejecting Free work', async () => {
     await runInDurableObject(stub(), (_instance, state) => {
-      state.storage.sql.exec('INSERT INTO daily_budget (day, provider_units) VALUES (?, ?)', '2026-08-07', 950);
+      state.storage.sql.exec('INSERT INTO daily_budget (day, provider_units) VALUES (?, ?)', '2099-08-07', 950);
     });
 
     await expect(reserve({ plan: 'free', subjectDigest: 'digest-free-budget' })).resolves.toMatchObject({
@@ -200,7 +200,7 @@ describe('atomic AI admission', () => {
 
   it('rejects every plan when projected usage reaches 100 percent and resets on the next UTC day', async () => {
     await runInDurableObject(stub(), (_instance, state) => {
-      state.storage.sql.exec('INSERT INTO daily_budget (day, provider_units) VALUES (?, ?)', '2026-08-07', 999);
+      state.storage.sql.exec('INSERT INTO daily_budget (day, provider_units) VALUES (?, ?)', '2099-08-07', 999);
     });
 
     for (const plan of ['free', 'pro'] as const) {
@@ -209,7 +209,7 @@ describe('atomic AI admission', () => {
       if (rejected.allowed) throw new Error('Expected daily budget rejection');
       expect(rejected.retryAfterSeconds).toBeGreaterThan(0);
     }
-    const tomorrow = await reserve({ plan: 'pro', now: Date.parse('2026-08-08T00:00:00Z') });
+    const tomorrow = await reserve({ plan: 'pro', now: Date.parse('2099-08-08T00:00:00Z') });
     expect(tomorrow.allowed).toBe(true);
     if (tomorrow.allowed) await release(tomorrow.leaseId);
   });
@@ -236,19 +236,19 @@ describe('atomic AI admission', () => {
   });
 
   it('uses an indexed once-daily retention pass that prunes obsolete rows and preserves current rows', async () => {
-    const now = Date.parse('2026-08-07T12:00:00Z');
+    const now = Date.parse('2099-08-07T12:00:00Z');
     await runInDurableObject(stub(), (_instance, state) => {
       state.storage.sql.exec(
         'INSERT INTO plan_usage (subject_digest, period, route, count) VALUES (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?)',
-        testDigest('old-free'), 'free:2026-07-08', '/v1/responses', 1,
-        testDigest('current-free'), 'free:2026-08-07', '/v1/responses', 1,
-        testDigest('old-pro'), 'pro:2026-07', '/v1/responses', 1,
-        testDigest('current-pro'), 'pro:2026-08', '/v1/responses', 1,
+        testDigest('old-free'), 'free:2099-07-08', '/v1/responses', 1,
+        testDigest('current-free'), 'free:2099-08-07', '/v1/responses', 1,
+        testDigest('old-pro'), 'pro:2099-07', '/v1/responses', 1,
+        testDigest('current-pro'), 'pro:2099-08', '/v1/responses', 1,
       );
       state.storage.sql.exec(
         'INSERT INTO daily_budget (day, provider_units) VALUES (?, ?), (?, ?)',
-        '2026-08-06', 20,
-        '2026-08-07', 30,
+        '2099-08-06', 20,
+        '2099-08-07', 30,
       );
       const indexes = state.storage.sql.exec<{ name: string }>('PRAGMA index_list(plan_usage)').toArray();
       expect(indexes.map((index) => index.name)).toContain('plan_usage_period_idx');
@@ -262,60 +262,60 @@ describe('atomic AI admission', () => {
       const marker = state.storage.sql.exec<{ last_retention_day: string }>(
         'SELECT last_retention_day FROM maintenance_state WHERE id = 1',
       ).one();
-      expect(periods.map((row) => row.period)).toEqual(['free:2026-08-07', 'pro:2026-08']);
-      expect(days.map((row) => row.day)).toEqual(['2026-08-07']);
-      expect(marker.last_retention_day).toBe('2026-08-07');
+      expect(periods.map((row) => row.period)).toEqual(['free:2099-08-07', 'pro:2099-08']);
+      expect(days.map((row) => row.day)).toEqual(['2099-08-07']);
+      expect(marker.last_retention_day).toBe('2099-08-07');
     });
   });
 
   it('runs retention at most once per UTC day and runs again on the next UTC day', async () => {
-    const firstDay = Date.parse('2026-08-07T12:00:00Z');
+    const firstDay = Date.parse('2099-08-07T12:00:00Z');
     await release(await reserveAllowed({ now: firstDay, subjectDigest: 'retention-marker-first' }));
     await runInDurableObject(stub(), (_instance, state) => {
       state.storage.sql.exec(
         'INSERT INTO plan_usage (subject_digest, period, route, count) VALUES (?, ?, ?, ?)',
-        testDigest('late-old-free'), 'free:2026-07-01', '/v1/responses', 1,
+        testDigest('late-old-free'), 'free:2099-07-01', '/v1/responses', 1,
       );
-      state.storage.sql.exec('INSERT INTO daily_budget (day, provider_units) VALUES (?, ?)', '2026-08-01', 9);
+      state.storage.sql.exec('INSERT INTO daily_budget (day, provider_units) VALUES (?, ?)', '2099-08-01', 9);
     });
 
     await release(await reserveAllowed({ now: firstDay + 1_000, subjectDigest: 'retention-marker-second' }));
     await runInDurableObject(stub(), (_instance, state) => {
       expect(state.storage.sql.exec<{ count: number }>(
-        "SELECT COUNT(*) AS count FROM plan_usage WHERE period = 'free:2026-07-01'",
+        "SELECT COUNT(*) AS count FROM plan_usage WHERE period = 'free:2099-07-01'",
       ).one().count).toBe(1);
       expect(state.storage.sql.exec<{ count: number }>(
-        "SELECT COUNT(*) AS count FROM daily_budget WHERE day = '2026-08-01'",
+        "SELECT COUNT(*) AS count FROM daily_budget WHERE day = '2099-08-01'",
       ).one().count).toBe(1);
     });
 
     await release(await reserveAllowed({
-      now: Date.parse('2026-08-08T00:00:00Z'),
+      now: Date.parse('2099-08-08T00:00:00Z'),
       subjectDigest: 'retention-marker-next-day',
     }));
     await runInDurableObject(stub(), (_instance, state) => {
       expect(state.storage.sql.exec<{ count: number }>(
-        "SELECT COUNT(*) AS count FROM plan_usage WHERE period = 'free:2026-07-01'",
+        "SELECT COUNT(*) AS count FROM plan_usage WHERE period = 'free:2099-07-01'",
       ).one().count).toBe(0);
       expect(state.storage.sql.exec<{ count: number }>(
-        "SELECT COUNT(*) AS count FROM daily_budget WHERE day = '2026-08-01'",
+        "SELECT COUNT(*) AS count FROM daily_budget WHERE day = '2099-08-01'",
       ).one().count).toBe(0);
       expect(state.storage.sql.exec<{ last_retention_day: string }>(
         'SELECT last_retention_day FROM maintenance_state WHERE id = 1',
-      ).one().last_retention_day).toBe('2026-08-08');
+      ).one().last_retention_day).toBe('2099-08-08');
     });
   });
 
   it('retention on a rejected reservation prunes only obsolete rows and does not increment current state', async () => {
-    const now = Date.parse('2026-08-07T12:00:00Z');
+    const now = Date.parse('2099-08-07T12:00:00Z');
     const subjectDigest = testDigest('retention-rejected-current');
     await runInDurableObject(stub(), (_instance, state) => {
       state.storage.sql.exec(
         'INSERT INTO plan_usage (subject_digest, period, route, count) VALUES (?, ?, ?, ?), (?, ?, ?, ?)',
-        subjectDigest, 'free:2026-08-07', '/v1/responses', 6,
-        testDigest('retention-rejected-old'), 'free:2026-07-01', '/v1/responses', 4,
+        subjectDigest, 'free:2099-08-07', '/v1/responses', 6,
+        testDigest('retention-rejected-old'), 'free:2099-07-01', '/v1/responses', 4,
       );
-      state.storage.sql.exec('INSERT INTO daily_budget (day, provider_units) VALUES (?, ?)', '2026-08-06', 8);
+      state.storage.sql.exec('INSERT INTO daily_budget (day, provider_units) VALUES (?, ?)', '2099-08-06', 8);
     });
 
     await expect(reserve({ plan: 'free', now, subjectDigest })).resolves.toMatchObject({
@@ -326,10 +326,10 @@ describe('atomic AI admission', () => {
     await runInDurableObject(stub(), (_instance, state) => {
       expect(state.storage.sql.exec<{ count: number }>(
         'SELECT count FROM plan_usage WHERE subject_digest = ? AND period = ? AND route = ?',
-        subjectDigest, 'free:2026-08-07', '/v1/responses',
+        subjectDigest, 'free:2099-08-07', '/v1/responses',
       ).one().count).toBe(6);
       expect(state.storage.sql.exec<{ count: number }>(
-        "SELECT COUNT(*) AS count FROM plan_usage WHERE period = 'free:2026-07-01'",
+        "SELECT COUNT(*) AS count FROM plan_usage WHERE period = 'free:2099-07-01'",
       ).one().count).toBe(0);
       expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM inflight').one().count).toBe(0);
       expect(state.storage.sql.exec<{ total: number | null }>('SELECT SUM(provider_units) AS total FROM daily_budget').one().total ?? 0).toBe(0);
