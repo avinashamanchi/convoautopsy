@@ -20,7 +20,11 @@ class MemoryCache {
   }
 }
 
-function customer(expiresDate: string | null, entitlementId = 'convo_pro') {
+function customer(
+  expiresDate: string | null,
+  entitlementId = 'convo_pro',
+  gracePeriodExpiresDate: string | null = null,
+) {
   return {
     request_date: '2026-08-07T00:00:00Z',
     request_date_ms: NOW,
@@ -28,7 +32,7 @@ function customer(expiresDate: string | null, entitlementId = 'convo_pro') {
       entitlements: {
         [entitlementId]: {
           expires_date: expiresDate,
-          grace_period_expires_date: null,
+          grace_period_expires_date: gracePeriodExpiresDate,
           product_identifier: 'com.avinashamanchi.convoautopsy.pro.monthly',
           purchase_date: '2026-08-01T00:00:00Z',
         },
@@ -46,7 +50,7 @@ function customer(expiresDate: string | null, entitlementId = 'convo_pro') {
           auto_resume_date: null,
           billing_issues_detected_at: null,
           expires_date: expiresDate,
-          grace_period_expires_date: null,
+          grace_period_expires_date: gracePeriodExpiresDate,
           is_sandbox: true,
           original_purchase_date: '2026-08-01T00:00:00Z',
           ownership_type: 'PURCHASED',
@@ -72,6 +76,20 @@ function env(fetchImpl: typeof fetch, cache = new MemoryCache(), secret: string 
 
 function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function fakeResponse(body: unknown): Response {
+  return { ok: true, status: 200, headers: new Headers(), body } as unknown as Response;
 }
 
 afterEach(() => {
@@ -100,11 +118,50 @@ describe('RevenueCat entitlement resolution', () => {
     await expect(resolvePlan(APP_USER_ID, env(wrongName), NOW)).resolves.toBe('free');
   });
 
+  it('keeps convo_pro active through a future grace deadline and caches only that effective deadline', async () => {
+    const cache = new MemoryCache();
+    const graceDeadline = '2026-08-07T00:04:00Z';
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(customer('2026-08-06T23:59:00Z', 'convo_pro', graceDeadline)))
+      .mockRejectedValueOnce(new Error('refresh unavailable'));
+
+    await expect(resolvePlan(APP_USER_ID, env(fetchImpl, cache), NOW)).resolves.toBe('pro');
+
+    const [{ value }] = [...cache.entries.values()];
+    expect(JSON.parse(value)).toEqual({ plan: 'pro', checkedAt: NOW, expiresAt: Date.parse(graceDeadline) });
+    await expect(resolvePlan(APP_USER_ID, env(fetchImpl, cache), Date.parse(graceDeadline))).resolves.toBe('free');
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns free after both the normal and grace deadlines expire', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(
+      customer('2026-08-06T23:58:00Z', 'convo_pro', '2026-08-06T23:59:00Z'),
+    ));
+
+    await expect(resolvePlan(APP_USER_ID, env(fetchImpl), NOW)).resolves.toBe('free');
+  });
+
+  it('fails closed when the grace deadline is malformed', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(
+      customer('2026-09-01T00:00:00Z', 'convo_pro', 'not-a-date'),
+    ));
+
+    await expect(resolvePlan(APP_USER_ID, env(fetchImpl), NOW)).resolves.toBe('free');
+  });
+
   it('fails closed without network access when the identifier or server secret is absent', async () => {
     const fetchImpl = vi.fn<typeof fetch>();
 
     await expect(resolvePlan(null, env(fetchImpl), NOW)).resolves.toBe('free');
     await expect(resolvePlan(APP_USER_ID, env(fetchImpl, new MemoryCache(), ''), NOW)).resolves.toBe('free');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it.each(['.', '..'])('rejects dot-segment app-user ID %s before sending Authorization', async (appUserId) => {
+    const fetchImpl = vi.fn<typeof fetch>();
+
+    await expect(resolvePlan(appUserId, env(fetchImpl), NOW)).resolves.toBe('free');
+
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
@@ -185,6 +242,51 @@ describe('RevenueCat entitlement resolution', () => {
 
     expect(outcome).toBe('free');
     expect(cancelled).toBe(true);
+  });
+
+  it('cancels a response that arrives after the deadline without starting body reads', async () => {
+    vi.useFakeTimers();
+    const pendingFetch = deferred<Response>();
+    const getReader = vi.fn(() => ({
+      read: vi.fn().mockResolvedValue({ done: true, value: undefined }),
+      cancel: vi.fn().mockResolvedValue(undefined),
+    }));
+    const cancel = vi.fn().mockRejectedValue(new Error('late response cancellation detail'));
+    const fetchImpl = vi.fn<typeof fetch>().mockReturnValue(pendingFetch.promise);
+    const result = resolvePlan(APP_USER_ID, env(fetchImpl), NOW);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(result).resolves.toBe('free');
+    pendingFetch.resolve(fakeResponse({ getReader, cancel }));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(getReader).not.toHaveBeenCalled();
+  });
+
+  it('does no reader work after the deadline and absorbs reader cancellation rejection', async () => {
+    vi.useFakeTimers();
+    const pendingRead = deferred<ReadableStreamReadResult<Uint8Array>>();
+    const read = vi.fn()
+      .mockImplementationOnce(() => pendingRead.promise)
+      .mockResolvedValue({ done: true, value: undefined });
+    const cancel = vi.fn().mockRejectedValue(new Error('reader cancellation detail'));
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(fakeResponse({
+      getReader: () => ({ read, cancel }),
+      cancel: vi.fn().mockResolvedValue(undefined),
+    }));
+    const result = resolvePlan(APP_USER_ID, env(fetchImpl), NOW);
+    await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(result).resolves.toBe('free');
+    pendingRead.resolve({ done: false, value: new Uint8Array([123]) });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(read).toHaveBeenCalledTimes(1);
   });
 
   it.each([

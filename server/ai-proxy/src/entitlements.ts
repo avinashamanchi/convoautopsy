@@ -41,7 +41,11 @@ export async function resolvePlan(
 }
 
 function validAppUserId(value: string | null | undefined): value is string {
-  return typeof value === 'string' && value.length > 0 && Array.from(value).length <= 100;
+  return typeof value === 'string'
+    && value !== '.'
+    && value !== '..'
+    && value.length > 0
+    && Array.from(value).length <= 100;
 }
 
 async function digestCacheKey(appUserId: string, secret: string): Promise<string> {
@@ -107,11 +111,16 @@ async function fetchSnapshot(
         headers: { authorization: `Bearer ${secret}`, accept: 'application/json' },
         signal: controller.signal,
       });
+      if (controller.signal.aborted) {
+        await safeCancel(response.body);
+        throw timeoutError();
+      }
       if (!response.ok) {
-        await response.body?.cancel();
+        await safeCancel(response.body);
         throw new Error('RevenueCat unavailable');
       }
       const body = await readBoundedJson(response, controller);
+      if (controller.signal.aborted) throw timeoutError();
       return snapshotFromCustomer(body, now);
     };
     return await Promise.race([operation(), deadline]);
@@ -124,31 +133,50 @@ async function readBoundedJson(response: Response, controller: AbortController):
   const declaredLength = Number(response.headers.get('content-length'));
   if (Number.isFinite(declaredLength) && declaredLength > MAX_RESPONSE_BYTES) {
     controller.abort();
-    await response.body?.cancel();
+    await safeCancel(response.body);
     throw new Error('RevenueCat response too large');
   }
   if (!response.body) throw new Error('RevenueCat response missing');
+  if (controller.signal.aborted) {
+    await safeCancel(response.body);
+    throw timeoutError();
+  }
 
   const reader = response.body.getReader();
-  const cancelReader = () => { void reader.cancel(); };
-  controller.signal.addEventListener('abort', cancelReader, { once: true });
+  let cancellation: Promise<void> | null = null;
+  const cancelReader = () => {
+    cancellation ??= safeCancel(reader);
+    return cancellation;
+  };
+  const cancelReaderOnAbort = () => { void cancelReader(); };
+  controller.signal.addEventListener('abort', cancelReaderOnAbort, { once: true });
   const chunks: Uint8Array[] = [];
   let total = 0;
   try {
     while (true) {
+      if (controller.signal.aborted) {
+        await cancelReader();
+        throw timeoutError();
+      }
       const { done, value } = await reader.read();
+      if (controller.signal.aborted) {
+        await cancelReader();
+        throw timeoutError();
+      }
       if (done) break;
       total += value.byteLength;
       if (total > MAX_RESPONSE_BYTES) {
+        await cancelReader();
         controller.abort();
-        await reader.cancel();
         throw new Error('RevenueCat response too large');
       }
       chunks.push(value);
     }
   } finally {
-    controller.signal.removeEventListener('abort', cancelReader);
+    controller.signal.removeEventListener('abort', cancelReaderOnAbort);
   }
+
+  if (controller.signal.aborted) throw timeoutError();
 
   const bytes = new Uint8Array(total);
   let offset = 0;
@@ -167,13 +195,36 @@ function snapshotFromCustomer(value: unknown, now: number): EntitlementSnapshot 
   if (!(ENTITLEMENT_ID in entitlements)) return { plan: 'free', checkedAt: now, expiresAt: null };
 
   const entitlement = entitlements[ENTITLEMENT_ID];
-  if (!isRecord(entitlement) || !('expires_date' in entitlement)) throw new Error('Invalid RevenueCat entitlement');
-  const rawExpiration = entitlement.expires_date;
-  if (rawExpiration === null) return { plan: 'pro', checkedAt: now, expiresAt: null };
-  if (typeof rawExpiration !== 'string') throw new Error('Invalid RevenueCat expiration');
-  const expiresAt = Date.parse(rawExpiration);
-  if (!Number.isFinite(expiresAt)) throw new Error('Invalid RevenueCat expiration');
-  return { plan: expiresAt > now ? 'pro' : 'free', checkedAt: now, expiresAt };
+  if (!isRecord(entitlement)
+    || !('expires_date' in entitlement)
+    || !('grace_period_expires_date' in entitlement)) {
+    throw new Error('Invalid RevenueCat entitlement');
+  }
+  const expiresAt = parseDeadline(entitlement.expires_date);
+  const graceExpiresAt = parseDeadline(entitlement.grace_period_expires_date);
+  if (expiresAt === null) return { plan: 'pro', checkedAt: now, expiresAt: null };
+  const effectiveExpiresAt = graceExpiresAt === null ? expiresAt : Math.max(expiresAt, graceExpiresAt);
+  return { plan: effectiveExpiresAt > now ? 'pro' : 'free', checkedAt: now, expiresAt: effectiveExpiresAt };
+}
+
+function parseDeadline(value: unknown): number | null {
+  if (value === null) return null;
+  if (typeof value !== 'string') throw new Error('Invalid RevenueCat expiration');
+  const deadline = Date.parse(value);
+  if (!Number.isFinite(deadline)) throw new Error('Invalid RevenueCat expiration');
+  return deadline;
+}
+
+function timeoutError(): DOMException {
+  return new DOMException('RevenueCat deadline exceeded', 'TimeoutError');
+}
+
+async function safeCancel(cancellable: { cancel(): Promise<unknown> } | null): Promise<void> {
+  try {
+    await cancellable?.cancel();
+  } catch {
+    // Cancellation is best-effort and must never become an orphaned rejection.
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
