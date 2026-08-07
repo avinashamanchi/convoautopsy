@@ -1,6 +1,10 @@
-import { env } from 'cloudflare:workers';
-import { describe, expect, it } from 'vitest';
+/// <reference types="@cloudflare/vitest-pool-workers/types" />
 
+import { env } from 'cloudflare:workers';
+import { reset, runInDurableObject } from 'cloudflare:test';
+import { beforeEach, describe, expect, it } from 'vitest';
+
+import { deriveAdmissionSubjectDigest } from '../src/admission';
 import type { AnalysisResult, CraftResponseRequest } from '../src/contract';
 import { createApp, type AiProvider, type Env } from '../src/index';
 import { ProviderUnavailableError } from '../src/errors';
@@ -52,6 +56,26 @@ function analysisRequest(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+function admissionStub(): DurableObjectStub {
+  return env.AI_ADMISSION.get(env.AI_ADMISSION.idFromName('global'));
+}
+
+async function currentInFlight(): Promise<number> {
+  return runInDurableObject(admissionStub(), (_instance, state) => (
+    state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM inflight').one().count
+  ));
+}
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((resolvePromise) => { resolve = resolvePromise; });
+  return { promise, resolve };
+}
+
+beforeEach(async () => {
+  await reset();
+});
 
 describe('AI proxy routes', () => {
   it('returns a validated analysis from POST /v1/analyses', async () => {
@@ -126,6 +150,7 @@ describe('AI proxy routes', () => {
 
     expect(response.status).toBe(502);
     await expect(response.json()).resolves.toMatchObject({ error: { code: 'PROVIDER_INVALID_RESPONSE' } });
+    expect(await currentInFlight()).toBe(0);
   });
 
   it('maps provider timeouts to a retryable safe public error', async () => {
@@ -136,6 +161,7 @@ describe('AI proxy routes', () => {
 
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({ error: { code: 'PROVIDER_UNAVAILABLE' } });
+    expect(await currentInFlight()).toBe(0);
   });
 
   it('maps upstream provider outages to a retryable safe public error', async () => {
@@ -146,6 +172,107 @@ describe('AI proxy routes', () => {
 
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({ error: { code: 'PROVIDER_UNAVAILABLE' } });
+    expect(await currentInFlight()).toBe(0);
+  });
+
+  it('holds exactly one lease during provider work and releases it after success', async () => {
+    const entered = deferred();
+    const finish = deferred();
+    const pending = app({
+      analyze: async () => {
+        entered.resolve();
+        await finish.promise;
+        return analysis;
+      },
+      craftResponse: validProvider().craftResponse,
+    }).fetch(request('/v1/analyses', analysisRequest()), env as unknown as Env);
+
+    await entered.promise;
+    expect(await currentInFlight()).toBe(1);
+    finish.resolve();
+    expect((await pending).status).toBe(200);
+    expect(await currentInFlight()).toBe(0);
+  });
+
+  it('releases the lease when provider cancellation surfaces as an abort', async () => {
+    const response = await app({
+      analyze: async () => { throw new DOMException('cancelled', 'AbortError'); },
+      craftResponse: validProvider().craftResponse,
+    }).fetch(request('/v1/analyses', analysisRequest()), env as unknown as Env);
+
+    expect(response.status).toBe(502);
+    expect(await currentInFlight()).toBe(0);
+  });
+
+  it('returns SERVICE_BUSY with a matching positive Retry-After without calling the provider', async () => {
+    const expiresAt = Date.now() + 60_000;
+    await runInDurableObject(admissionStub(), (_instance, state) => {
+      for (let index = 0; index < 100; index += 1) {
+        state.storage.sql.exec('INSERT INTO inflight (lease_id, expires_at) VALUES (?, ?)', `seed-${index}`, expiresAt);
+      }
+    });
+    let providerCalled = false;
+    const response = await app({
+      analyze: async () => {
+        providerCalled = true;
+        return analysis;
+      },
+      craftResponse: validProvider().craftResponse,
+    }).fetch(request('/v1/analyses', analysisRequest()), env as unknown as Env);
+    const body = await response.json() as { error: { code: string; retryAfterSeconds: number } };
+
+    expect(response.status).toBe(503);
+    expect(body.error.code).toBe('SERVICE_BUSY');
+    expect(body.error.retryAfterSeconds).toBeGreaterThan(0);
+    expect(response.headers.get('Retry-After')).toBe(String(body.error.retryAfterSeconds));
+    expect(providerCalled).toBe(false);
+  });
+
+  it('returns PLAN_LIMIT_REACHED with Retry-After and stores only the HMAC subject', async () => {
+    const subjectDigest = await deriveAdmissionSubjectDigest(installationToken, 'installation', 'test-only-rate-key');
+    const period = `free:${new Date().toISOString().slice(0, 10)}`;
+    await runInDurableObject(admissionStub(), (_instance, state) => {
+      state.storage.sql.exec(
+        'INSERT INTO plan_usage (subject_digest, period, route, count) VALUES (?, ?, ?, ?)',
+        subjectDigest,
+        period,
+        '/v1/analyses',
+        3,
+      );
+    });
+    const response = await app().fetch(request('/v1/analyses', analysisRequest()), env as unknown as Env);
+    const body = await response.json() as { error: { code: string; retryAfterSeconds: number } };
+
+    expect(response.status).toBe(429);
+    expect(body.error.code).toBe('PLAN_LIMIT_REACHED');
+    expect(response.headers.get('Retry-After')).toBe(String(body.error.retryAfterSeconds));
+    expect(body.error.retryAfterSeconds).toBeGreaterThan(0);
+    await runInDurableObject(admissionStub(), (_instance, state) => {
+      const rows = state.storage.sql.exec<{ subject_digest: string }>('SELECT subject_digest FROM plan_usage').toArray();
+      expect(rows.every((row) => /^[a-f0-9]{64}$/.test(row.subject_digest))).toBe(true);
+      expect(JSON.stringify(rows)).not.toContain(installationToken);
+    });
+  });
+
+  it('returns DAILY_BUDGET_REACHED before provider work at the Free reserve threshold', async () => {
+    const day = new Date().toISOString().slice(0, 10);
+    await runInDurableObject(admissionStub(), (_instance, state) => {
+      state.storage.sql.exec('INSERT INTO daily_budget (day, provider_units) VALUES (?, ?)', day, 950);
+    });
+    let providerCalled = false;
+    const response = await app({
+      analyze: async () => {
+        providerCalled = true;
+        return analysis;
+      },
+      craftResponse: validProvider().craftResponse,
+    }).fetch(request('/v1/analyses', analysisRequest()), env as unknown as Env);
+    const body = await response.json() as { error: { code: string; retryAfterSeconds: number } };
+
+    expect(response.status).toBe(503);
+    expect(body.error.code).toBe('DAILY_BUDGET_REACHED');
+    expect(response.headers.get('Retry-After')).toBe(String(body.error.retryAfterSeconds));
+    expect(providerCalled).toBe(false);
   });
 
   it('allows native requests, allowlists web origins, and varies CORS by Origin', async () => {
@@ -232,10 +359,10 @@ describe('AI proxy routes', () => {
     const input: CraftResponseRequest = {
       schemaVersion: 1, consentVersion: '2026-08-02', installationToken: routeToken, sender: 'Person A', goal: 'resolve', tone: 'empathetic', analysis,
     };
-    for (let index = 0; index < 10; index += 1) {
+    for (let index = 0; index < 3; index += 1) {
       expect((await app().fetch(request('/v1/analyses', analysisRequest({ installationToken: routeToken }), { headers: routeHeaders }), env as unknown as Env)).status).toBe(200);
     }
-    for (let index = 0; index < 20; index += 1) {
+    for (let index = 0; index < 6; index += 1) {
       expect((await app().fetch(request('/v1/responses', input, { headers: routeHeaders }), env as unknown as Env)).status).toBe(200);
     }
   });

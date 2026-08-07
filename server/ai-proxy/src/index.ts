@@ -11,14 +11,19 @@ import { asPublicError, ProviderInvalidResponseError, ProviderUnavailableError, 
 import { resolvePlan } from './entitlements';
 import { createGroqProvider, type AiProvider, type ProviderCraftInput } from './provider';
 import { checkRateLimits, deriveRateLimitKeys } from './rateLimit';
+import { deriveAdmissionSubjectDigest, releaseAdmission, reserveAdmission } from './admission';
 
 export type { AiProvider } from './provider';
 export { RateLimitDurableObject } from './rateLimit';
+export { AdmissionDurableObject } from './admission';
 
 export interface Env {
   RATE_LIMITER: DurableObjectNamespace;
+  AI_ADMISSION: DurableObjectNamespace;
   GROQ_API_KEY: string;
   RATE_LIMIT_HMAC_SECRET: string;
+  MAX_GLOBAL_IN_FLIGHT?: string;
+  MAX_DAILY_PROVIDER_UNITS: string;
   REVENUECAT_SECRET_API_KEY?: string;
   ENTITLEMENT_CACHE?: KVNamespace;
 }
@@ -86,45 +91,71 @@ async function handle(request: Request, env: Env, route: SafeLog['route'], reque
   const rate = await checkRateLimits(env.RATE_LIMITER, keys, route);
   if (!rate.allowed) throw new PublicError('RATE_LIMITED', 429, rate.retryAfterSeconds);
 
-  const verifiedPlan = await resolvePlan(parsed.data.revenueCatAppUserId, env, Date.now());
-  // Task 4 consumes this verified value at the quota seam; fixed rate limits stay unchanged here.
-  void verifiedPlan;
+  const now = Date.now();
+  const verifiedPlan = await resolvePlan(parsed.data.revenueCatAppUserId, env, now);
+  const verifiedCustomerId = verifiedPlan === 'pro' ? parsed.data.revenueCatAppUserId : undefined;
+  const subjectDigest = await deriveAdmissionSubjectDigest(
+    verifiedCustomerId ?? parsed.data.installationToken,
+    verifiedCustomerId === undefined ? 'installation' : 'customer',
+    secret,
+  );
+  const reservation = await reserveAdmission(env.AI_ADMISSION, {
+    plan: verifiedPlan,
+    subjectDigest,
+    route,
+    now,
+  }, {
+    maxGlobalInFlight: env.MAX_GLOBAL_IN_FLIGHT,
+    maxDailyProviderUnits: env.MAX_DAILY_PROVIDER_UNITS,
+  });
+  if (!reservation.allowed) {
+    const status = reservation.code === 'PLAN_LIMIT_REACHED' ? 429 : 503;
+    throw new PublicError(reservation.code, status, reservation.retryAfterSeconds);
+  }
 
   const provider = options.provider ?? createGroqProvider(env.GROQ_API_KEY);
-  if (route === '/v1/analyses') {
-    let analysis;
+  try {
+    if (route === '/v1/analyses') {
+      let analysis;
+      try {
+        analysis = AnalysisResultSchema.parse(await provider.analyze((parsed.data as AnalyzeRequest).messages));
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'TimeoutError') throw error;
+        if (error instanceof ProviderInvalidResponseError || error instanceof ProviderUnavailableError) throw error;
+        if (error instanceof Error && !(error instanceof PublicError)) throw new ProviderInvalidResponseError();
+        throw error;
+      }
+      return json({ analysis, requestId }, 200, origin);
+    }
+
+    let response;
     try {
-      analysis = AnalysisResultSchema.parse(await provider.analyze((parsed.data as AnalyzeRequest).messages));
+      const input = parsed.data as CraftResponseRequest;
+      const providerInput: ProviderCraftInput = {
+        sender: input.sender,
+        goal: input.goal,
+        tone: input.tone,
+        analysis: {
+          intensityScore: input.analysis.intensityScore,
+          conflictMode: input.analysis.conflictMode,
+          messages: input.analysis.messages,
+        },
+      };
+      response = ResponseDraftSchema.parse(await provider.craftResponse(providerInput));
     } catch (error) {
       if (error instanceof DOMException && error.name === 'TimeoutError') throw error;
       if (error instanceof ProviderInvalidResponseError || error instanceof ProviderUnavailableError) throw error;
       if (error instanceof Error && !(error instanceof PublicError)) throw new ProviderInvalidResponseError();
       throw error;
     }
-    return json({ analysis, requestId }, 200, origin);
+    return json({ response, requestId }, 200, origin);
+  } finally {
+    try {
+      await releaseAdmission(env.AI_ADMISSION, reservation.leaseId);
+    } catch {
+      // Lease expiry and the coordinator alarm recover capacity without replacing a valid response.
+    }
   }
-
-  let response;
-  try {
-    const input = parsed.data as CraftResponseRequest;
-    const providerInput: ProviderCraftInput = {
-      sender: input.sender,
-      goal: input.goal,
-      tone: input.tone,
-      analysis: {
-        intensityScore: input.analysis.intensityScore,
-        conflictMode: input.analysis.conflictMode,
-        messages: input.analysis.messages,
-      },
-    };
-    response = ResponseDraftSchema.parse(await provider.craftResponse(providerInput));
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'TimeoutError') throw error;
-    if (error instanceof ProviderInvalidResponseError || error instanceof ProviderUnavailableError) throw error;
-    if (error instanceof Error && !(error instanceof PublicError)) throw new ProviderInvalidResponseError();
-    throw error;
-  }
-  return json({ response, requestId }, 200, origin);
 }
 
 async function readBoundedJson(request: Request): Promise<unknown> {

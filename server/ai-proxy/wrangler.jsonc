@@ -7,12 +7,17 @@
   "kv_namespaces": [
     { "binding": "ENTITLEMENT_CACHE" }
   ],
+  "vars": {
+    "MAX_DAILY_PROVIDER_UNITS": "1000"
+  },
   "durable_objects": {
     "bindings": [
-      { "name": "RATE_LIMITER", "class_name": "RateLimitDurableObject" }
+      { "name": "RATE_LIMITER", "class_name": "RateLimitDurableObject" },
+      { "name": "AI_ADMISSION", "class_name": "AdmissionDurableObject" }
     ]
   },
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["RateLimitDurableObject"] }
+    { "tag": "v1", "new_sqlite_classes": ["RateLimitDurableObject"] },
+    { "tag": "v2", "new_sqlite_classes": ["AdmissionDurableObject"] }
   ]
 }
