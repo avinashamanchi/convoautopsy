@@ -255,3 +255,32 @@ This final pass started from `9c6c24d425ccc9439fffcd2a5a90f46042a43b34`. It pres
 - Independent final read-only review reported no remaining concrete code blocker. Its combined focused checks passed Worker 159/159, mobile 80/80, web 51/51, and `git diff --check`.
 
 The approximately 65-minute full 24,000-request stub soak was not executed in this pass; its duration, counts, and safety contract are unit-verified and the actual CI mechanism was exercised. The oldest-supported physical iPhone 10,000-report performance gate also remains unobserved. Both stay explicit release evidence gates. No deployment, credential configuration, signed build, physical-device purchase/restore result, TestFlight action, App Store submission, review, publication, or live-listing availability is claimed.
+
+## Final abort and remote-result contract follow-up
+
+This separate follow-up started from `60195e408adf5a2ce2f650b9a7ac6265f8bace6f`. It preserved and will not stage the user-owned `server/ai-proxy/src/rateLimit.ts` modification or the untracked readiness plan.
+
+### Strict RED and GREEN
+
+- Worker RED: 2/2 new analysis/response tests failed because a caller abort while provider work was pending still returned HTTP 200 and completed success accounting. Independent review then found the smaller abort-during-success-completion interval: the route returned 200, and a second `caller_error` completion left usage at one instead of zero. Receipt-lifecycle RED proved no cleanup alarm was scheduled, and a UTC month rollover deleted the allowance needed for compensation and produced `INTERNAL_ERROR`. A final Worker RED lost all three success-completion responses after the Durable Object had committed success; the route correctly withheld the result but never issued `caller_error`, leaving the user charged. GREEN: the complete focused admission plus route set passed 90/90. A pre-aborted request remains `INVALID_REQUEST`/408 before accounting, and an abort after reservation but before invocation still uses `pre_provider_abort` and refunds both counters.
+- Mobile RED: 6 new cases failed because remote output accepted 11 messages, 281-code-point text, a 151-code-point interpretation, substituted sender/text, and reordered messages. Strict extra-key/type cases were already fail-closed. GREEN: the client/consumer focused suites passed 83/83.
+- Web RED: 4 new cases failed because remote output accepted a 151-code-point interpretation, substituted sender/text, and reordered messages. Existing checks already rejected 11 messages, 281-code-point text, extra keys, and wrong types. GREEN: the focused remote-analysis suite passed 24/24.
+
+### Implemented behavior
+
+- Both analysis and response routes now recheck the caller signal after invoked provider work returns and on both sides of durable success completion. An observed post-invocation abort completes with `caller_error`, refunds user allowance, retains the already-spent global provider units, releases the lease, and returns only a safe `INVALID_REQUEST`/408 envelope. The tests independently verify retained costs of three analysis units and one response unit, zero allowance, zero in-flight leases, and no delivered provider result.
+- Successful completion retains a content-free, 60-second compensatable receipt containing only pseudonymous accounting fields. The receipt makes the post-success abort correction idempotent, protects its exact plan/budget rows across UTC retention advancement, participates in the Durable Object's earliest accounting alarm, and expires without refunding work that was actually delivered.
+- If durable success accounting cannot be confirmed after all bounded retries, the Worker performs bounded best-effort `caller_error` compensation before rethrowing the original retryable accounting failure. This is idempotent whether success committed or not: an undelivered result refunds user allowance and retains invoked-provider cost, while a fully unavailable coordinator remains protected by lease expiry.
+- Mobile and web now use dedicated remote-analysis result validators instead of the general on-device schema. They require strict keys/types/enums, `mode: ai`, no more than 10 messages, no more than 280 Unicode code points of message text, and no more than 150 Unicode code points of possible interpretation.
+- Each client validates exact sender/text identity and order against a frozen internal copy of the immutable reviewed snapshot. Mobile maps a mismatch to `INVALID_RESPONSE`; its screen flow proves the invalid result cannot expose an AI result, Save action, or response-drafting entry and retains the on-device alternative. Web discards invalid output and constructs a fresh local `REMOTE_UNAVAILABLE` fallback. General on-device analysis limits were not changed.
+
+### Fresh final Node 22 evidence
+
+- Web: 15 files / 119 tests; zero-warning ESLint; production build at 1,488.72 kB / 415.47 kB gzip with only the existing large-chunk warning.
+- Mobile: 38 suites / 410 tests; TypeScript; Expo lint; Expo Doctor 18/18; iOS export with 1,497 modules, 23 assets, and a 5.98 MB Hermes bundle.
+- Worker: 11 files / 193 tests; TypeScript; zero-warning ESLint; production dry build at 220.38 KiB / 41.02 KiB gzip; fixture dry build at 227.86 KiB / 43.17 KiB gzip.
+- The final short fixture gate passed with the printed 70-request plan, exact 49/21 route mix, 100 peak reservations, expected `SERVICE_BUSY` and injected `RATE_LIMITED`, zero ordinary failures, p95 48.71 ms, p99 55.51 ms, and zero final reservations.
+- Tracked and built-output secret scanning passed. Root, mobile, and Worker production audits each reported zero vulnerabilities. `git diff --check` passed.
+- Final independent read-only review reported no blocker or important issue; its focused admission and route set passed 90/90, TypeScript passed, and targeted diff checking was clean.
+
+No external release state is inferred or claimed by this follow-up.

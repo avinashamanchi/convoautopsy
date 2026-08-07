@@ -18,6 +18,26 @@ const baseOptions = {
 function reviewedOptions(text, overrides = {}) {
   return { ...baseOptions, ...overrides, reviewedSnapshot: prepareAnalysisReview(text) }
 }
+
+function remoteAnalysisFor(messages, possibleInterpretation = 'This may be a tentative interpretation.') {
+  return {
+    schemaVersion: 1,
+    mode: 'ai',
+    intensityScore: 12,
+    conflictMode: 'Collaborating',
+    messages: messages.map(({ sender, text: messageText }) => ({
+      sender,
+      text: messageText,
+      pattern: 'Neutral',
+      egoState: 'Adult',
+      possibleInterpretation,
+    })),
+  }
+}
+
+function remoteAnalysisResponse(analysis, requestId = 'remote-result') {
+  return Response.json({ analysis, requestId }, { headers: { 'x-request-id': requestId } })
+}
 const directProviderHost = ['api', 'groq', 'com'].join('.')
 const clientKeyName = ['VITE', 'GROQ', 'API', 'KEY'].join('_')
 
@@ -100,6 +120,64 @@ describe('analyzeConversation', () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 
+  it('accepts a remote result at exactly 10 messages, 280 Unicode code points of text, and 150 of interpretation', async () => {
+    const input = Array.from({ length: 10 }, () => `Alice: ${'🧠'.repeat(280)}`).join('\n')
+    const reviewed = prepareAnalysisReview(input).messages
+    const exactResult = remoteAnalysisFor(reviewed, '🧠'.repeat(150))
+    vi.stubEnv('VITE_AI_PROXY_URL', 'https://proxy.example')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(remoteAnalysisResponse(exactResult, 'exact-remote-result')))
+
+    await expect(analyzeConversation(input, reviewedOptions(input))).resolves.toMatchObject({
+      source: 'ai',
+      fallbackReason: null,
+      result: { messages: expect.arrayContaining([expect.objectContaining({ hidden_meaning: '🧠'.repeat(150) })]) },
+    })
+  })
+
+  it.each([
+    ['an eleventh output message', (reviewed) => remoteAnalysisFor([...reviewed, reviewed[0]])],
+    ['a 281-code-point output text', (reviewed) => remoteAnalysisFor([{ ...reviewed[0], text: '🧠'.repeat(281) }])],
+    ['a 151-code-point interpretation', (reviewed) => remoteAnalysisFor(reviewed, '🧠'.repeat(151))],
+    ['an extra result key', (reviewed) => ({ ...remoteAnalysisFor(reviewed), internalNote: 'must not cross the boundary' })],
+    ['an extra message key', (reviewed) => ({
+      ...remoteAnalysisFor(reviewed),
+      messages: [{ ...remoteAnalysisFor(reviewed).messages[0], confidence: 0.9 }],
+    })],
+    ['a wrong field type', (reviewed) => ({ ...remoteAnalysisFor(reviewed), intensityScore: '12' })],
+  ])('rejects remote analysis with %s instead of returning it to persistence', async (_case, makeInvalidResult) => {
+    const input = _case === 'an eleventh output message'
+      ? Array.from({ length: 10 }, (_, index) => `Alice: message ${index + 1}`).join('\n')
+      : _case === 'a 281-code-point output text'
+        ? `Alice: ${'🧠'.repeat(280)}`
+        : 'Alice: Hello'
+    const reviewed = prepareAnalysisReview(input).messages
+    vi.stubEnv('VITE_AI_PROXY_URL', 'https://proxy.example')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(remoteAnalysisResponse(makeInvalidResult(reviewed))))
+
+    await expect(analyzeConversation(input, reviewedOptions(input))).resolves.toMatchObject({
+      source: 'local',
+      fallbackReason: 'REMOTE_UNAVAILABLE',
+      result: { analysis_mode: 'local' },
+    })
+  })
+
+  it.each([
+    ['substitutes a sender', (reviewed) => remoteAnalysisFor([{ ...reviewed[0], sender: 'Person B' }, reviewed[1]])],
+    ['substitutes text', (reviewed) => remoteAnalysisFor([{ ...reviewed[0], text: 'Different text' }, reviewed[1]])],
+    ['reorders messages', (reviewed) => remoteAnalysisFor([reviewed[1], reviewed[0]])],
+  ])('rejects a remote result that %s relative to the reviewed snapshot', async (_case, makeInvalidResult) => {
+    const input = 'Alice: First message\nBob: Second message'
+    const reviewed = prepareAnalysisReview(input).messages
+    vi.stubEnv('VITE_AI_PROXY_URL', 'https://proxy.example')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(remoteAnalysisResponse(makeInvalidResult(reviewed))))
+
+    await expect(analyzeConversation(input, reviewedOptions(input))).resolves.toMatchObject({
+      source: 'local',
+      fallbackReason: 'REMOTE_UNAVAILABLE',
+      result: { analysis_mode: 'local' },
+    })
+  })
+
   it('sends anonymized, participant-redacted messages to the analysis proxy without authorization', async () => {
     vi.stubEnv('VITE_AI_PROXY_URL', 'https://proxy.example/base')
     const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
@@ -108,7 +186,10 @@ describe('analyzeConversation', () => {
         mode: 'ai',
         intensityScore: 42,
         conflictMode: 'Competing',
-        messages: [{ sender: 'Person A', text: '[Person], please listen.', pattern: 'Criticism', egoState: 'Parent', possibleInterpretation: 'Needs to be heard.' }],
+        messages: [
+          { sender: 'Person A', text: '[Person], please listen.', pattern: 'Criticism', egoState: 'Parent', possibleInterpretation: 'Needs to be heard.' },
+          { sender: 'Person B', text: 'Okay.', pattern: 'Neutral', egoState: 'Adult', possibleInterpretation: 'This may be agreement.' },
+        ],
       },
       requestId: 'request-1',
     }), { status: 200, headers: { 'x-request-id': 'request-1' } }))

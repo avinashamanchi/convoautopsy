@@ -67,6 +67,25 @@ function remoteMessages(count: number, text: string): ParsedMessage[] {
   }));
 }
 
+function remoteAnalysisFor(
+  messages: readonly Readonly<Pick<ParsedMessage, 'sender' | 'text'>>[],
+  possibleInterpretation = 'This may be a tentative interpretation.',
+): AnalysisResult {
+  return {
+    schemaVersion: 1,
+    mode: 'ai',
+    intensityScore: 12,
+    conflictMode: 'Collaborating',
+    messages: messages.map(({ sender, text }) => ({
+      sender,
+      text,
+      pattern: 'Neutral',
+      egoState: 'Adult',
+      possibleInterpretation,
+    })),
+  };
+}
+
 type FetchMock = jest.Mock<Promise<Response>, [RequestInfo | URL, RequestInit?]>;
 const noRevenueCatId = async () => '$RCAnonymousID:mobile-test';
 
@@ -172,8 +191,11 @@ it('fails closed before fetch when billing identity lookup fails', async () => {
 });
 
 it('never serializes known participant names found in accepted message bodies', async () => {
-  const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockResolvedValue(response({ analysis: aiResult, requestId: 'req-mentions' }));
   const parsed = parseConversation('Alex: Jordan, please call me\nJordan: Hi Alex\nthis rejected line mentions Alex');
+  const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockResolvedValue(response({
+    analysis: remoteAnalysisFor(parsed.messages),
+    requestId: 'req-mentions',
+  }));
 
   await client(fetchImpl)(parsed.messages, new AbortController().signal);
 
@@ -200,12 +222,47 @@ it('rejects labels beyond Person Z before making a request', async () => {
   expect(fetchImpl).not.toHaveBeenCalled();
 });
 
-it('accepts the largest remote-analysis request of 10 messages and 280 Unicode code points each', async () => {
+it('accepts a remote result at exactly 10 messages, 280 Unicode code points of text, and 150 of interpretation', async () => {
+  const largestMessages = remoteMessages(10, '🧠'.repeat(280));
+  const largestResult = remoteAnalysisFor(largestMessages, '🧠'.repeat(150));
   const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>()
-    .mockResolvedValue(response({ analysis: aiResult, requestId: 'req-largest-analysis' }));
+    .mockResolvedValue(response({ analysis: largestResult, requestId: 'req-largest-analysis' }));
 
-  await expect(client(fetchImpl)(remoteMessages(10, '🧠'.repeat(280)), new AbortController().signal)).resolves.toEqual(aiResult);
+  await expect(client(fetchImpl)(largestMessages, new AbortController().signal)).resolves.toEqual(largestResult);
   expect(fetchImpl).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  ['an eleventh output message', remoteAnalysisFor([...anonymousMessages, ...remoteMessages(9, 'extra')])],
+  ['a 281-code-point output text', remoteAnalysisFor([{ sender: 'Person A', text: '🧠'.repeat(281) }])],
+  ['a 151-code-point interpretation', remoteAnalysisFor([anonymousMessages[0]], '🧠'.repeat(151))],
+  ['an extra result key', { ...remoteAnalysisFor([anonymousMessages[0]]), internalNote: 'must not cross the boundary' }],
+  ['an extra message key', {
+    ...remoteAnalysisFor([anonymousMessages[0]]),
+    messages: [{ ...remoteAnalysisFor([anonymousMessages[0]]).messages[0], confidence: 0.9 }],
+  }],
+  ['a wrong field type', { ...remoteAnalysisFor([anonymousMessages[0]]), intensityScore: '12' }],
+] as const)('rejects remote analysis with %s instead of returning it to the app flow', async (_case, invalidResult) => {
+  const reviewed = _case === 'a 281-code-point output text'
+    ? [{ ...anonymousMessages[0], text: '🧠'.repeat(280) }]
+    : _case === 'an eleventh output message'
+      ? remoteMessages(10, 'extra')
+      : [anonymousMessages[0]];
+  const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>()
+    .mockResolvedValue(response({ analysis: invalidResult, requestId: 'req-invalid-remote-result' }));
+
+  await expectCode(client(fetchImpl)(reviewed, new AbortController().signal), 'INVALID_RESPONSE');
+});
+
+it.each([
+  ['substitutes a sender', { ...aiResult, messages: [{ ...aiResult.messages[0], sender: 'Person B' }, aiResult.messages[1]] }],
+  ['substitutes text', { ...aiResult, messages: [{ ...aiResult.messages[0], text: 'Different text' }, aiResult.messages[1]] }],
+  ['reorders messages', { ...aiResult, messages: [aiResult.messages[1], aiResult.messages[0]] }],
+] as const)('rejects a remote result that %s relative to the reviewed snapshot', async (_case, invalidResult) => {
+  const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>()
+    .mockResolvedValue(response({ analysis: invalidResult, requestId: 'req-mismatched-remote-result' }));
+
+  await expectCode(client(fetchImpl)(anonymousMessages, new AbortController().signal), 'INVALID_RESPONSE');
 });
 
 it.each([

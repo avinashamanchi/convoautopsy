@@ -85,10 +85,6 @@ export function localAnalyze(text) {
 }
 
 const CONSENT_VERSION = '2026-08-07.2'
-const MODES = new Set(['local', 'ai'])
-const CONFLICT_MODES = new Set(['Competing', 'Avoiding', 'Compromising', 'Collaborating', 'Accommodating', 'Competing vs Avoiding'])
-const PATTERNS = new Set(['Criticism', 'Contempt', 'Defensiveness', 'Stonewalling', 'Neutral'])
-const EGO_STATES = new Set(['Parent', 'Adult', 'Child'])
 
 export function toLegacyResult(result) {
   return {
@@ -148,10 +144,10 @@ export function prepareAnalysisReview(text) {
 function reviewedAnalysisMessages(snapshot) {
   if (!snapshot || !Array.isArray(snapshot.messages) || snapshot.messages.length === 0 || snapshot.messages.length > REMOTE_ANALYSIS_MAX_MESSAGES) return null
   if (snapshot.messages.some((message) => !message || typeof message !== 'object' || typeof message.text !== 'string')) return null
-  const messages = snapshot.messages.map((message) => ({ sender: message?.sender, text: normalizeText(message?.text) }))
+  const messages = snapshot.messages.map((message) => Object.freeze({ sender: message?.sender, text: normalizeText(message?.text) }))
   return messages.every((message) => isAnonymousSender(message.sender)
       && isCodePointLength(message.text, 1, REMOTE_ANALYSIS_MAX_MESSAGE_CHARACTERS))
-    ? messages
+    ? Object.freeze(messages)
     : null
 }
 
@@ -170,23 +166,11 @@ function hasOnlyKeys(value, allowed) {
   return Object.keys(value).every(key => allowed.includes(key))
 }
 
-function isAnalysisResult(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value) || !hasOnlyKeys(value, ['schemaVersion', 'mode', 'intensityScore', 'conflictMode', 'messages'])) return false
-  if (value.schemaVersion !== 1 || !MODES.has(value.mode) || !Number.isInteger(value.intensityScore) || value.intensityScore < 0 || value.intensityScore > 100 || !CONFLICT_MODES.has(value.conflictMode) || !Array.isArray(value.messages) || value.messages.length === 0 || value.messages.length > REMOTE_ANALYSIS_MAX_MESSAGES) return false
-  return value.messages.every(message => message && typeof message === 'object' && !Array.isArray(message)
-    && hasOnlyKeys(message, ['sender', 'text', 'pattern', 'egoState', 'possibleInterpretation'])
-    && isAnonymousSender(message.sender)
-    && isCodePointLength(message.text, 1, REMOTE_ANALYSIS_MAX_MESSAGE_CHARACTERS)
-    && PATTERNS.has(message.pattern)
-    && EGO_STATES.has(message.egoState)
-    && isCodePointLength(message.possibleInterpretation, 1, 300))
-}
-
-function isSuccessEnvelope(value) {
+function isSuccessEnvelope(value, reviewedMessages) {
   return value && typeof value === 'object' && !Array.isArray(value)
     && hasOnlyKeys(value, ['analysis', 'requestId'])
     && isRequestId(value.requestId)
-    && isAnalysisResult(value.analysis)
+    && isRemoteAnalysisResult(value.analysis, reviewedMessages)
 }
 
 function requestIdMatchesHeader(response, requestId) {
@@ -207,7 +191,7 @@ export async function analyzeConversation(text, options = {}) {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ schemaVersion: 1, consentVersion: options.consentVersion, installationToken: options.installationToken, messages }),
     }, options)
-    if (!res.ok || !isSuccessEnvelope(data) || !requestIdMatchesHeader(res, data.requestId) || data.analysis.mode !== 'ai') throw new Error()
+    if (!res.ok || !isSuccessEnvelope(data, messages) || !requestIdMatchesHeader(res, data.requestId)) throw new Error()
     return { result: toLegacyResult(data.analysis), source: 'ai', fallbackReason: null }
   } catch (error) {
     if (error?.name === 'AbortError' && options.signal?.aborted) throw error
@@ -235,6 +219,7 @@ export const DEMO_RESULT = {
   ]
 }
 import { fetchBoundedJson } from './fetchBoundedJson'
+import { isRemoteAnalysisResult } from './remoteAnalysisResult'
 import {
   MAX_INPUT_CHARACTERS,
   MAX_MESSAGE_CHARACTERS,

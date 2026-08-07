@@ -90,6 +90,12 @@ function deferred() {
   return { promise, resolve };
 }
 
+function deferredValue<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise; });
+  return { promise, resolve };
+}
+
 beforeEach(async () => {
   await reset();
 });
@@ -616,6 +622,49 @@ describe('AI proxy routes', () => {
     expect(await currentInFlight()).toBe(1);
   });
 
+  it('compensates user allowance when every durable success response is lost after commit', async () => {
+    const completionOutcomes: string[] = [];
+    const actualAdmission = env.AI_ADMISSION;
+    const responseLostEnv = {
+      ...(env as unknown as Env),
+      AI_ADMISSION: {
+        idFromName: (name: string) => actualAdmission.idFromName(name),
+        get: (id: DurableObjectId) => {
+          const actual = actualAdmission.get(id);
+          return {
+            fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+              if (new URL(String(input)).pathname !== '/complete' || typeof init?.body !== 'string') {
+                return actual.fetch(input, init);
+              }
+              const outcome = (JSON.parse(init.body) as { outcome: string }).outcome;
+              completionOutcomes.push(outcome);
+              const response = await actual.fetch(input, init);
+              if (outcome === 'success') throw new Error('success completion response lost after durable commit');
+              return response;
+            },
+          };
+        },
+      } as unknown as DurableObjectNamespace,
+    };
+
+    const response = await app().fetch(
+      request('/v1/analyses', analysisRequest()),
+      responseLostEnv,
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body).toMatchObject({ error: { code: 'INTERNAL_ERROR', retryAfterSeconds: expect.any(Number) } });
+    expect(JSON.stringify(body)).not.toContain('analysis');
+    expect(completionOutcomes).toEqual(['success', 'success', 'success', 'caller_error']);
+    await runInDurableObject(admissionStub(), (_instance, state) => {
+      expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM inflight').one().count).toBe(0);
+      expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM success_receipt').one().count).toBe(0);
+      expect(state.storage.sql.exec<{ total: number | null }>('SELECT SUM(count) AS total FROM plan_usage').one().total ?? 0).toBe(0);
+      expect(state.storage.sql.exec<{ total: number | null }>('SELECT SUM(provider_units) AS total FROM daily_budget').one().total ?? 0).toBe(3);
+    });
+  });
+
   it('returns retryable accounting failure when provider-failure completion cannot be confirmed', async () => {
     const response = await app({
       analyze: async () => { throw new ProviderUnavailableError(); },
@@ -742,6 +791,111 @@ describe('AI proxy routes', () => {
       expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM inflight').one().count).toBe(0);
       expect(state.storage.sql.exec<{ total: number | null }>('SELECT SUM(count) AS total FROM plan_usage').one().total ?? 0).toBe(0);
       expect(state.storage.sql.exec<{ total: number | null }>('SELECT SUM(provider_units) AS total FROM daily_budget').one().total ?? 0).toBe(0);
+    });
+  });
+
+  it('refunds analysis allowance but retains provider cost when the caller aborts during invoked work', async () => {
+    const controller = new AbortController();
+    const entered = deferred();
+    const providerResult = deferredValue<AnalysisResult>();
+    const pending = app({
+      analyze: async () => {
+        entered.resolve();
+        return providerResult.promise;
+      },
+      craftResponse: validProvider().craftResponse,
+    }).fetch(request('/v1/analyses', analysisRequest(), { signal: controller.signal }), env as unknown as Env);
+
+    await entered.promise;
+    expect(await currentInFlight()).toBe(1);
+    controller.abort();
+    providerResult.resolve(analysis);
+    const response = await pending;
+
+    expect(response.status).toBe(408);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: 'INVALID_REQUEST' } });
+    await runInDurableObject(admissionStub(), (_instance, state) => {
+      expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM inflight').one().count).toBe(0);
+      expect(state.storage.sql.exec<{ total: number | null }>('SELECT SUM(count) AS total FROM plan_usage').one().total ?? 0).toBe(0);
+      expect(state.storage.sql.exec<{ total: number | null }>('SELECT SUM(provider_units) AS total FROM daily_budget').one().total ?? 0).toBe(3);
+    });
+  });
+
+  it('refunds response allowance but retains provider cost when the caller aborts during invoked work', async () => {
+    const controller = new AbortController();
+    const entered = deferred();
+    const providerResult = deferredValue<{ id: string; text: string; hint: string }>();
+    const input: CraftResponseRequest = {
+      schemaVersion: 1,
+      consentVersion: '2026-08-07.2',
+      installationToken,
+      sender: 'Person A',
+      goal: 'resolve',
+      tone: 'empathetic',
+      analysis,
+    };
+    const pending = app({
+      analyze: validProvider().analyze,
+      craftResponse: async () => {
+        entered.resolve();
+        return providerResult.promise;
+      },
+    }).fetch(request('/v1/responses', input, { signal: controller.signal }), env as unknown as Env);
+
+    await entered.promise;
+    expect(await currentInFlight()).toBe(1);
+    controller.abort();
+    providerResult.resolve({ id: 'must-not-deliver', text: 'This draft must not be delivered.', hint: 'Do not deliver.' });
+    const response = await pending;
+    const body = await response.json();
+
+    expect(response.status).toBe(408);
+    expect(body).toMatchObject({ error: { code: 'INVALID_REQUEST' } });
+    expect(JSON.stringify(body)).not.toContain('must-not-deliver');
+    await runInDurableObject(admissionStub(), (_instance, state) => {
+      expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM inflight').one().count).toBe(0);
+      expect(state.storage.sql.exec<{ total: number | null }>('SELECT SUM(count) AS total FROM plan_usage').one().total ?? 0).toBe(0);
+      expect(state.storage.sql.exec<{ total: number | null }>('SELECT SUM(provider_units) AS total FROM daily_budget').one().total ?? 0).toBe(1);
+    });
+  });
+
+  it('compensates a caller abort triggered while success accounting is in flight', async () => {
+    const controller = new AbortController();
+    const completionOutcomes: string[] = [];
+    const actualAdmission = env.AI_ADMISSION;
+    const observedEnv = {
+      ...(env as unknown as Env),
+      AI_ADMISSION: {
+        idFromName: (name: string) => actualAdmission.idFromName(name),
+        get: (id: DurableObjectId) => {
+          const actual = actualAdmission.get(id);
+          return {
+            fetch: (input: RequestInfo | URL, init?: RequestInit) => {
+              if (new URL(String(input)).pathname === '/complete' && typeof init?.body === 'string') {
+                const outcome = (JSON.parse(init.body) as { outcome: string }).outcome;
+                completionOutcomes.push(outcome);
+                if (outcome === 'success') controller.abort();
+              }
+              return actual.fetch(input, init);
+            },
+          };
+        },
+      } as unknown as DurableObjectNamespace,
+    };
+
+    const response = await app().fetch(request('/v1/analyses', analysisRequest(), {
+      signal: controller.signal,
+    }), observedEnv);
+    const body = await response.json();
+
+    expect(response.status).toBe(408);
+    expect(body).toMatchObject({ error: { code: 'INVALID_REQUEST' } });
+    expect(JSON.stringify(body)).not.toContain('analysis');
+    expect(completionOutcomes).toEqual(['success', 'caller_error']);
+    await runInDurableObject(admissionStub(), (_instance, state) => {
+      expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM inflight').one().count).toBe(0);
+      expect(state.storage.sql.exec<{ total: number | null }>('SELECT SUM(count) AS total FROM plan_usage').one().total ?? 0).toBe(0);
+      expect(state.storage.sql.exec<{ total: number | null }>('SELECT SUM(provider_units) AS total FROM daily_budget').one().total ?? 0).toBe(3);
     });
   });
 

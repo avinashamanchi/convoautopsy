@@ -15,6 +15,7 @@ import {
   REMOTE_INTERPRETATION_MAX_CODE_POINTS,
   REMOTE_DRAFT_MAX_RESPONSE_BYTES,
 } from './remoteLimits';
+import { validateRemoteAnalysisResult } from './remoteAnalysisResult';
 
 export {
   REMOTE_ANALYSIS_MAX_MESSAGES,
@@ -142,7 +143,7 @@ export function createAiClient({
       const body = await readBoundedJson(response, requestController.signal, REMOTE_ANALYSIS_MAX_RESPONSE_BYTES);
       ensureActive();
       if (!response.ok) throw publicError(response, body);
-      return validAnalysis(response, body);
+      return validAnalysis(response, body, anonymousMessages);
     };
 
     try {
@@ -290,7 +291,7 @@ function toAnonymousMessages(messages: readonly Readonly<ParsedMessage>[]) {
     || messages.some((message) => !/^Person [A-Z]$/.test(message.sender) || !message.text)) {
     throw new AiClientError('INVALID_RESPONSE');
   }
-  return messages.map(({ sender, text }) => ({ sender, text }));
+  return Object.freeze(messages.map(({ sender, text }) => Object.freeze({ sender, text })));
 }
 
 function withinRemoteMessageBounds(messages: readonly Readonly<{ text: string }>[]): boolean {
@@ -415,13 +416,17 @@ async function readBoundedJson(response: Response, signal: AbortSignal, maximumB
   }
 }
 
-function validAnalysis(response: Response, body: unknown): AnalysisResult {
+function validAnalysis(
+  response: Response,
+  body: unknown,
+  reviewedMessages: readonly Readonly<{ sender: string; text: string }>[],
+): AnalysisResult {
   if (!isRecord(body) || !hasOnlyKeys(body, ['analysis', 'requestId']) || !isRequestId(body.requestId) || !requestIdMatchesHeader(response, body.requestId)) {
     throw new AiClientError('INVALID_RESPONSE');
   }
-  const parsed = AnalysisResultSchema.safeParse(body.analysis);
-  if (!parsed.success || parsed.data.mode !== 'ai') throw new AiClientError('INVALID_RESPONSE');
-  return parsed.data;
+  const parsed = validateRemoteAnalysisResult(body.analysis, reviewedMessages);
+  if (!parsed) throw new AiClientError('INVALID_RESPONSE');
+  return parsed;
 }
 
 function validResponseDraft(response: Response, body: unknown): ResponseDraft {

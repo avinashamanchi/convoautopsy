@@ -284,6 +284,76 @@ describe('atomic AI admission', () => {
     expect(await counts()).toEqual({ inflight: 0, budget: 0, usage: 0 });
   });
 
+  it('compensates an abort observed after success accounting without refunding provider cost', async () => {
+    const now = Date.parse('2099-08-07T12:00:00Z');
+    const leaseId = await reserveAllowed({
+      plan: 'pro',
+      route: '/v1/analyses',
+      subjectDigest: 'success-then-caller-abort',
+      now,
+    });
+
+    await completeAdmission(namespace(), leaseId, 'success', now + 1);
+    await completeAdmission(namespace(), leaseId, 'caller_error', now + 2);
+
+    expect(await counts()).toEqual({ inflight: 0, budget: 3, usage: 0 });
+    await runInDurableObject(stub(), (_instance, state) => {
+      expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM lease_accounting').one().count).toBe(0);
+    });
+  });
+
+  it('expires a successful completion receipt without refunding delivered work', async () => {
+    const now = Date.parse('2099-08-07T12:00:00Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    const leaseId = await reserveAllowed({
+      plan: 'pro',
+      route: '/v1/analyses',
+      subjectDigest: 'delivered-success-receipt-expiry',
+      now,
+    });
+
+    await completeAdmission(namespace(), leaseId, 'success', now + 1);
+    const scheduledAlarm = await runInDurableObject(stub(), (_instance, state) => state.storage.getAlarm());
+
+    expect(scheduledAlarm).not.toBeNull();
+    if (scheduledAlarm === null) return;
+    vi.setSystemTime(scheduledAlarm + 1);
+    expect(await runDurableObjectAlarm(stub())).toBe(true);
+    expect(await counts()).toEqual({ inflight: 0, budget: 3, usage: 1 });
+    await runInDurableObject(stub(), (_instance, state) => {
+      expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM success_receipt').one().count).toBe(0);
+      expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM lease_accounting').one().count).toBe(0);
+    });
+  });
+
+  it('preserves a compensatable success receipt across UTC retention advancement', async () => {
+    const beforeMidnight = Date.parse('2099-08-31T23:59:59.900Z');
+    const oldLease = await reserveAllowed({
+      plan: 'pro',
+      route: '/v1/analyses',
+      subjectDigest: 'success-receipt-cross-month',
+      now: beforeMidnight,
+    });
+    await completeAdmission(namespace(), oldLease, 'success', beforeMidnight + 1);
+    const newLease = await reserveAllowed({
+      plan: 'pro',
+      route: '/v1/responses',
+      subjectDigest: 'success-receipt-next-month',
+      now: Date.parse('2099-09-01T00:00:00.100Z'),
+    });
+    await release(newLease);
+
+    await expect(completeAdmission(
+      namespace(),
+      oldLease,
+      'caller_error',
+      Date.parse('2099-09-01T00:00:00.200Z'),
+    )).resolves.toBeUndefined();
+
+    expect(await counts()).toEqual({ inflight: 0, budget: 4, usage: 1 });
+  });
+
   it('retries a response-lost completion idempotently without double-refunding', async () => {
     const now = Date.parse('2099-08-07T12:00:00Z');
     const leaseId = await reserveAllowed({

@@ -203,7 +203,9 @@ async function handle(
       await recordProviderFailure(env.AI_ADMISSION, reservation.leaseId, normalized);
       throw normalized;
     }
+    if (request.signal.aborted) await recordInvokedCallerAbort(env.AI_ADMISSION, reservation.leaseId);
     await recordProviderSuccess(env.AI_ADMISSION, reservation.leaseId);
+    if (request.signal.aborted) await recordInvokedCallerAbort(env.AI_ADMISSION, reservation.leaseId);
     return addBudgetWarning(json({ analysis, requestId }, 200, origin, requestId), reservation.budgetWarning);
   }
 
@@ -226,8 +228,18 @@ async function handle(
     await recordProviderFailure(env.AI_ADMISSION, reservation.leaseId, normalized);
     throw normalized;
   }
+  if (request.signal.aborted) await recordInvokedCallerAbort(env.AI_ADMISSION, reservation.leaseId);
   await recordProviderSuccess(env.AI_ADMISSION, reservation.leaseId);
+  if (request.signal.aborted) await recordInvokedCallerAbort(env.AI_ADMISSION, reservation.leaseId);
   return addBudgetWarning(json({ response, requestId }, 200, origin, requestId), reservation.budgetWarning);
+}
+
+async function recordInvokedCallerAbort(
+  namespace: DurableObjectNamespace,
+  leaseId: string,
+): Promise<void> {
+  await completeAdmission(namespace, leaseId, 'caller_error', Date.now());
+  throw new PublicError('INVALID_REQUEST', 408);
 }
 
 function matchesReviewedMessages(
@@ -252,7 +264,18 @@ async function recordProviderFailure(namespace: DurableObjectNamespace, leaseId:
 }
 
 async function recordProviderSuccess(namespace: DurableObjectNamespace, leaseId: string): Promise<void> {
-  await completeAdmission(namespace, leaseId, 'success', Date.now());
+  try {
+    await completeAdmission(namespace, leaseId, 'success', Date.now());
+  } catch (error) {
+    try {
+      await completeAdmission(namespace, leaseId, 'caller_error', Date.now());
+    } catch {
+      // The original bounded accounting failure remains authoritative. If the
+      // compensation request committed but its response was lost, completion
+      // idempotency still leaves the user allowance refunded.
+    }
+    throw error;
+  }
 }
 
 function normalizeProviderError(error: unknown): unknown {

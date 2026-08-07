@@ -49,6 +49,8 @@ type LeaseAccounting = {
   is_probe: number;
 };
 
+type SuccessReceipt = LeaseAccounting & { expires_at: number };
+
 type CircuitRow = { state: string; opened_at: number; probe_lease_id: string | null };
 
 const DEFAULT_MAX_GLOBAL_IN_FLIGHT = 100;
@@ -56,6 +58,7 @@ const LEASE_TTL_MS = 2 * 60_000;
 const RELEASE_DEADLINE_MS = 2_000;
 const COMPLETION_ATTEMPT_DEADLINE_MS = 750;
 const COMPLETION_ATTEMPTS = 3;
+const SUCCESS_RECEIPT_TTL_MS = 60_000;
 const PROVIDER_FAILURE_WINDOW_MS = 60_000;
 const PROVIDER_FAILURE_THRESHOLD = 5;
 const PROVIDER_CIRCUIT_COOLDOWN_MS = 30_000;
@@ -184,6 +187,8 @@ export class AdmissionDurableObject {
     this.state.storage.sql.exec('CREATE INDEX IF NOT EXISTS plan_usage_period_idx ON plan_usage(period)');
     this.state.storage.sql.exec('CREATE TABLE IF NOT EXISTS maintenance_state(id INTEGER PRIMARY KEY CHECK(id = 1), last_retention_day TEXT NOT NULL)');
     this.state.storage.sql.exec('CREATE TABLE IF NOT EXISTS lease_accounting(lease_id TEXT PRIMARY KEY, subject_digest TEXT NOT NULL, period TEXT NOT NULL, route TEXT NOT NULL, day TEXT NOT NULL, provider_units INTEGER NOT NULL, is_probe INTEGER NOT NULL CHECK(is_probe IN (0, 1)))');
+    this.state.storage.sql.exec('CREATE TABLE IF NOT EXISTS success_receipt(lease_id TEXT PRIMARY KEY, subject_digest TEXT NOT NULL, period TEXT NOT NULL, route TEXT NOT NULL, day TEXT NOT NULL, provider_units INTEGER NOT NULL, is_probe INTEGER NOT NULL CHECK(is_probe IN (0, 1)), expires_at INTEGER NOT NULL)');
+    this.state.storage.sql.exec('CREATE INDEX IF NOT EXISTS success_receipt_expires_idx ON success_receipt(expires_at)');
     this.state.storage.sql.exec('CREATE TABLE IF NOT EXISTS provider_failures(failure_id TEXT PRIMARY KEY, observed_at INTEGER NOT NULL)');
     this.state.storage.sql.exec('CREATE INDEX IF NOT EXISTS provider_failures_observed_idx ON provider_failures(observed_at)');
     this.state.storage.sql.exec("CREATE TABLE IF NOT EXISTS accounting_reconciliation(event_id TEXT PRIMARY KEY, observed_at INTEGER NOT NULL, reason TEXT NOT NULL CHECK(reason = 'expired_unresolved'))");
@@ -204,8 +209,10 @@ export class AdmissionDurableObject {
   async alarm(): Promise<void> {
     const nextAlarm = this.state.storage.transactionSync(() => {
       this.assertCircuit();
-      this.deleteExpiredLeases(Date.now());
-      return this.earliestLeaseExpiry();
+      const now = Date.now();
+      this.deleteExpiredLeases(now);
+      this.deleteExpiredSuccessReceipts(now);
+      return this.earliestAccountingDeadline();
     });
     await this.scheduleAlarm(nextAlarm);
   }
@@ -215,7 +222,8 @@ export class AdmissionDurableObject {
     const state = this.state.storage.transactionSync(() => {
       this.assertCircuit();
       this.deleteExpiredLeases(now);
-      return { count: this.inflightCount(), nextAlarm: this.earliestLeaseExpiry() };
+      this.deleteExpiredSuccessReceipts(now);
+      return { count: this.inflightCount(), nextAlarm: this.earliestAccountingDeadline() };
     });
     try {
       await this.scheduleAlarm(state.nextAlarm);
@@ -230,14 +238,14 @@ export class AdmissionDurableObject {
     if (!isInternalReservation(input)) return new Response(null, { status: 400 });
 
     const reservation = this.state.storage.transactionSync(() => this.reserveSync(input));
-    const nextAlarm = this.earliestLeaseExpiry();
+    const nextAlarm = this.earliestAccountingDeadline();
     try {
       await this.scheduleAlarm(nextAlarm);
     } catch {
       if (reservation.allowed) {
         this.state.storage.transactionSync(() => this.rollbackReservation(reservation, input));
         try {
-          await this.scheduleAlarm(this.earliestLeaseExpiry());
+          await this.scheduleAlarm(this.earliestAccountingDeadline());
         } catch {
           // The lease and its accounting are already compensated; a later request can reschedule.
         }
@@ -259,7 +267,7 @@ export class AdmissionDurableObject {
       this.state.storage.sql.exec('DELETE FROM inflight WHERE lease_id = ?', leaseId);
       this.state.storage.sql.exec('DELETE FROM lease_accounting WHERE lease_id = ?', leaseId);
       if (accounting?.is_probe === 1) this.closeCircuit();
-      return this.earliestLeaseExpiry();
+      return this.earliestAccountingDeadline();
     });
     try {
       await this.scheduleAlarm(nextAlarm);
@@ -281,7 +289,7 @@ export class AdmissionDurableObject {
 
     const nextAlarm = this.state.storage.transactionSync(() => {
       this.completeSync(input.leaseId as string, input.outcome as AdmissionCompletionOutcome, input.now as number);
-      return this.earliestLeaseExpiry();
+      return this.earliestAccountingDeadline();
     });
     try {
       await this.scheduleAlarm(nextAlarm);
@@ -293,6 +301,15 @@ export class AdmissionDurableObject {
 
   private completeSync(leaseId: string, outcome: AdmissionCompletionOutcome, now: number): void {
     const circuit = this.assertCircuit();
+    this.deleteExpiredSuccessReceipts(now);
+    const receipt = this.successReceipt(leaseId);
+    if (receipt) {
+      if (outcome === 'caller_error') {
+        this.refundUserAllowance(receipt);
+        this.state.storage.sql.exec('DELETE FROM success_receipt WHERE lease_id = ?', leaseId);
+      }
+      return;
+    }
     const accounting = this.leaseAccounting(leaseId);
     if (!accounting) {
       this.state.storage.sql.exec('DELETE FROM inflight WHERE lease_id = ?', leaseId);
@@ -304,12 +321,25 @@ export class AdmissionDurableObject {
       if (outcome === 'pre_provider_abort') this.refundProviderBudget(accounting);
     }
     this.state.storage.sql.exec('DELETE FROM inflight WHERE lease_id = ?', leaseId);
-    this.state.storage.sql.exec('DELETE FROM lease_accounting WHERE lease_id = ?', leaseId);
 
     if (outcome === 'success') {
+      this.state.storage.sql.exec(
+        'INSERT INTO success_receipt (lease_id, subject_digest, period, route, day, provider_units, is_probe, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        accounting.lease_id,
+        accounting.subject_digest,
+        accounting.period,
+        accounting.route,
+        accounting.day,
+        accounting.provider_units,
+        accounting.is_probe,
+        Math.min(8_640_000_000_000_000, now + SUCCESS_RECEIPT_TTL_MS),
+      );
+      this.state.storage.sql.exec('DELETE FROM lease_accounting WHERE lease_id = ?', leaseId);
       if (accounting.is_probe === 1) this.closeCircuit();
       return;
     }
+
+    this.state.storage.sql.exec('DELETE FROM lease_accounting WHERE lease_id = ?', leaseId);
 
     if (outcome === 'pre_provider_abort') {
       if (accounting.is_probe === 1) this.openCircuit(now);
@@ -343,6 +373,7 @@ export class AdmissionDurableObject {
   private reserveSync(input: InternalReservation): AdmissionRejection | ReservedLease {
     this.assertCircuit();
     this.deleteExpiredLeases(input.now);
+    this.deleteExpiredSuccessReceipts(input.now);
     this.runDailyRetention(input.now);
 
     this.state.storage.sql.exec('DELETE FROM provider_failures WHERE observed_at < ?', input.now - PROVIDER_FAILURE_WINDOW_MS);
@@ -366,7 +397,7 @@ export class AdmissionDurableObject {
 
     const inflight = this.inflightCount();
     if (inflight >= input.maxGlobalInFlight) {
-      const earliest = this.earliestLeaseExpiry();
+      const earliest = this.earliestAccountingDeadline();
       return reject('SERVICE_BUSY', retrySeconds(input.now, earliest ?? input.now + LEASE_TTL_MS));
     }
 
@@ -495,6 +526,25 @@ export class AdmissionDurableObject {
     return row;
   }
 
+  private successReceipt(leaseId: string): SuccessReceipt | undefined {
+    const row = this.state.storage.sql.exec<SuccessReceipt>(
+      'SELECT lease_id, subject_digest, period, route, day, provider_units, is_probe, expires_at FROM success_receipt WHERE lease_id = ?',
+      leaseId,
+    ).toArray()[0];
+    if (!row) return undefined;
+    if (row.lease_id !== leaseId
+      || !DIGEST_PATTERN.test(row.subject_digest)
+      || (row.route !== '/v1/analyses' && row.route !== '/v1/responses')
+      || !/^(free:\d{4}-\d{2}-\d{2}|pro:\d{4}-\d{2})$/.test(row.period)
+      || !/^\d{4}-\d{2}-\d{2}$/.test(row.day)
+      || (row.provider_units !== 1 && row.provider_units !== 3)
+      || (row.is_probe !== 0 && row.is_probe !== 1)
+      || !validTimestamp(row.expires_at)) {
+      throw new Error('Invalid success receipt state');
+    }
+    return row;
+  }
+
   private refundUserAllowance(accounting: LeaseAccounting): void {
     const usage = this.usageForPeriod(accounting.subject_digest, accounting.period, accounting.route);
     if (usage < 1) throw new Error('Invalid refundable allowance state');
@@ -567,10 +617,12 @@ export class AdmissionDurableObject {
     return count;
   }
 
-  private earliestLeaseExpiry(): number | undefined {
-    const value = this.state.storage.sql.exec<{ expires_at: number | null }>('SELECT MIN(expires_at) AS expires_at FROM inflight').one().expires_at;
+  private earliestAccountingDeadline(): number | undefined {
+    const value = this.state.storage.sql.exec<{ expires_at: number | null }>(
+      'SELECT MIN(expires_at) AS expires_at FROM (SELECT expires_at FROM inflight UNION ALL SELECT expires_at FROM success_receipt)',
+    ).one().expires_at;
     if (value === null) return undefined;
-    if (!Number.isSafeInteger(value)) throw new Error('Invalid lease state');
+    if (!Number.isSafeInteger(value)) throw new Error('Invalid accounting deadline state');
     return value;
   }
 
@@ -598,6 +650,10 @@ export class AdmissionDurableObject {
     this.state.storage.sql.exec('DELETE FROM inflight WHERE expires_at <= ?', now);
   }
 
+  private deleteExpiredSuccessReceipts(now: number): void {
+    this.state.storage.sql.exec('DELETE FROM success_receipt WHERE expires_at <= ?', now);
+  }
+
   private runDailyRetention(now: number): void {
     const day = utcDay(now);
     const lastRetentionDay = this.state.storage.sql.exec<{ last_retention_day: string }>(
@@ -608,12 +664,12 @@ export class AdmissionDurableObject {
     const oldestRetainedFreePeriod = `free:${utcDay(now - (FREE_WINDOW_DAYS - 1) * DAY_MS)}`;
     const currentProPeriod = `pro:${utcMonth(now)}`;
     this.state.storage.sql.exec(
-      "DELETE FROM plan_usage WHERE ((period >= 'free:' AND period < ?) OR (period >= 'pro:' AND period < ?)) AND NOT EXISTS (SELECT 1 FROM lease_accounting WHERE lease_accounting.subject_digest = plan_usage.subject_digest AND lease_accounting.period = plan_usage.period AND lease_accounting.route = plan_usage.route)",
+      "DELETE FROM plan_usage WHERE ((period >= 'free:' AND period < ?) OR (period >= 'pro:' AND period < ?)) AND NOT EXISTS (SELECT 1 FROM lease_accounting WHERE lease_accounting.subject_digest = plan_usage.subject_digest AND lease_accounting.period = plan_usage.period AND lease_accounting.route = plan_usage.route) AND NOT EXISTS (SELECT 1 FROM success_receipt WHERE success_receipt.subject_digest = plan_usage.subject_digest AND success_receipt.period = plan_usage.period AND success_receipt.route = plan_usage.route)",
       oldestRetainedFreePeriod,
       currentProPeriod,
     );
     this.state.storage.sql.exec(
-      'DELETE FROM daily_budget WHERE day < ? AND NOT EXISTS (SELECT 1 FROM lease_accounting WHERE lease_accounting.day = daily_budget.day)',
+      'DELETE FROM daily_budget WHERE day < ? AND NOT EXISTS (SELECT 1 FROM lease_accounting WHERE lease_accounting.day = daily_budget.day) AND NOT EXISTS (SELECT 1 FROM success_receipt WHERE success_receipt.day = daily_budget.day)',
       day,
     );
     this.state.storage.sql.exec('DELETE FROM provider_failures WHERE observed_at < ?', now - PROVIDER_FAILURE_WINDOW_MS);

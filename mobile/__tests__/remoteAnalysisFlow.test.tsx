@@ -295,11 +295,16 @@ it('keeps the preview available after consent persistence fails', async () => {
   expect(remoteAnalysis).not.toHaveBeenCalled();
 });
 
-it('keeps the draft and offers an on-device alternative after an AI failure', async () => {
-  remoteAnalysis.mockRejectedValue(new Error('network details must not reach the screen'));
+it('does not expose, persist, or draft from a remote result rejected as INVALID_RESPONSE', async () => {
+  remoteAnalysis.mockRejectedValue(new AiClientError('INVALID_RESPONSE'));
   await renderPreview();
   await openFirstConsent();
   fireEvent.press(screen.getByRole('button', { name: 'Agree and continue' }));
+
+  expect(await screen.findByText("AI-assisted analysis couldn't be completed. Your conversation is still available.")).toBeOnTheScreen();
+  expect(screen.queryByText('AI-assisted estimate')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Save analysis' })).toBeNull();
+  expect(screen.queryByText(/Draft responses/i)).toBeNull();
 
   fireEvent.press(await screen.findByRole('button', { name: 'Run on-device analysis instead' }));
 
