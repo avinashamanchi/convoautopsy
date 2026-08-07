@@ -257,7 +257,7 @@ describe('AI proxy routes', () => {
   it('returns DAILY_BUDGET_REACHED before provider work at the Free reserve threshold', async () => {
     const day = new Date().toISOString().slice(0, 10);
     await runInDurableObject(admissionStub(), (_instance, state) => {
-      state.storage.sql.exec('INSERT INTO daily_budget (day, provider_units) VALUES (?, ?)', day, 950);
+      state.storage.sql.exec('INSERT INTO daily_budget (day, provider_units) VALUES (?, ?)', day, 1_234_997);
     });
     let providerCalled = false;
     const response = await app({

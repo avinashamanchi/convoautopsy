@@ -8,7 +8,9 @@
     { "binding": "ENTITLEMENT_CACHE" }
   ],
   "vars": {
-    "MAX_DAILY_PROVIDER_UNITS": "1000"
+    // Covers a full day at 5 analysis requests/second (1,296,000 units) with a small margin.
+    // This remains an explicit operator-adjustable provider-cost ceiling, not an unbounded default.
+    "MAX_DAILY_PROVIDER_UNITS": "1300000"
   },
   "durable_objects": {
     "bindings": [

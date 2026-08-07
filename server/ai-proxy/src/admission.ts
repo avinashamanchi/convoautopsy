@@ -103,6 +103,8 @@ export class AdmissionDurableObject {
     this.state.storage.sql.exec('CREATE TABLE IF NOT EXISTS daily_budget(day TEXT PRIMARY KEY, provider_units INTEGER NOT NULL)');
     this.state.storage.sql.exec('CREATE TABLE IF NOT EXISTS inflight(lease_id TEXT PRIMARY KEY, expires_at INTEGER NOT NULL)');
     this.state.storage.sql.exec('CREATE TABLE IF NOT EXISTS plan_usage(subject_digest TEXT NOT NULL, period TEXT NOT NULL, route TEXT NOT NULL, count INTEGER NOT NULL, PRIMARY KEY(subject_digest, period, route))');
+    this.state.storage.sql.exec('CREATE INDEX IF NOT EXISTS plan_usage_period_idx ON plan_usage(period)');
+    this.state.storage.sql.exec('CREATE TABLE IF NOT EXISTS maintenance_state(id INTEGER PRIMARY KEY CHECK(id = 1), last_retention_day TEXT NOT NULL)');
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -162,7 +164,7 @@ export class AdmissionDurableObject {
 
   private reserveSync(input: InternalReservation): AdmissionRejection | ReservedLease {
     this.deleteExpiredLeases(input.now);
-    this.cleanObsoleteFreeBuckets(input.now);
+    this.runDailyRetention(input.now);
 
     const quota = this.quotaState(input);
     if (quota.count >= quota.limit) {
@@ -278,9 +280,25 @@ export class AdmissionDurableObject {
     this.state.storage.sql.exec('DELETE FROM inflight WHERE expires_at <= ?', now);
   }
 
-  private cleanObsoleteFreeBuckets(now: number): void {
-    const oldestRetained = `free:${utcDay(now - (FREE_WINDOW_DAYS - 1) * DAY_MS)}`;
-    this.state.storage.sql.exec("DELETE FROM plan_usage WHERE period LIKE 'free:%' AND period < ?", oldestRetained);
+  private runDailyRetention(now: number): void {
+    const day = utcDay(now);
+    const lastRetentionDay = this.state.storage.sql.exec<{ last_retention_day: string }>(
+      'SELECT last_retention_day FROM maintenance_state WHERE id = 1',
+    ).toArray()[0]?.last_retention_day;
+    if (lastRetentionDay !== undefined && lastRetentionDay >= day) return;
+
+    const oldestRetainedFreePeriod = `free:${utcDay(now - (FREE_WINDOW_DAYS - 1) * DAY_MS)}`;
+    const currentProPeriod = `pro:${utcMonth(now)}`;
+    this.state.storage.sql.exec(
+      "DELETE FROM plan_usage WHERE (period >= 'free:' AND period < ?) OR (period >= 'pro:' AND period < ?)",
+      oldestRetainedFreePeriod,
+      currentProPeriod,
+    );
+    this.state.storage.sql.exec('DELETE FROM daily_budget WHERE day < ?', day);
+    this.state.storage.sql.exec(
+      'INSERT INTO maintenance_state (id, last_retention_day) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET last_retention_day = excluded.last_retention_day',
+      day,
+    );
   }
 
   private rollbackReservation(reservation: ReservedLease, input: InternalReservation): void {
