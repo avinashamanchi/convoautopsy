@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { router } from 'expo-router';
 import { ScrollView, StyleSheet, Text } from 'react-native';
+import { useBilling } from '../src/billing/BillingProvider';
 import { AiConsentSheet } from '../src/components/AiConsentSheet';
 import { AnalysisModePicker } from '../src/components/AnalysisModePicker';
 import { ParsedMessageList } from '../src/components/ParsedMessageList';
@@ -20,6 +21,7 @@ const AI_FAILURE = "AI-assisted analysis couldn't be completed. Your conversatio
 export default function PreviewScreen() {
   const { draft, parsed, preparePreview, runLocal, startRemote, setRemoteResult, cancel } = useAnalysisSession();
   const { preferences } = useReportRepository();
+  const { appUserId } = useBilling();
   const [preview, setPreview] = useState<ParseResult | null>(null);
   const [aiNotice, setAiNotice] = useState<string | null>(null);
   const [consentVisible, setConsentVisible] = useState(false);
@@ -37,8 +39,9 @@ export default function PreviewScreen() {
     () => createAiClient({
       getConsent: consentStore.getConsent,
       getInstallationToken: consentStore.getInstallationToken,
+      getRevenueCatAppUserId: async () => appUserId,
     }),
-    [consentStore],
+    [appUserId, consentStore],
   );
 
   useEffect(() => {

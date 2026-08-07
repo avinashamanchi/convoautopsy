@@ -30,6 +30,7 @@ function response(body: unknown, init: ResponseInit = {}) {
 }
 
 type FetchMock = jest.Mock<Promise<Response>, [RequestInfo | URL, RequestInit?]>;
+const noRevenueCatId = async () => null;
 
 function client(fetchImpl: FetchMock) {
   return createAiClient({
@@ -37,6 +38,7 @@ function client(fetchImpl: FetchMock) {
     fetch: fetchImpl,
     getConsent: async () => consent,
     getInstallationToken: async () => '4b479c21-5169-41b5-ba54-3d0c5bdb82ba',
+    getRevenueCatAppUserId: async () => '$RCAnonymousID:mobile-test',
   });
 }
 
@@ -64,12 +66,42 @@ it('sends only anonymous parsed Person labels with consent and a device token', 
     schemaVersion: 1,
     consentVersion: '2026-08-02',
     installationToken: '4b479c21-5169-41b5-ba54-3d0c5bdb82ba',
+    revenueCatAppUserId: '$RCAnonymousID:mobile-test',
     messages: [
       { sender: 'Person A', text: 'Can we talk?' },
       { sender: 'Person B', text: 'Not right now.' },
     ],
   });
   expect(JSON.stringify(requestBody.messages)).not.toContain('Alex');
+});
+
+it('omits the RevenueCat identifier when billing is unavailable', async () => {
+  const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockResolvedValue(response({ analysis: aiResult, requestId: 'req-free' }));
+  const analyze = createAiClient({
+    endpoint: 'https://ai.example.test',
+    fetch: fetchImpl,
+    getConsent: async () => consent,
+    getInstallationToken: async () => '4b479c21-5169-41b5-ba54-3d0c5bdb82ba',
+    getRevenueCatAppUserId: async () => null,
+  });
+
+  await analyze(anonymousMessages, new AbortController().signal);
+
+  expect(JSON.parse(String(fetchImpl.mock.calls[0][1]?.body))).not.toHaveProperty('revenueCatAppUserId');
+});
+
+it('continues as a free request when billing identifier lookup fails', async () => {
+  const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockResolvedValue(response({ analysis: aiResult, requestId: 'req-billing-failure' }));
+  const analyze = createAiClient({
+    endpoint: 'https://ai.example.test',
+    fetch: fetchImpl,
+    getConsent: async () => consent,
+    getInstallationToken: async () => '4b479c21-5169-41b5-ba54-3d0c5bdb82ba',
+    getRevenueCatAppUserId: async () => { throw new Error('billing unavailable'); },
+  });
+
+  await expect(analyze(anonymousMessages, new AbortController().signal)).resolves.toEqual(aiResult);
+  expect(JSON.parse(String(fetchImpl.mock.calls[0][1]?.body))).not.toHaveProperty('revenueCatAppUserId');
 });
 
 it('never serializes known participant names found in accepted message bodies', async () => {
@@ -119,7 +151,7 @@ it('maps caller cancellation to CANCELLED', async () => {
 it('does not fetch after cancellation while consent lookup is pending', async () => {
   const consentLookup = deferred<ConsentRecord | null>();
   const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>();
-  const analyze = createAiClient({ endpoint: 'https://ai.example.test', fetch: fetchImpl, getConsent: () => consentLookup.promise, getInstallationToken: async () => 'token' });
+  const analyze = createAiClient({ endpoint: 'https://ai.example.test', fetch: fetchImpl, getConsent: () => consentLookup.promise, getInstallationToken: async () => 'token', getRevenueCatAppUserId: noRevenueCatId });
   const controller = new AbortController();
   const request = analyze(anonymousMessages, controller.signal);
 
@@ -133,7 +165,7 @@ it('does not fetch after cancellation while consent lookup is pending', async ()
 it('does not fetch after cancellation while secure token lookup is pending', async () => {
   const tokenLookup = deferred<string>();
   const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>();
-  const analyze = createAiClient({ endpoint: 'https://ai.example.test', fetch: fetchImpl, getConsent: async () => consent, getInstallationToken: () => tokenLookup.promise });
+  const analyze = createAiClient({ endpoint: 'https://ai.example.test', fetch: fetchImpl, getConsent: async () => consent, getInstallationToken: () => tokenLookup.promise, getRevenueCatAppUserId: noRevenueCatId });
   const controller = new AbortController();
   const request = analyze(anonymousMessages, controller.signal);
 
@@ -151,6 +183,7 @@ it('preserves the secure-storage error without attempting a request', async () =
     fetch: fetchImpl,
     getConsent: async () => consent,
     getInstallationToken: async () => { throw new SecureStorageUnavailableError(); },
+    getRevenueCatAppUserId: noRevenueCatId,
   });
 
   await expect(analyze(anonymousMessages, new AbortController().signal)).rejects.toThrow(SECURE_STORAGE_UNAVAILABLE_MESSAGE);
@@ -248,8 +281,8 @@ it('rejects a response whose request header conflicts with its public envelope',
 
 it('requires a configured HTTPS endpoint for production', async () => {
   const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>();
-  const missing = createAiClient({ endpoint: '', fetch: fetchImpl, isProduction: true, getConsent: async () => consent, getInstallationToken: async () => 'token' });
-  const insecure = createAiClient({ endpoint: 'http://localhost:8787', fetch: fetchImpl, isProduction: true, getConsent: async () => consent, getInstallationToken: async () => 'token' });
+  const missing = createAiClient({ endpoint: '', fetch: fetchImpl, isProduction: true, getConsent: async () => consent, getInstallationToken: async () => 'token', getRevenueCatAppUserId: noRevenueCatId });
+  const insecure = createAiClient({ endpoint: 'http://localhost:8787', fetch: fetchImpl, isProduction: true, getConsent: async () => consent, getInstallationToken: async () => 'token', getRevenueCatAppUserId: noRevenueCatId });
 
   await expectCode(missing(anonymousMessages, new AbortController().signal), 'NOT_CONFIGURED');
   await expectCode(insecure(anonymousMessages, new AbortController().signal), 'NOT_CONFIGURED');

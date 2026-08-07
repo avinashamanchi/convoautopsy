@@ -29,6 +29,7 @@ type AiClientDependencies = {
   fetch?: FetchPort;
   getConsent(): Promise<ConsentRecord | null>;
   getInstallationToken(): Promise<string>;
+  getRevenueCatAppUserId(): Promise<string | null>;
   isProduction?: boolean;
   timeoutMs?: number;
 };
@@ -42,6 +43,7 @@ export function createAiClient({
   fetch: fetchPort = globalThis.fetch,
   getConsent,
   getInstallationToken,
+  getRevenueCatAppUserId,
   isProduction = true,
   timeoutMs = 20_000,
 }: AiClientDependencies) {
@@ -84,6 +86,7 @@ export function createAiClient({
       ensureActive();
       const url = analysisUrl(endpoint, isProduction);
       if (!url || !fetchPort) throw new AiClientError('NOT_CONFIGURED');
+      const revenueCatAppUserId = await getRevenueCatAppUserId().catch(() => null);
       ensureActive();
       const response = await fetchPort(url, {
         method: 'POST',
@@ -92,6 +95,7 @@ export function createAiClient({
           schemaVersion: 1,
           consentVersion: consent.version,
           installationToken,
+          ...(revenueCatAppUserId === null ? {} : { revenueCatAppUserId }),
           messages: anonymousMessages,
         }),
         signal: requestController.signal,

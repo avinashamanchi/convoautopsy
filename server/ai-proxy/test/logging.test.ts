@@ -5,6 +5,7 @@ import { createApp, type AiProvider, type Env } from '../src/index';
 
 const CONTENT_MARKER = 'MARKER_CONVERSATION_CONTENT_DO_NOT_LOG';
 const PROVIDER_MARKER = 'MARKER_PROVIDER_CONTENT_DO_NOT_LOG';
+const REVENUECAT_ID_MARKER = '$RCAnonymousID:MARKER_REVENUECAT_ID_DO_NOT_LOG';
 const token = 'installation-token-which-is-long-enough';
 
 describe('privacy-safe logging', () => {
@@ -23,7 +24,7 @@ describe('privacy-safe logging', () => {
     const app = createApp({ provider, logger: { info: (record) => records.push(record) }, rateLimitSecret: 'test-only-rate-key' });
     const analysisResponse = await app.fetch(new Request('https://proxy.example/v1/analyses', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ schemaVersion: 1, consentVersion: '2026-08-02', installationToken: token, messages: [{ sender: 'Person A', text: CONTENT_MARKER }] }),
+      body: JSON.stringify({ schemaVersion: 1, consentVersion: '2026-08-02', installationToken: token, revenueCatAppUserId: REVENUECAT_ID_MARKER, messages: [{ sender: 'Person A', text: CONTENT_MARKER }] }),
     }), env as unknown as Env);
     const responseResponse = await app.fetch(new Request('https://proxy.example/v1/responses', {
       method: 'POST', headers: { 'content-type': 'application/json' },
@@ -39,6 +40,7 @@ describe('privacy-safe logging', () => {
     const serialized = JSON.stringify(records);
     expect(serialized).not.toContain(CONTENT_MARKER);
     expect(serialized).not.toContain(PROVIDER_MARKER);
+    expect(serialized).not.toContain(REVENUECAT_ID_MARKER);
     expect(records).toEqual(expect.arrayContaining([expect.objectContaining({ requestId: analysisBody.requestId })]));
     expect(records).toEqual(expect.arrayContaining([expect.objectContaining({ route: '/v1/analyses', status: 200 }), expect.objectContaining({ route: '/v1/responses', status: 502, code: 'PROVIDER_INVALID_RESPONSE' })]));
   });

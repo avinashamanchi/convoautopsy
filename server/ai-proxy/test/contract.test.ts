@@ -64,6 +64,43 @@ describe('request contract', () => {
     expect(AnalyzeRequestSchema.safeParse(request('🫠'.repeat(1_001))).success).toBe(false);
   });
 
+  it('accepts an optional RevenueCat identifier of at most 100 Unicode code points on both request routes', () => {
+    const base = {
+      schemaVersion: 1 as const,
+      consentVersion: '2026-08-02' as const,
+      installationToken: 'installation-token-which-is-long-enough',
+      revenueCatAppUserId: '🫠'.repeat(100),
+    };
+    const analysisRequest = { ...base, messages: [{ sender: 'Person A', text: 'Please listen.' }] };
+    const responseRequest = {
+      ...base,
+      sender: 'Person A', goal: 'resolve', tone: 'empathetic',
+      analysis: fixture,
+    };
+
+    expect(AnalyzeRequestSchema.safeParse(analysisRequest).success).toBe(true);
+    expect(CraftResponseRequestSchema.safeParse(responseRequest).success).toBe(true);
+    expect(AnalyzeRequestSchema.safeParse({ ...analysisRequest, revenueCatAppUserId: '🫠'.repeat(101) }).success).toBe(false);
+    expect(CraftResponseRequestSchema.safeParse({ ...responseRequest, revenueCatAppUserId: '🫠'.repeat(101) }).success).toBe(false);
+  });
+
+  it('rejects client-asserted subscription plan fields', () => {
+    const request = {
+      schemaVersion: 1,
+      consentVersion: '2026-08-02',
+      installationToken: 'installation-token-which-is-long-enough',
+      messages: [{ sender: 'Person A', text: 'Please listen.' }],
+    };
+
+    expect(AnalyzeRequestSchema.safeParse({ ...request, isPro: true }).success).toBe(false);
+    expect(AnalyzeRequestSchema.safeParse({ ...request, plan: 'pro' }).success).toBe(false);
+    expect(CraftResponseRequestSchema.safeParse({
+      ...request,
+      sender: 'Person A', goal: 'resolve', tone: 'empathetic', analysis: fixture,
+      isPro: true,
+    }).success).toBe(false);
+  });
+
   it('enforces anonymous Person A through Person Z labels at every provider boundary', () => {
     const rawInput = {
       schemaVersion: 1,

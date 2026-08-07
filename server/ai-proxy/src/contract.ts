@@ -15,6 +15,7 @@ function codePointString(min: number, max: number) {
 }
 
 export const InstallationTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{16,256}$/);
+export const RevenueCatAppUserIdSchema = codePointString(1, 100);
 export const AnonymousSenderSchema = z.string().regex(/^Person [A-Z]$/);
 
 export const InputMessageSchema = z
@@ -56,6 +57,7 @@ export const AnalyzeRequestSchema = z
     schemaVersion: z.literal(1),
     consentVersion: z.literal(CONSENT_VERSION),
     installationToken: InstallationTokenSchema,
+    revenueCatAppUserId: RevenueCatAppUserIdSchema.optional(),
     messages: z.array(InputMessageSchema).min(1).max(100),
   })
   .strict();
@@ -65,6 +67,7 @@ export const CraftResponseRequestSchema = z
     schemaVersion: z.literal(1),
     consentVersion: z.literal(CONSENT_VERSION),
     installationToken: InstallationTokenSchema,
+    revenueCatAppUserId: RevenueCatAppUserIdSchema.optional(),
     sender: AnonymousSenderSchema,
     goal: z.enum(['resolve', 'boundary', 'feelings', 'understand', 'apologize', 'request']),
     tone: z.enum(['empathetic', 'assertive', 'deescalating', 'direct', 'diplomatic']),

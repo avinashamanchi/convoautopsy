@@ -8,6 +8,7 @@ import {
   type CraftResponseRequest,
 } from './contract';
 import { asPublicError, ProviderInvalidResponseError, ProviderUnavailableError, PublicError, type PublicErrorCode } from './errors';
+import { resolvePlan } from './entitlements';
 import { createGroqProvider, type AiProvider, type ProviderCraftInput } from './provider';
 import { checkRateLimits, deriveRateLimitKeys } from './rateLimit';
 
@@ -18,6 +19,8 @@ export interface Env {
   RATE_LIMITER: DurableObjectNamespace;
   GROQ_API_KEY: string;
   RATE_LIMIT_HMAC_SECRET: string;
+  REVENUECAT_SECRET_API_KEY?: string;
+  ENTITLEMENT_CACHE?: KVNamespace;
 }
 
 type SafeLog = {
@@ -82,6 +85,10 @@ async function handle(request: Request, env: Env, route: SafeLog['route'], reque
   );
   const rate = await checkRateLimits(env.RATE_LIMITER, keys, route);
   if (!rate.allowed) throw new PublicError('RATE_LIMITED', 429, rate.retryAfterSeconds);
+
+  const verifiedPlan = await resolvePlan(parsed.data.revenueCatAppUserId, env, Date.now());
+  // Task 4 consumes this verified value at the quota seam; fixed rate limits stay unchanged here.
+  void verifiedPlan;
 
   const provider = options.provider ?? createGroqProvider(env.GROQ_API_KEY);
   if (route === '/v1/analyses') {
