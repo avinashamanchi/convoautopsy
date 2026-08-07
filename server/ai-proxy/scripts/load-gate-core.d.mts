@@ -40,6 +40,14 @@ export type FatalLoadSummary = Readonly<Omit<LoadSummary, 'activeReservations'> 
 }>;
 
 export function parseLoadOptions(args: readonly string[]): LoadOptions;
+export function createPlannedWorkload(options: LoadOptions): Readonly<{
+  scheduledRequests: number;
+  paddingRequests: number;
+  totalRequests: number;
+  analysisRequests: number;
+  responseRequests: number;
+  providerUnits: number;
+}>;
 export function createWranglerArguments(options: Readonly<{
   root: string;
   port: number;
@@ -48,6 +56,33 @@ export function createWranglerArguments(options: Readonly<{
 }>): readonly string[];
 export function scheduledOffsets(rps: number, seconds: number): number[];
 export function createRequestIdentity(runId: string, index: number): Readonly<{ installationToken: string; syntheticIp: string }>;
+export function createFixedWorkloadCohort(totalRequests: number): Readonly<{
+  strategy: 'fixed-pool';
+  installationPoolSize: number;
+  exercisedInstallations: number;
+}>;
+export type QuotaSafeWorkloadPlan = Readonly<{
+  totalRequests: number;
+  analysisRequests: number;
+  responseRequests: number;
+  analysisInstallations: number;
+  responseInstallations: number;
+  totalInstallations: number;
+}>;
+export function createQuotaSafeWorkloadPlan(totalRequests: number): QuotaSafeWorkloadPlan;
+export function createQuotaSafeWorkloadIdentity(
+  runId: string,
+  index: number,
+  plan: QuotaSafeWorkloadPlan,
+): Readonly<{
+  installationToken: string;
+  syntheticIp: string;
+  route: '/v1/analyses' | '/v1/responses';
+}>;
+export function requireFreshFinalDiagnostics(
+  observations: readonly Readonly<{ stage: string; activeReservations: number }>[],
+  finalInjectedStage: string,
+): number;
 export function routeForRequestIndex(index: number): '/v1/analyses' | '/v1/responses';
 export function exactRouteMix(routeCounts: Readonly<Record<string, number>>, total: number): boolean;
 export function abusiveRateLimitObserved(samples: readonly LoadSample[]): boolean;
@@ -68,3 +103,13 @@ export function fetchBoundedJsonWithDeadline(
     fetchImplementation?: typeof fetch;
   }>,
 ): Promise<Readonly<{ ok: boolean; status: number; value: unknown }>>;
+export function fetchApiResponseWithDeadline(
+  input: string,
+  init: RequestInit,
+  options: Readonly<{
+    timeoutMs: number;
+    maxBytes: number;
+    parentSignal: AbortSignal;
+    fetchImplementation?: typeof fetch;
+  }>,
+): Promise<Readonly<{ ok: boolean; status: number; value?: unknown }>>;

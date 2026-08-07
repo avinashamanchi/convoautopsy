@@ -15,7 +15,7 @@ jest.mock('expo-router', () => ({
   useLocalSearchParams: () => ({ id: 'report-1', reportId: 'report-1' }),
 }));
 jest.mock('../src/billing/BillingProvider', () => ({
-  useBilling: () => ({ appUserId: '$RCAnonymousID:revision-test', identityStatus: 'ready' }),
+  useBilling: () => ({ appUserId: '$RCAnonymousID:revision-test', identityStatus: 'ready', entitlementStatus: 'free' }),
 }));
 
 const result: AnalysisResult = {

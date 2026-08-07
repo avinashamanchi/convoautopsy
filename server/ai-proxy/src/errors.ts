@@ -6,6 +6,7 @@ export type PublicErrorCode =
   | 'PLAN_LIMIT_REACHED'
   | 'SERVICE_BUSY'
   | 'DAILY_BUDGET_REACHED'
+  | 'ENTITLEMENT_UNAVAILABLE'
   | 'PROVIDER_UNAVAILABLE'
   | 'PROVIDER_INVALID_RESPONSE'
   | 'INTERNAL_ERROR';
@@ -20,8 +21,21 @@ export class PublicError extends Error {
   }
 }
 
-export class ProviderUnavailableError extends Error {}
-export class ProviderInvalidResponseError extends Error {}
+export class ProviderUnavailableError extends Error {
+  readonly providerFailureKind = 'availability' as const;
+}
+
+export class ProviderInvalidResponseError extends Error {
+  readonly providerFailureKind = 'invalid_output' as const;
+}
+
+export class ProviderRequestRejectedError extends Error {
+  readonly providerFailureKind = 'caller' as const;
+}
+
+export class ProviderConfigurationError extends Error {
+  readonly providerFailureKind = 'configuration' as const;
+}
 
 export function asPublicError(error: unknown): PublicError {
   if (error instanceof PublicError) return error;
@@ -30,6 +44,12 @@ export function asPublicError(error: unknown): PublicError {
   }
   if (error instanceof ProviderInvalidResponseError) {
     return new PublicError('PROVIDER_INVALID_RESPONSE', 502);
+  }
+  if (error instanceof ProviderRequestRejectedError) {
+    return new PublicError('PROVIDER_INVALID_RESPONSE', 502);
+  }
+  if (error instanceof ProviderConfigurationError) {
+    return new PublicError('INTERNAL_ERROR', 503, 30);
   }
   return new PublicError('INTERNAL_ERROR', 500);
 }

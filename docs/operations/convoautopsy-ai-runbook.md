@@ -17,7 +17,9 @@ Review these aggregate signals at the start of each on-call shift and after ever
 - provider spend and the current UTC-day provider-unit budget in the provider and Cloudflare operator consoles.
 - the deterministic local gate with `npm run test:load:ci`; use `npm run test:load` before a production release.
 
-The deterministic gate starts an ephemeral loopback Worker, uses a stub provider, puts 100 unique synthetic installation tokens behind the same `198.18.0.1` network address, sends a deterministic 70% analysis / 30% response-draft route mix through production request behavior, and deletes its temporary state. It must show exactly 100 peak reservations, a 503 `SERVICE_BUSY` result for request 101, no ordinary 429 responses, the exact route mix, and zero final reservations. Per-token limits must still reject an abusive installation while the shared-network limit admits the legitimate 100-install cohort.
+The deterministic gate starts an ephemeral loopback Worker, uses a stub provider, and puts both its fixed short-workload installation pool and its separate 100-installation capacity cohort behind the same `198.18.0.1` network address. The result reports the short pool size separately from the number of installation identities actually exercised; the CI profile schedules 65 requests, pads to an exact 70/30 mix, and therefore exercises 70 of the 100 available workload identities. Capacity and abusive-token samples are explicitly injected and excluded from that workload route mix. The full `npm run test:load` profile is also stub-only: 3,600 seconds at 5 requests per second followed by 300 seconds at 20 requests per second, or 24,000 scheduled requests over about 65 minutes before capacity checks. Its exact mix is 16,800 analyses and 7,200 response drafts, representing 57,600 planned provider units while consuming no real provider units. Before any requests, every profile prints a machine-readable `load-plan` record with the mode, request counts, padding, route mix, and planned provider units; review that record before allowing a run to continue.
+
+The gate must show exactly 100 peak reservations, a 503 `SERVICE_BUSY` result for request 101, no ordinary 429 responses, the exact workload route mix, a fresh zero-reservation diagnostic after capacity and again after token abuse, and zero final reservations. Per-token limits must still reject an abusive installation while the shared-network limit admits the legitimate 100-installation capacity cohort. Long and real-provider profiles use a separately reported deterministic identity pool sized so each absent-ID Free identity stays within three analyses and six drafts; never reuse the short fixed pool for a 24,000-request profile.
 
 ## Daily provider-budget thresholds
 
@@ -53,7 +55,7 @@ At 100%, admission rejects all remote provider work with `DAILY_BUDGET_REACHED`;
 
 ### RevenueCat outage
 
-The entitlement resolver fails closed to Free with cache outcome `error`; it never trusts a client-supplied plan.
+An absent RevenueCat ID is verified Free. A supplied ID whose cache, configuration, or upstream verification is unavailable resolves to `unknown`, returns retryable `ENTITLEMENT_UNAVAILABLE` before admission, and consumes no plan allowance or provider budget; it is never silently metered as Free. The resolver never trusts a client-supplied plan.
 
 1. Confirm the outage using RevenueCat status and aggregate cache outcomes.
 2. Keep local analysis available and use: “Subscription verification is temporarily unavailable. Local analysis still works on this device. Please try AI analysis again later.”
@@ -62,11 +64,13 @@ The entitlement resolver fails closed to Free with cache outcome `error`; it nev
 
 ### Groq/provider outage
 
-Provider failures return the bounded public `PROVIDER_UNAVAILABLE` or `PROVIDER_INVALID_RESPONSE` outcome. The admission coordinator atomically refunds that request's plan allowance and provider units and removes its lease. Only availability and timeout failures add a content-free rolling outage timestamp; caller-influenced schema-invalid output is refunded but cannot open the global outage circuit.
+Provider failures return a bounded public outcome. The admission coordinator refunds the user's plan allowance for unusable results but retains global provider-cost units after any provider invocation, including invalid output, caller/content rejection, availability failure, configuration failure, or client disconnect. Global units are refunded only for a confirmed pre-provider abort. Completion is idempotent and retried three times; a result is never returned as successful until its accounting completion is confirmed. An unresolved expired lease releases capacity, refunds user allowance, retains global cost, and records only a content-free reconciliation reason and time.
+
+Network/deadline failures, HTTP 408/429, and 5xx responses advance the rolling availability breaker. HTTP 400/413/422 responses are caller/content-context rejections: they do not advance the breaker. HTTP 401/403 and model/configuration 404 responses fail closed as internal configuration incidents and immediately start a bounded 30-second safe circuit. Schema-invalid model output does not open a closed outage circuit, but invalid output from the sole half-open probe reopens the bounded cooldown so the circuit cannot stick.
 
 1. Five provider failures inside 60 seconds open the global provider circuit for 30 seconds. Confirm the sixth request is rejected before Groq is called.
 2. After cooldown, exactly one request is admitted as the half-open probe. Other requests remain rejected; a probe failure restarts the 30-second cooldown and a probe success closes the circuit and clears the rolling failures.
-3. Confirm elevated public codes, zero leaked reservations, and refunded quota/budget for provider failures. Confirm `PROVIDER_INVALID_RESPONSE` does not increase the availability-breaker count. A corrupt or unavailable circuit/admission record must fail closed rather than call Groq.
+3. Confirm elevated public codes, zero leaked reservations, refunded user allowance, and retained provider-cost units for invoked work. Confirm ordinary `PROVIDER_INVALID_RESPONSE` does not increase the availability-breaker count. A corrupt or unavailable circuit/admission record must fail closed rather than call Groq.
 4. Display or publish: “AI analysis is temporarily unavailable. Your conversation stays on this device; use Local analysis and try again later.”
 5. Do not retry automatically in a tight loop and do not send real conversation content to a diagnostic provider.
 6. Run the local stub gate. A green stub gate separates proxy capacity from the external provider outage.
@@ -100,4 +104,4 @@ Rotate a secret when exposure is suspected, on provider instruction, or accordin
 
 ## Authorized real-provider soak
 
-The release gate never contacts a real provider. A non-loopback target is accepted only when both `--authorize-provider` and `--synthetic-content` are supplied. That mode does not call fixture diagnostics/control endpoints and reports reservation checking as not measured; it is not a substitute for the deterministic release gate. Obtain provider authorization, use only synthetic conversation text, set an explicit cost window, and record the soak as not run unless it was actually observed.
+The release gate never contacts a real provider. A non-loopback target is accepted only when `--authorize-provider`, `--synthetic-content`, `--sustained-seconds <seconds>`, and `--burst-seconds <seconds>` are all supplied. The explicit durations are required cost bounds, so the 24,000-request default cannot accidentally target a real provider. Inspect the printed `load-plan` and its planned provider units before the first request is allowed to proceed. That mode does not call fixture diagnostics/control endpoints and reports reservation checking as not measured; it is not a substitute for the deterministic release gate. Obtain provider authorization, use only synthetic conversation text, choose a reviewed cost window, and record the soak as not run unless it was actually observed.

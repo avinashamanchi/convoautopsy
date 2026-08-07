@@ -118,6 +118,7 @@ function normalizeOutcome(value: MetricOutcome): MetricOutcome {
     || value === 'PLAN_LIMIT_REACHED'
     || value === 'SERVICE_BUSY'
     || value === 'DAILY_BUDGET_REACHED'
+    || value === 'ENTITLEMENT_UNAVAILABLE'
     || value === 'PROVIDER_UNAVAILABLE'
     || value === 'PROVIDER_INVALID_RESPONSE'
     || value === 'INTERNAL_ERROR'

@@ -3,8 +3,8 @@ import * as Clipboard from 'expo-clipboard';
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { AiConsentSheet } from '../../src/components/AiConsentSheet';
-import { RemoteDataReview } from '../../src/components/RemoteDataReview';
-import type { AnalysisResult, ParsedMessage, ResponseDraft } from '../../src/domain/analysis';
+import { RemoteDataReview, type ReviewableMessage } from '../../src/components/RemoteDataReview';
+import type { AnalysisResult, ResponseDraft } from '../../src/domain/analysis';
 import { craftLocalResponses, type ResponseGoal, type ResponseTone } from '../../src/domain/responseCrafter';
 import { ResponseDraftCard } from '../../src/components/ResponseDraftCard';
 import { PrimaryButton } from '../../src/components/PrimaryButton';
@@ -12,7 +12,15 @@ import { Screen } from '../../src/components/Screen';
 import type { SavedReport } from '../../src/services/reportRepository';
 import { useReportRepository } from '../../src/services/reportRepositoryContext';
 import { shareDraftText } from '../../src/services/exportReport';
-import { AiClientError, createResponseClient, type AiResponseRequest } from '../../src/services/aiClient';
+import {
+  AiClientError,
+  createResponseClient,
+  type AiResponseRequest,
+} from '../../src/services/aiClient';
+import {
+  REMOTE_ANALYSIS_MAX_TEXT_CODE_POINTS,
+  REMOTE_INTERPRETATION_MAX_CODE_POINTS,
+} from '../../src/services/remoteLimits';
 import { CONSENT_VERSION, SECURE_STORAGE_UNAVAILABLE_MESSAGE, createConsentStore } from '../../src/services/consentStore';
 import { tokens } from '../../src/theme/tokens';
 import { useBilling } from '../../src/billing/BillingProvider';
@@ -40,7 +48,15 @@ type PendingAiPersistence = Readonly<{ reportId: string; draft: ResponseDraft }>
 export default function ResponseScreen() {
   const { reportId } = useLocalSearchParams<{ reportId: string }>();
   const { repository, preferences, revision, deletingAll } = useReportRepository();
-  const { appUserId, identityStatus } = useBilling();
+  const { appUserId, identityStatus, entitlementStatus } = useBilling();
+  const entitlementDecisionReady = entitlementStatus === 'free' || entitlementStatus === 'pro';
+  const billingIdentityReady = identityStatus === 'ready' && Boolean(appUserId);
+  const remoteDecisionReady = entitlementDecisionReady && billingIdentityReady;
+  const remoteDecisionNotice = !entitlementDecisionReady || identityStatus === 'loading'
+    ? 'Checking your plan before AI-assisted drafting…'
+    : !billingIdentityReady
+      ? 'AI-assisted drafting is unavailable because plan identity could not be prepared. Restart the app and try again.'
+      : null;
   const [report, setReport] = useState<SavedReport | null>(null);
   const [loadStatus, setLoadStatus] = useState<'loading' | 'missing' | 'error' | 'ready'>('loading');
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -51,7 +67,7 @@ export default function ResponseScreen() {
   const [saveError, setSaveError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [retryDrafts, setRetryDrafts] = useState<ResponseDraft[] | null>(null);
-  const [reviewMessages, setReviewMessages] = useState<ParsedMessage[]>([]);
+  const [reviewMessages, setReviewMessages] = useState<ReviewableMessage[]>([]);
   const [remoteStage, setRemoteStage] = useState<'idle' | 'review' | 'consent'>('idle');
   const [reviewConfirming, setReviewConfirming] = useState(false);
   const [remoteRunning, setRemoteRunning] = useState(false);
@@ -74,10 +90,10 @@ export default function ResponseScreen() {
     getConsent: consentStore.getConsent,
     getInstallationToken: consentStore.getInstallationToken,
     getRevenueCatAppUserId: async () => {
-      if (identityStatus !== 'ready' || !appUserId) throw new AiClientError('NOT_CONFIGURED');
+      if (!remoteDecisionReady || !appUserId) throw new AiClientError('NOT_CONFIGURED');
       return appUserId;
     },
-  }), [appUserId, consentStore, identityStatus]);
+  }), [appUserId, consentStore, remoteDecisionReady]);
 
   const cancelRemoteWorkflow = useCallback(() => {
     remoteGeneration.current += 1;
@@ -154,7 +170,7 @@ export default function ResponseScreen() {
 
   const senders = useMemo(() => Array.from(new Set(report?.result.messages.map((message) => message.sender) ?? [])), [report]);
   const progress = !sender ? 'Step 2 of 4: Sender' : !goal ? 'Step 3 of 4: Goal' : !tone ? 'Step 4 of 4: Tone' : 'Ready to generate';
-  const remoteDispatchBlocked = saveError || retryDrafts !== null || pendingAiPersistence !== null;
+  const remoteDispatchBlocked = !remoteDecisionReady || saveError || retryDrafts !== null || pendingAiPersistence !== null;
   const visibleDrafts = useMemo(() => {
     if (!pendingAiPersistence || pendingAiPersistence.reportId !== reportId) return drafts;
     const alreadyVisible = drafts.some((draft) => (
@@ -299,7 +315,7 @@ export default function ResponseScreen() {
   }
 
   function startRemoteReview() {
-    if (!report || !sender || !goal || !tone || saving || remoteRunningRef.current || remoteDispatchBlocked) return;
+    if (!report || !sender || !goal || !tone || !remoteDecisionReady || saving || remoteRunningRef.current || remoteDispatchBlocked) return;
     cancelRemoteWorkflow();
     const generation = remoteGeneration.current;
     pendingRemoteRequest.current = {
@@ -315,12 +331,14 @@ export default function ResponseScreen() {
       text: message.text,
       sourceLine: index + 1,
       possibleInterpretation: message.possibleInterpretation,
+      pattern: message.pattern,
+      egoState: message.egoState,
     })));
     setRemoteNotice(null);
     setRemoteStage('review');
   }
 
-  async function confirmReviewedText(messages: ParsedMessage[]) {
+  async function confirmReviewedText(messages: ReviewableMessage[]) {
     const pending = pendingRemoteRequest.current;
     if (!pending || reviewConfirmingRef.current || remoteStage !== 'review') return;
     const generation = remoteGeneration.current;
@@ -424,11 +442,19 @@ export default function ResponseScreen() {
           onPress={startRemoteReview}
           testID="review-ai-response"
         />
+        {!remoteDecisionReady && remoteDecisionNotice ? <Text accessibilityRole="alert" style={styles.message}>{remoteDecisionNotice}</Text> : null}
         <PrimaryButton label="Reset draft choices" disabled={saving || remoteRunning || pendingAiPersistence !== null} onPress={resetWizard} />
         {remoteStage === 'review' ? (
           <RemoteDataReview
             isConfirming={reviewConfirming}
             messages={reviewMessages}
+            responseContext={pendingRemoteRequest.current ? {
+              sender: pendingRemoteRequest.current.sender,
+              goal: pendingRemoteRequest.current.goal,
+              tone: pendingRemoteRequest.current.tone,
+              intensityScore: pendingRemoteRequest.current.analysis.intensityScore,
+              conflictMode: pendingRemoteRequest.current.analysis.conflictMode,
+            } : undefined}
             onCancel={cancelRemoteWorkflow}
             onConfirm={(messages) => { void confirmReviewedText(messages); }}
           />
@@ -471,15 +497,32 @@ export default function ResponseScreen() {
   );
 }
 
-function analysisWithReviewedText(analysis: AnalysisResult, reviewedMessages: ParsedMessage[]): AnalysisResult | null {
+type ReviewedAnalysisMessage = Readonly<{
+  sender: string;
+  text: string;
+  pattern?: string;
+  egoState?: string;
+  possibleInterpretation?: string;
+}>;
+
+export function analysisWithReviewedText(
+  analysis: AnalysisResult,
+  reviewedMessages: readonly ReviewedAnalysisMessage[],
+): AnalysisResult | null {
   if (analysis.messages.length !== reviewedMessages.length) return null;
   const messages = analysis.messages.map((message, index) => {
     const reviewed = reviewedMessages[index];
-    const reviewedInterpretation = (reviewed as ParsedMessage & { possibleInterpretation?: string })?.possibleInterpretation;
-    if (!reviewed || reviewed.sender !== message.sender || !reviewed.text.trim() || !reviewedInterpretation?.trim()) return null;
+    const reviewedInterpretation = reviewed?.possibleInterpretation;
+    if (!reviewed
+      || reviewed.sender !== message.sender
+      || reviewed.pattern !== message.pattern
+      || reviewed.egoState !== message.egoState
+      || !reviewed.text.trim()
+      || !reviewedInterpretation?.trim()) return null;
     const length = Array.from(reviewed.text).length;
     const interpretationLength = Array.from(reviewedInterpretation).length;
-    if (length < 1 || length > 1_000 || interpretationLength < 1 || interpretationLength > 300) return null;
+    if (length < 1 || length > REMOTE_ANALYSIS_MAX_TEXT_CODE_POINTS
+      || interpretationLength < 1 || interpretationLength > REMOTE_INTERPRETATION_MAX_CODE_POINTS) return null;
     return {
       sender: message.sender,
       text: reviewed.text,

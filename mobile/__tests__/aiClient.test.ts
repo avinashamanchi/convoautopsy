@@ -7,7 +7,7 @@ const mockExpoFetch = jest.fn();
 jest.mock('expo/fetch', () => ({ fetch: (...args: unknown[]) => mockExpoFetch(...args) }));
 
 const consent: ConsentRecord = {
-  version: '2026-08-07',
+  version: '2026-08-07.2',
   grantedAt: '2026-08-07T12:00:00.000Z',
   provider: 'Groq',
 };
@@ -42,6 +42,29 @@ function response(body: unknown, init: ResponseInit = {}) {
     : null;
   if (typeof requestId === 'string' && !responseHeaders.has('x-request-id')) responseHeaders.set('x-request-id', requestId);
   return new Response(JSON.stringify(body), { status: 200, ...rest, headers: responseHeaders });
+}
+
+function paddedJsonResponse(body: unknown, totalBytes: number, requestId: string) {
+  const json = JSON.stringify(body);
+  const byteLength = new TextEncoder().encode(json).byteLength;
+  if (byteLength > totalBytes) throw new Error('fixture exceeds requested byte size');
+  return new Response(`${json}${' '.repeat(totalBytes - byteLength)}`, {
+    status: 200,
+    headers: {
+      'content-type': 'application/json',
+      'content-length': String(totalBytes),
+      'x-request-id': requestId,
+    },
+  });
+}
+
+function remoteMessages(count: number, text: string): ParsedMessage[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `line-${index + 1}`,
+    sender: `Person ${String.fromCharCode(65 + index)}`,
+    text,
+    sourceLine: index + 1,
+  }));
 }
 
 type FetchMock = jest.Mock<Promise<Response>, [RequestInfo | URL, RequestInit?]>;
@@ -79,7 +102,7 @@ it('sends only anonymous parsed Person labels with consent and a device token', 
   const requestBody = JSON.parse(String(fetchImpl.mock.calls[0][1]?.body));
   expect(requestBody).toEqual({
     schemaVersion: 1,
-    consentVersion: '2026-08-07',
+    consentVersion: '2026-08-07.2',
     installationToken: '4b479c21-5169-41b5-ba54-3d0c5bdb82ba',
     revenueCatAppUserId: '$RCAnonymousID:mobile-test',
     messages: [
@@ -174,6 +197,38 @@ it('rejects labels beyond Person Z before making a request', async () => {
   const outOfContractMessage = [{ ...anonymousMessages[0], sender: 'Person AA' }];
 
   await expectCode(client(fetchImpl)(outOfContractMessage, new AbortController().signal), 'INVALID_RESPONSE');
+  expect(fetchImpl).not.toHaveBeenCalled();
+});
+
+it('accepts the largest remote-analysis request of 10 messages and 280 Unicode code points each', async () => {
+  const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>()
+    .mockResolvedValue(response({ analysis: aiResult, requestId: 'req-largest-analysis' }));
+
+  await expect(client(fetchImpl)(remoteMessages(10, '🧠'.repeat(280)), new AbortController().signal)).resolves.toEqual(aiResult);
+  expect(fetchImpl).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  ['an eleventh message', remoteMessages(11, 'ok')],
+  ['a 281-code-point message', remoteMessages(1, '🧠'.repeat(281))],
+] as const)('rejects %s before consent, identity, quota, or fetch work', async (_case, messages) => {
+  const getConsent = jest.fn(async () => consent);
+  const getInstallationToken = jest.fn(async () => '4b479c21-5169-41b5-ba54-3d0c5bdb82ba');
+  const getRevenueCatAppUserId = jest.fn(async () => '$RCAnonymousID:mobile-test');
+  const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>()
+    .mockResolvedValue(response({ analysis: aiResult, requestId: 'req-must-not-run' }));
+  const analyze = createAiClient({
+    endpoint: 'https://ai.example.test',
+    fetch: fetchImpl,
+    getConsent,
+    getInstallationToken,
+    getRevenueCatAppUserId,
+  });
+
+  await expectCode(analyze(messages, new AbortController().signal), 'INVALID_RESPONSE');
+  expect(getConsent).not.toHaveBeenCalled();
+  expect(getInstallationToken).not.toHaveBeenCalled();
+  expect(getRevenueCatAppUserId).not.toHaveBeenCalled();
   expect(fetchImpl).not.toHaveBeenCalled();
 });
 
@@ -316,18 +371,26 @@ it('uses the bounded streaming reader for analysis responses and never calls res
   expect(read).toHaveBeenCalledTimes(2);
 });
 
+it('accepts an analysis response whose UTF-8 body is exactly 40 KiB', async () => {
+  const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockResolvedValue(
+    paddedJsonResponse({ analysis: aiResult, requestId: 'req-analysis-40k' }, 40 * 1024, 'req-analysis-40k'),
+  );
+
+  await expect(client(fetchImpl)(anonymousMessages, new AbortController().signal)).resolves.toEqual(aiResult);
+});
+
 it('rejects declared and streamed oversized analysis bodies without accumulating them', async () => {
   const declaredRead = jest.fn();
   const declaredCancel = jest.fn().mockResolvedValue(undefined);
   const declared = {
     body: { getReader: () => ({ read: declaredRead, cancel: declaredCancel, releaseLock: jest.fn() }) },
-    headers: new Headers({ 'content-type': 'application/json', 'content-length': '32769', 'x-request-id': 'req-large' }),
+    headers: new Headers({ 'content-type': 'application/json', 'content-length': '40961', 'x-request-id': 'req-large' }),
     ok: true,
     status: 200,
     json: jest.fn().mockResolvedValue({ analysis: aiResult, requestId: 'req-large' }),
   } as unknown as Response;
   const streamRead = jest.fn()
-    .mockResolvedValueOnce({ done: false, value: new Uint8Array(20_000) })
+    .mockResolvedValueOnce({ done: false, value: new Uint8Array(25_000) })
     .mockResolvedValueOnce({ done: false, value: new Uint8Array(20_000) });
   const streamCancel = jest.fn().mockResolvedValue(undefined);
   const streamed = {
@@ -351,6 +414,8 @@ it('rejects declared and streamed oversized analysis bodies without accumulating
 it.each([
   [400, 'INVALID_REQUEST', 'INVALID_RESPONSE'],
   [413, 'PAYLOAD_TOO_LARGE', 'INVALID_RESPONSE'],
+  [503, 'ENTITLEMENT_UNAVAILABLE', 'SERVICE_UNAVAILABLE'],
+  [503, 'INTERNAL_ERROR', 'SERVICE_UNAVAILABLE'],
   [503, 'PROVIDER_UNAVAILABLE', 'SERVICE_UNAVAILABLE'],
 ] as const)('maps public %i responses without exposing their body', async (status, serverCode, expectedCode) => {
   const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockResolvedValue(response({ error: { code: serverCode, requestId: 'req-error' } }, { status }));
@@ -425,7 +490,7 @@ describe('reviewed AI response client', () => {
     expect(String(fetchImpl.mock.calls[0][0])).toBe('https://ai.example.test/v1/responses');
     expect(JSON.parse(String(fetchImpl.mock.calls[0][1]?.body))).toEqual({
       schemaVersion: 1,
-      consentVersion: '2026-08-07',
+      consentVersion: '2026-08-07.2',
       installationToken: '4b479c21-5169-41b5-ba54-3d0c5bdb82ba',
       revenueCatAppUserId: '$RCAnonymousID:mobile-test',
       sender: 'Person A',
@@ -440,6 +505,79 @@ describe('reviewed AI response client', () => {
     const craft = responseClient(fetchImpl, { getConsent: async () => null });
 
     await expectCode(craft(input, new AbortController().signal), 'NOT_CONFIGURED');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('accepts the largest reviewed response request of 10 messages and 280 Unicode code points each', async () => {
+    const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockResolvedValue(response(
+      { response: responseDraft, requestId: 'req-largest-draft' },
+    ));
+    const largestInput = {
+      ...input,
+      analysis: {
+        ...input.analysis,
+        messages: remoteMessages(10, '🧠'.repeat(280)).map(({ sender, text }) => ({
+          sender,
+          text,
+          pattern: 'Neutral' as const,
+          egoState: 'Adult' as const,
+          possibleInterpretation: 'Possible interpretation.',
+        })),
+      },
+    };
+
+    await expect(responseClient(fetchImpl)(largestInput, new AbortController().signal)).resolves.toEqual(responseDraft);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['an eleventh message', remoteMessages(11, 'ok')],
+    ['a 281-code-point message', remoteMessages(1, '🧠'.repeat(281))],
+  ] as const)('rejects reviewed response input with %s before consent, identity, quota, or fetch work', async (_case, messages) => {
+    const getConsent = jest.fn(async () => consent);
+    const getInstallationToken = jest.fn(async () => '4b479c21-5169-41b5-ba54-3d0c5bdb82ba');
+    const getRevenueCatAppUserId = jest.fn(async () => '$RCAnonymousID:mobile-test');
+    const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockResolvedValue(response(
+      { response: responseDraft, requestId: 'req-must-not-run' },
+    ));
+    const overLimitInput = {
+      ...input,
+      analysis: {
+        ...input.analysis,
+        messages: messages.map(({ sender, text }) => ({
+          sender,
+          text,
+          pattern: 'Neutral' as const,
+          egoState: 'Adult' as const,
+          possibleInterpretation: 'Possible interpretation.',
+        })),
+      },
+    };
+
+    await expectCode(responseClient(fetchImpl, { getConsent, getInstallationToken, getRevenueCatAppUserId })(overLimitInput, new AbortController().signal), 'INVALID_RESPONSE');
+    expect(getConsent).not.toHaveBeenCalled();
+    expect(getInstallationToken).not.toHaveBeenCalled();
+    expect(getRevenueCatAppUserId).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('rejects a 151-code-point response interpretation before consent, identity, quota, or fetch work', async () => {
+    const getConsent = jest.fn(async () => consent);
+    const getInstallationToken = jest.fn(async () => '4b479c21-5169-41b5-ba54-3d0c5bdb82ba');
+    const getRevenueCatAppUserId = jest.fn(async () => '$RCAnonymousID:mobile-test');
+    const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>();
+    const overLimitInput = {
+      ...input,
+      analysis: {
+        ...input.analysis,
+        messages: [{ ...input.analysis.messages[0], possibleInterpretation: '🧠'.repeat(151) }],
+      },
+    };
+
+    await expectCode(responseClient(fetchImpl, { getConsent, getInstallationToken, getRevenueCatAppUserId })(overLimitInput, new AbortController().signal), 'INVALID_RESPONSE');
+    expect(getConsent).not.toHaveBeenCalled();
+    expect(getInstallationToken).not.toHaveBeenCalled();
+    expect(getRevenueCatAppUserId).not.toHaveBeenCalled();
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
@@ -543,11 +681,34 @@ describe('reviewed AI response client', () => {
     expect(text).not.toHaveBeenCalled();
   });
 
+  it('accepts a reviewed-draft response at exactly 32 KiB and rejects the next byte before reading', async () => {
+    const exact = paddedJsonResponse({ response: responseDraft, requestId: 'req-draft-32k' }, 32 * 1024, 'req-draft-32k');
+    const overRead = jest.fn();
+    const overCancel = jest.fn().mockResolvedValue(undefined);
+    const over = {
+      body: { getReader: () => ({ read: overRead, cancel: overCancel, releaseLock: jest.fn() }) },
+      headers: new Headers({
+        'content-type': 'application/json',
+        'content-length': String((32 * 1024) + 1),
+        'x-request-id': 'req-draft-over',
+      }),
+      ok: true,
+      status: 200,
+    } as unknown as Response;
+
+    await expect(responseClient(jest.fn().mockResolvedValue(exact))(input, new AbortController().signal)).resolves.toEqual(responseDraft);
+    await expectCode(responseClient(jest.fn().mockResolvedValue(over))(input, new AbortController().signal), 'INVALID_RESPONSE');
+    expect(overRead).not.toHaveBeenCalled();
+    expect(overCancel).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     [429, 'RATE_LIMITED', 'RATE_LIMITED'],
     [429, 'PLAN_LIMIT_REACHED', 'PLAN_LIMIT_REACHED'],
     [503, 'SERVICE_BUSY', 'SERVICE_BUSY'],
     [503, 'DAILY_BUDGET_REACHED', 'DAILY_BUDGET_REACHED'],
+    [503, 'ENTITLEMENT_UNAVAILABLE', 'SERVICE_UNAVAILABLE'],
+    [503, 'INTERNAL_ERROR', 'SERVICE_UNAVAILABLE'],
     [503, 'PROVIDER_UNAVAILABLE', 'SERVICE_UNAVAILABLE'],
   ] as const)('maps content-free public response failure %s/%s', async (status, serverCode, expectedCode) => {
     const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockResolvedValue(response(

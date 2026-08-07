@@ -1,6 +1,15 @@
 import { fireEvent, screen } from '@testing-library/react-native';
 import { renderRouter } from 'expo-router/testing-library';
 
+jest.mock('../src/billing/BillingProvider', () => ({
+  BillingProvider: ({ children }: { children: React.ReactNode }) => children,
+  useBilling: () => ({
+    appUserId: '$RCAnonymousID:analyze-flow',
+    identityStatus: 'ready',
+    entitlementStatus: 'free',
+  }),
+}));
+
 it('previews parsed messages before running local analysis', async () => {
   renderRouter('./app', { initialUrl: '/' });
 
@@ -86,7 +95,7 @@ it('shows the exact outgoing-data review before the AI-sharing disclosure', asyn
   fireEvent.press(screen.getByRole('button', { name: 'Confirm exact text' }));
   expect(
     await screen.findByText(
-      /Names are replaced with Person labels. Message text is sent to Groq through ConvoAutopsy's server./,
+      /Speaker labels are replaced with Person labels. Message text is sent to Groq through ConvoAutopsy's server./,
     ),
   ).toBeOnTheScreen();
 });

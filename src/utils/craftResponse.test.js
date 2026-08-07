@@ -10,7 +10,7 @@ const legacyResult = {
 
 const baseOptions = {
   allowRemote: true,
-  consentVersion: '2026-08-07',
+  consentVersion: '2026-08-07.2',
   installationToken: 'installation-token-0001',
 }
 
@@ -47,7 +47,7 @@ describe('craftResponse', () => {
     const request = JSON.parse(fetch.mock.calls[0][1].body)
     expect(request).toMatchObject({
       schemaVersion: 1,
-      consentVersion: '2026-08-07',
+      consentVersion: '2026-08-07.2',
       installationToken: 'installation-token-0001',
       sender: 'Person A',
       goal: 'resolve',
@@ -86,6 +86,25 @@ describe('craftResponse', () => {
 
     await expect(craftResponse(params, { ...baseOptions, reviewedSnapshot }))
       .resolves.toMatchObject({ source: 'local', fallbackReason: 'NOT_CONFIGURED' })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['an eleventh message', snapshot => ({ ...snapshot, messages: Array.from({ length: 11 }, () => snapshot.messages[0]) })],
+    ['a 281-code-point message', snapshot => ({ ...snapshot, messages: [{ ...snapshot.messages[0], text: '🫠'.repeat(281) }] })],
+    ['a 151-code-point interpretation', snapshot => ({ ...snapshot, messages: [{ ...snapshot.messages[0], possibleInterpretation: '🫠'.repeat(151) }] })],
+  ])('rejects response drafting with %s before any remote request', async (_case, mutate) => {
+    const params = {
+      sender: 'Person A', goal: 'resolve', tone: 'empathetic', result: legacyResult,
+      conversationText: 'Alice: Alice needs a pause.',
+    }
+    vi.stubEnv('VITE_AI_PROXY_URL', 'https://proxy.example')
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+    const reviewedSnapshot = mutate(prepareResponseReview(params))
+
+    await expect(craftResponse(params, { ...baseOptions, reviewedSnapshot }))
+      .resolves.toMatchObject({ source: 'local', fallbackReason: 'REMOTE_INPUT_LIMIT' })
     expect(fetch).not.toHaveBeenCalled()
   })
 

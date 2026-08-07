@@ -50,7 +50,7 @@ function validProvider(): AiProvider {
 function analysisRequest(overrides: Record<string, unknown> = {}) {
   return {
     schemaVersion: 1,
-    consentVersion: '2026-08-07',
+    consentVersion: '2026-08-07.2',
     installationToken,
     messages: [{ sender: 'Person A', text: 'Please listen to me.' }],
     ...overrides,
@@ -59,6 +59,23 @@ function analysisRequest(overrides: Record<string, unknown> = {}) {
 
 function admissionStub(): DurableObjectStub {
   return env.AI_ADMISSION.get(env.AI_ADMISSION.idFromName('global'));
+}
+
+function envWithRejectedCompletions(): Env {
+  const actualNamespace = env.AI_ADMISSION;
+  const namespace = {
+    idFromName: (name: string) => actualNamespace.idFromName(name),
+    get: (id: DurableObjectId) => {
+      const actual = actualNamespace.get(id);
+      return {
+        fetch: (input: RequestInfo | URL, init?: RequestInit) => {
+          if (new URL(String(input)).pathname === '/complete') return Promise.reject(new Error('completion unavailable'));
+          return actual.fetch(input, init);
+        },
+      };
+    },
+  } as unknown as DurableObjectNamespace;
+  return { ...(env as unknown as Env), AI_ADMISSION: namespace };
 }
 
 async function currentInFlight(): Promise<number> {
@@ -138,17 +155,235 @@ describe('AI proxy routes', () => {
     await expect(response.json()).resolves.toMatchObject({ error: { code: 'PAYLOAD_TOO_LARGE' } });
   });
 
-  it('accepts 1,000 Unicode code points even when UTF-8 uses more bytes', async () => {
-    const response = await app().fetch(request('/v1/analyses', analysisRequest({
-      messages: [{ sender: 'Person A', text: '🫠'.repeat(1_000) }],
+  it('settles a stalled streaming body on a wall deadline before rate, admission, or provider work', async () => {
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    let cancelled = false;
+    let rateLimitCalls = 0;
+    let providerCalled = false;
+    const actualRateLimiter = env.RATE_LIMITER;
+    const guardedEnv = {
+      ...(env as unknown as Env),
+      RATE_LIMITER: {
+        idFromName: (name: string) => actualRateLimiter.idFromName(name),
+        get: (id: DurableObjectId) => {
+          const actual = actualRateLimiter.get(id);
+          return {
+            fetch: (input: RequestInfo | URL, init?: RequestInit) => {
+              rateLimitCalls += 1;
+              return actual.fetch(input, init);
+            },
+          };
+        },
+      } as unknown as DurableObjectNamespace,
+    };
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        streamController = controller;
+        controller.enqueue(new TextEncoder().encode('{'));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const stalled = new Request('https://proxy.example/v1/analyses', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body,
+    });
+    const pending = createApp({
+      provider: {
+        analyze: async () => {
+          providerCalled = true;
+          return analysis;
+        },
+        craftResponse: validProvider().craftResponse,
+      },
+      logger: { info: () => undefined },
+      rateLimitSecret: 'test-only-rate-key',
+      bodyReadTimeoutMs: 20,
+    }).fetch(stalled, guardedEnv);
+    const response = await Promise.race([
+      pending,
+      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 75)),
+    ]);
+
+    if (!response) {
+      streamController.close();
+      await pending;
+    }
+    expect(response).toBeDefined();
+    if (!response) return;
+    expect(response.status).toBe(408);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: 'INVALID_REQUEST' } });
+    expect(cancelled).toBe(true);
+    expect(rateLimitCalls).toBe(0);
+    expect(providerCalled).toBe(false);
+    expect(await currentInFlight()).toBe(0);
+  });
+
+  it('settles a stalled streaming body when the caller aborts before pre-admission work', async () => {
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    let cancelled = false;
+    const requestController = new AbortController();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        streamController = controller;
+        controller.enqueue(new TextEncoder().encode('{'));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const stalled = new Request('https://proxy.example/v1/analyses', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body,
+      signal: requestController.signal,
+    });
+    const pending = createApp({
+      provider: validProvider(),
+      logger: { info: () => undefined },
+      rateLimitSecret: 'test-only-rate-key',
+      bodyReadTimeoutMs: 10_000,
+    }).fetch(stalled, env as unknown as Env);
+    requestController.abort();
+    const response = await Promise.race([
+      pending,
+      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 75)),
+    ]);
+
+    if (!response) {
+      streamController.close();
+      await pending;
+    }
+    expect(response).toBeDefined();
+    if (!response) return;
+    expect(response.status).toBe(408);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: 'INVALID_REQUEST' } });
+    expect(cancelled).toBe(true);
+    expect(await currentInFlight()).toBe(0);
+  });
+
+  it('rejects remote analysis text above 280 Unicode code points before admission', async () => {
+    let providerCalled = false;
+    const provider: AiProvider = {
+      analyze: async () => {
+        providerCalled = true;
+        return analysis;
+      },
+      craftResponse: validProvider().craftResponse,
+    };
+    const response = await app(provider).fetch(request('/v1/analyses', analysisRequest({
+      messages: [{ sender: 'Person A', text: '🫠'.repeat(281) }],
     })), env as unknown as Env);
 
+    expect(response.status).toBe(400);
+    expect(providerCalled).toBe(false);
+    await runInDurableObject(admissionStub(), (_instance, state) => {
+      expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM plan_usage').one().count).toBe(0);
+      expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM daily_budget').one().count).toBe(0);
+    });
+  });
+
+  it.each([
+    ['an eleventh message', Array.from({ length: 11 }, () => ({ ...analysis.messages[0] }))],
+    ['a 281-code-point message', [{ ...analysis.messages[0], text: '🫠'.repeat(281) }]],
+    ['a 151-code-point interpretation', [{ ...analysis.messages[0], possibleInterpretation: 'x'.repeat(151) }]],
+  ])('rejects response drafting with %s before admission', async (_case, messages) => {
+    let providerCalled = false;
+    const response = await app({
+      analyze: validProvider().analyze,
+      craftResponse: async () => {
+        providerCalled = true;
+        return { id: 'must-not-run', text: 'No.', hint: 'No.' };
+      },
+    }).fetch(request('/v1/responses', {
+      schemaVersion: 1,
+      consentVersion: '2026-08-07.2',
+      installationToken,
+      sender: 'Person A',
+      goal: 'resolve',
+      tone: 'empathetic',
+      analysis: { ...analysis, mode: 'local', messages },
+    }), env as unknown as Env);
+
+    expect(response.status).toBe(400);
+    expect(providerCalled).toBe(false);
+    await runInDurableObject(admissionStub(), (_instance, state) => {
+      expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM plan_usage').one().count).toBe(0);
+      expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM daily_budget').one().count).toBe(0);
+    });
+  });
+
+  it('accepts the largest remote analysis request and bounded response contract end to end', async () => {
+    const messages = Array.from({ length: 10 }, (_, index) => ({
+      sender: `Person ${String.fromCharCode(65 + index)}`,
+      text: '🫠'.repeat(280),
+    }));
+    const largestAnalysis = {
+      schemaVersion: 1 as const,
+      mode: 'ai' as const,
+      intensityScore: 50,
+      conflictMode: 'Collaborating' as const,
+      messages: messages.map((message) => ({
+        ...message,
+        pattern: 'Neutral' as const,
+        egoState: 'Adult' as const,
+        possibleInterpretation: 'x'.repeat(150),
+      })),
+    };
+    const response = await app({
+      analyze: async () => largestAnalysis,
+      craftResponse: validProvider().craftResponse,
+    }).fetch(request('/v1/analyses', analysisRequest({ messages })), env as unknown as Env);
+    const encoded = new TextEncoder().encode(await response.clone().text());
+
     expect(response.status).toBe(200);
+    expect(encoded.byteLength).toBeLessThanOrEqual(40 * 1_024);
+    await expect(response.json()).resolves.toMatchObject({ analysis: { messages: expect.arrayContaining([
+      expect.objectContaining({ text: '🫠'.repeat(280), possibleInterpretation: 'x'.repeat(150) }),
+    ]) } });
+  });
+
+  it('rejects a provider result that does not echo every reviewed remote message exactly', async () => {
+    const response = await app().fetch(request('/v1/analyses', analysisRequest({
+      messages: [
+        { sender: 'Person A', text: 'first reviewed message' },
+        { sender: 'Person B', text: 'second reviewed message' },
+      ],
+    })), env as unknown as Env);
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: 'PROVIDER_INVALID_RESPONSE' } });
+  });
+
+  it('rejects an eleventh remote analysis message without provider work or quota charge', async () => {
+    let providerCalled = false;
+    const provider: AiProvider = {
+      analyze: async () => {
+        providerCalled = true;
+        return analysis;
+      },
+      craftResponse: validProvider().craftResponse,
+    };
+    const response = await app(provider).fetch(request('/v1/analyses', analysisRequest({
+      messages: Array.from({ length: 11 }, (_, index) => ({
+        sender: `Person ${String.fromCharCode(65 + index)}`,
+        text: `message ${index}`,
+      })),
+    })), env as unknown as Env);
+
+    expect(response.status).toBe(400);
+    expect(providerCalled).toBe(false);
+    await runInDurableObject(admissionStub(), (_instance, state) => {
+      expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM plan_usage').one().count).toBe(0);
+      expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM daily_budget').one().count).toBe(0);
+    });
   });
 
   it('requires an installation token and the current consent version', async () => {
     const invalidToken = await app().fetch(request('/v1/analyses', analysisRequest({ installationToken: 'short' })), env as unknown as Env);
-    const oldConsent = await app().fetch(request('/v1/analyses', analysisRequest({ consentVersion: 'old-consent' })), env as unknown as Env);
+    const oldConsent = await app().fetch(request('/v1/analyses', analysisRequest({ consentVersion: '2026-08-07' })), env as unknown as Env);
 
     expect(invalidToken.status).toBe(400);
     expect(oldConsent.status).toBe(403);
@@ -190,6 +425,7 @@ describe('AI proxy routes', () => {
     await runInDurableObject(admissionStub(), (_instance, state) => {
       expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM provider_failures').one().count).toBe(0);
       expect(state.storage.sql.exec<{ total: number | null }>('SELECT SUM(count) AS total FROM plan_usage').one().total ?? 0).toBe(1);
+      expect(state.storage.sql.exec<{ total: number | null }>('SELECT SUM(provider_units) AS total FROM daily_budget').one().total ?? 0).toBe(18);
     });
   });
 
@@ -215,7 +451,67 @@ describe('AI proxy routes', () => {
     expect(await currentInFlight()).toBe(0);
   });
 
-  it('opens the provider circuit after five failures, refunds quota and budget, and makes no sixth provider call', async () => {
+  it('does not open the global outage circuit after five caller-content provider rejections', async () => {
+    let providerCalls = 0;
+    const callerRejected: AiProvider = {
+      analyze: async () => {
+        providerCalls += 1;
+        throw Object.assign(new Error('caller content rejected'), { providerFailureKind: 'caller' as const });
+      },
+      craftResponse: validProvider().craftResponse,
+    };
+    for (let index = 0; index < 5; index += 1) {
+      const response = await app(callerRejected).fetch(request('/v1/analyses', analysisRequest({
+        installationToken: `caller-rejection-installation-${index}`,
+      })), env as unknown as Env);
+      expect(response.status).toBe(502);
+      await expect(response.json()).resolves.toMatchObject({ error: { code: 'PROVIDER_INVALID_RESPONSE' } });
+    }
+
+    const next = await app().fetch(request('/v1/analyses', analysisRequest({
+      installationToken: 'caller-rejection-next-installation',
+    })), env as unknown as Env);
+
+    expect(providerCalls).toBe(5);
+    expect(next.status).toBe(200);
+    await runInDurableObject(admissionStub(), (_instance, state) => {
+      expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM provider_failures').one().count).toBe(0);
+      expect(state.storage.sql.exec<{ total: number | null }>('SELECT SUM(provider_units) AS total FROM daily_budget').one().total ?? 0).toBe(18);
+    });
+  });
+
+  it('fails closed and logs only an internal outcome for provider authentication or model configuration failure', async () => {
+    const marker = 'MARKER_PROVIDER_CONFIGURATION_DETAIL';
+    const metrics: import('../src/metrics').SafeMetric[] = [];
+    const configured = createApp({
+      provider: {
+        analyze: async () => {
+          throw Object.assign(new Error(marker), { providerFailureKind: 'configuration' as const });
+        },
+        craftResponse: validProvider().craftResponse,
+      },
+      logger: { info: (metric) => { metrics.push(metric); } },
+      rateLimitSecret: 'test-only-rate-key',
+      entitlementResolver: async () => ({ plan: 'pro', cache: 'hit' }),
+    });
+
+    const response = await configured.fetch(request('/v1/analyses', analysisRequest({
+      revenueCatAppUserId: '$RCAnonymousID:verified-pro-configuration-failure',
+    })), env as unknown as Env);
+    const blocked = await app().fetch(request('/v1/analyses', analysisRequest({
+      installationToken: 'configuration-circuit-second-installation',
+    })), env as unknown as Env);
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: 'INTERNAL_ERROR' } });
+    expect(blocked.status).toBe(503);
+    await expect(blocked.json()).resolves.toMatchObject({ error: { code: 'PROVIDER_UNAVAILABLE' } });
+    expect(metrics[0]).toMatchObject({ outcome: 'INTERNAL_ERROR', statusClass: '5xx', plan: 'pro' });
+    expect(JSON.stringify(metrics)).not.toContain(marker);
+    expect(JSON.stringify(metrics)).not.toMatch(/"message"|"content"|"error"|"installationToken"/i);
+  });
+
+  it('opens the provider circuit after five failures, refunds user quota, retains provider cost, and makes no sixth provider call', async () => {
     let providerCalls = 0;
     const failingProvider: AiProvider = {
       analyze: async () => { providerCalls += 1; throw new ProviderUnavailableError(); },
@@ -233,9 +529,104 @@ describe('AI proxy routes', () => {
     expect(providerCalls).toBe(5);
     await runInDurableObject(admissionStub(), (_instance, state) => {
       expect(state.storage.sql.exec<{ total: number | null }>('SELECT SUM(count) AS total FROM plan_usage').one().total ?? 0).toBe(0);
-      expect(state.storage.sql.exec<{ total: number | null }>('SELECT SUM(provider_units) AS total FROM daily_budget').one().total ?? 0).toBe(0);
+      expect(state.storage.sql.exec<{ total: number | null }>('SELECT SUM(provider_units) AS total FROM daily_budget').one().total ?? 0).toBe(15);
       expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM inflight').one().count).toBe(0);
     });
+  });
+
+  it('returns retryable entitlement-unavailable before admission for an identified customer', async () => {
+    let providerCalled = false;
+    const response = await createApp({
+      provider: {
+        analyze: async () => {
+          providerCalled = true;
+          return analysis;
+        },
+        craftResponse: validProvider().craftResponse,
+      },
+      logger: { info: () => undefined },
+      rateLimitSecret: 'test-only-rate-key',
+      entitlementResolver: async () => ({ plan: 'unknown', cache: 'error' } as never),
+    }).fetch(request('/v1/analyses', analysisRequest({ revenueCatAppUserId: '$RCAnonymousID:identified-pro' })), env as unknown as Env);
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: 'ENTITLEMENT_UNAVAILABLE', retryAfterSeconds: expect.any(Number) },
+    });
+    expect(providerCalled).toBe(false);
+    await runInDurableObject(admissionStub(), (_instance, state) => {
+      expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM plan_usage').one().count).toBe(0);
+      expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM daily_budget').one().count).toBe(0);
+    });
+  });
+
+  it('keeps an absent RevenueCat identifier as verified Free', async () => {
+    const plans: string[] = [];
+    const response = await createApp({
+      provider: validProvider(),
+      logger: { info: (metric) => { plans.push(metric.plan); } },
+      rateLimitSecret: 'test-only-rate-key',
+    }).fetch(request('/v1/analyses', analysisRequest()), env as unknown as Env);
+
+    expect(response.status).toBe(200);
+    expect(plans).toEqual(['free']);
+  });
+
+  it('meters rotating installations under one verified Free RevenueCat identity', async () => {
+    const provider = validProvider();
+    let providerCalls = 0;
+    const identifiedFree = createApp({
+      provider: {
+        analyze: async (messages) => {
+          providerCalls += 1;
+          return provider.analyze(messages);
+        },
+        craftResponse: provider.craftResponse,
+      },
+      logger: { info: () => undefined },
+      rateLimitSecret: 'test-only-rate-key',
+      entitlementResolver: async () => ({ plan: 'free', cache: 'hit' }),
+    });
+    const responses: Response[] = [];
+    for (let index = 0; index < 4; index += 1) {
+      responses.push(await identifiedFree.fetch(request('/v1/analyses', analysisRequest({
+        installationToken: `rotating-free-installation-${index}`,
+        revenueCatAppUserId: '$RCAnonymousID:stable-verified-free',
+      })), env as unknown as Env));
+    }
+
+    expect(responses.map(({ status }) => status)).toEqual([200, 200, 200, 429]);
+    await expect(responses[3].json()).resolves.toMatchObject({ error: { code: 'PLAN_LIMIT_REACHED' } });
+    expect(providerCalls).toBe(3);
+    await runInDurableObject(admissionStub(), (_instance, state) => {
+      expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(DISTINCT subject_digest) AS count FROM plan_usage').one().count).toBe(1);
+    });
+  });
+
+  it('does not return provider success when durable success accounting cannot be confirmed', async () => {
+    const response = await app().fetch(
+      request('/v1/analyses', analysisRequest()),
+      envWithRejectedCompletions(),
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: 'INTERNAL_ERROR', retryAfterSeconds: expect.any(Number) },
+    });
+    expect(await currentInFlight()).toBe(1);
+  });
+
+  it('returns retryable accounting failure when provider-failure completion cannot be confirmed', async () => {
+    const response = await app({
+      analyze: async () => { throw new ProviderUnavailableError(); },
+      craftResponse: validProvider().craftResponse,
+    }).fetch(request('/v1/analyses', analysisRequest()), envWithRejectedCompletions());
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: 'INTERNAL_ERROR', retryAfterSeconds: expect.any(Number) },
+    });
+    expect(await currentInFlight()).toBe(1);
   });
 
   it('returns a content-free 80 percent budget warning header and metric', async () => {
@@ -273,6 +664,85 @@ describe('AI proxy routes', () => {
     finish.resolve();
     expect((await pending).status).toBe(200);
     expect(await currentInFlight()).toBe(0);
+  });
+
+  it('rejects a pre-aborted request before body parsing or accounting work', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let providerCalled = false;
+    const provider: AiProvider = {
+      analyze: async () => {
+        providerCalled = true;
+        return analysis;
+      },
+      craftResponse: validProvider().craftResponse,
+    };
+
+    const response = await app(provider).fetch(request('/v1/analyses', analysisRequest(), {
+      signal: controller.signal,
+    }), env as unknown as Env);
+
+    expect(response.status).toBe(408);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: 'INVALID_REQUEST' } });
+    expect(providerCalled).toBe(false);
+    await runInDurableObject(admissionStub(), (_instance, state) => {
+      expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM inflight').one().count).toBe(0);
+      expect(state.storage.sql.exec<{ total: number | null }>('SELECT SUM(count) AS total FROM plan_usage').one().total ?? 0).toBe(0);
+      expect(state.storage.sql.exec<{ total: number | null }>('SELECT SUM(provider_units) AS total FROM daily_budget').one().total ?? 0).toBe(0);
+    });
+  });
+
+  it('fully compensates a proven abort after reservation but before provider invocation', async () => {
+    const controller = new AbortController();
+    let providerCalled = false;
+    let reserveCalls = 0;
+    const completionOutcomes: string[] = [];
+    const actualAdmission = env.AI_ADMISSION;
+    const observedEnv = {
+      ...(env as unknown as Env),
+      AI_ADMISSION: {
+        idFromName: (name: string) => actualAdmission.idFromName(name),
+        get: (id: DurableObjectId) => {
+          const actual = actualAdmission.get(id);
+          return {
+            fetch: (input: RequestInfo | URL, init?: RequestInit) => {
+              const pathname = new URL(String(input)).pathname;
+              if (pathname === '/reserve') reserveCalls += 1;
+              if (pathname === '/complete' && typeof init?.body === 'string') {
+                completionOutcomes.push((JSON.parse(init.body) as { outcome: string }).outcome);
+              }
+              return actual.fetch(input, init);
+            },
+          };
+        },
+      } as unknown as DurableObjectNamespace,
+    };
+    const response = await createApp({
+      provider: {
+        analyze: async () => {
+          providerCalled = true;
+          return analysis;
+        },
+        craftResponse: validProvider().craftResponse,
+      },
+      logger: { info: () => undefined },
+      rateLimitSecret: 'test-only-rate-key',
+      entitlementResolver: async () => {
+        controller.abort();
+        return { plan: 'free', cache: 'hit' };
+      },
+    }).fetch(request('/v1/analyses', analysisRequest(), { signal: controller.signal }), observedEnv);
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: 'INTERNAL_ERROR' } });
+    expect(reserveCalls).toBe(1);
+    expect(completionOutcomes).toEqual(['pre_provider_abort']);
+    expect(providerCalled).toBe(false);
+    await runInDurableObject(admissionStub(), (_instance, state) => {
+      expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM inflight').one().count).toBe(0);
+      expect(state.storage.sql.exec<{ total: number | null }>('SELECT SUM(count) AS total FROM plan_usage').one().total ?? 0).toBe(0);
+      expect(state.storage.sql.exec<{ total: number | null }>('SELECT SUM(provider_units) AS total FROM daily_budget').one().total ?? 0).toBe(0);
+    });
   });
 
   it('releases the lease when provider cancellation surfaces as an abort', async () => {
@@ -382,7 +852,7 @@ describe('AI proxy routes', () => {
   it('returns a response draft from POST /v1/responses', async () => {
     const input: CraftResponseRequest = {
       schemaVersion: 1,
-      consentVersion: '2026-08-07',
+      consentVersion: '2026-08-07.2',
       installationToken,
       sender: 'Person A',
       goal: 'resolve',
@@ -400,7 +870,7 @@ describe('AI proxy routes', () => {
     let received: unknown;
     const input: CraftResponseRequest = {
       schemaVersion: 1,
-      consentVersion: '2026-08-07',
+      consentVersion: '2026-08-07.2',
       installationToken,
       sender: 'Person A',
       goal: 'resolve',
@@ -438,7 +908,7 @@ describe('AI proxy routes', () => {
     const routeToken = 'route-bucket-installation-token';
     const routeHeaders = { 'CF-Connecting-IP': '192.0.2.88' };
     const input: CraftResponseRequest = {
-      schemaVersion: 1, consentVersion: '2026-08-07', installationToken: routeToken, sender: 'Person A', goal: 'resolve', tone: 'empathetic', analysis,
+      schemaVersion: 1, consentVersion: '2026-08-07.2', installationToken: routeToken, sender: 'Person A', goal: 'resolve', tone: 'empathetic', analysis,
     };
     for (let index = 0; index < 3; index += 1) {
       expect((await app().fetch(request('/v1/analyses', analysisRequest({ installationToken: routeToken }), { headers: routeHeaders }), env as unknown as Env)).status).toBe(200);

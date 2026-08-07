@@ -17,7 +17,7 @@ type ResultScreenProps = { createReportId?: UuidProvider };
 export default function ResultScreen({ createReportId = createNativeUuid }: ResultScreenProps) {
   const { activeResult, draft, reset } = useAnalysisSession();
   const { repository } = useReportRepository();
-  const { entitlementActive } = useBilling();
+  const { entitlementStatus } = useBilling();
   const [saveOptionsVisible, setSaveOptionsVisible] = useState(false);
   const [retainSourceText, setRetainSourceText] = useState(false);
   const [title, setTitle] = useState('Saved analysis');
@@ -48,10 +48,10 @@ export default function ResultScreen({ createReportId = createNativeUuid }: Resu
         sourceText: retainSourceText ? draft : null,
         result: activeResult,
         responseDrafts: [],
-      }, entitlementActive);
+      }, entitlementStatus);
       if (!gate.allowed) {
         setSaveStatus('idle');
-        router.push('/upgrade?source=history-limit');
+        if (gate.reason === 'FREE_HISTORY_LIMIT') router.push('/upgrade?source=history-limit');
         return;
       }
       setSaveStatus('saved');
@@ -98,7 +98,12 @@ export default function ResultScreen({ createReportId = createNativeUuid }: Resu
               trackColor={{ false: tokens.colors.textSecondary, true: tokens.colors.accent }}
               value={retainSourceText}
             />
-            <PrimaryButton label={saveStatus === 'saving' ? 'Saving…' : 'Save privately'} disabled={saveStatus === 'saving'} onPress={() => { void save(); }} testID="save-without-source" />
+            <PrimaryButton
+              label={saveStatus === 'saving' ? 'Saving…' : 'Save privately'}
+              disabled={saveStatus === 'saving'}
+              onPress={() => { void save(); }}
+              testID="save-without-source"
+            />
           </View>
         ) : <PrimaryButton label="Save analysis" onPress={() => { setSaveStatus('idle'); setSaveOptionsVisible(true); }} testID="save-report" />}
         <PrimaryButton

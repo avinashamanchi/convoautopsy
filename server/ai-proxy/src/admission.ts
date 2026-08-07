@@ -13,7 +13,13 @@ export type AdmissionResult =
   | { allowed: false; code: AdmissionRejectionCode; retryAfterSeconds: number };
 
 export type BudgetWarning = 'under-80' | 'at-least-80';
-export type AdmissionCompletionOutcome = 'success' | 'provider_failure' | 'invalid_output';
+export type AdmissionCompletionOutcome =
+  | 'success'
+  | 'provider_failure'
+  | 'invalid_output'
+  | 'caller_error'
+  | 'configuration_failure'
+  | 'pre_provider_abort';
 type AdmissionRejectionCode = Extract<PublicErrorCode, 'PLAN_LIMIT_REACHED' | 'SERVICE_BUSY' | 'DAILY_BUDGET_REACHED' | 'PROVIDER_UNAVAILABLE'>;
 type AdmissionRejection = Extract<AdmissionResult, { allowed: false }>;
 type AdmissionConfig = { maxGlobalInFlight?: unknown; maxDailyProviderUnits?: unknown };
@@ -48,6 +54,8 @@ type CircuitRow = { state: string; opened_at: number; probe_lease_id: string | n
 const DEFAULT_MAX_GLOBAL_IN_FLIGHT = 100;
 const LEASE_TTL_MS = 2 * 60_000;
 const RELEASE_DEADLINE_MS = 2_000;
+const COMPLETION_ATTEMPT_DEADLINE_MS = 750;
+const COMPLETION_ATTEMPTS = 3;
 const PROVIDER_FAILURE_WINDOW_MS = 60_000;
 const PROVIDER_FAILURE_THRESHOLD = 5;
 const PROVIDER_CIRCUIT_COOLDOWN_MS = 30_000;
@@ -140,28 +148,32 @@ export async function completeAdmission(
   if (!leaseId || !isCompletionOutcome(outcome) || !validTimestamp(now)) {
     throw new PublicError('INTERNAL_ERROR', 500);
   }
-  const controller = new AbortController();
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<never>((_resolve, reject) => {
-    timeout = setTimeout(() => {
-      controller.abort();
-      reject(new DOMException('Admission completion deadline exceeded', 'TimeoutError'));
-    }, RELEASE_DEADLINE_MS);
-  });
-  try {
-    const operation = globalStub(namespace).fetch('https://admission.internal/complete', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ leaseId, outcome, now }),
-      signal: controller.signal,
+  const body = JSON.stringify({ leaseId, outcome, now });
+  for (let attempt = 0; attempt < COMPLETION_ATTEMPTS; attempt += 1) {
+    const controller = new AbortController();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_resolve, reject) => {
+      timeout = setTimeout(() => {
+        controller.abort();
+        reject(new DOMException('Admission completion deadline exceeded', 'TimeoutError'));
+      }, COMPLETION_ATTEMPT_DEADLINE_MS);
     });
-    const response = await Promise.race([operation, deadline]);
-    if (!response.ok) throw new Error('Admission coordinator unavailable');
-  } catch {
-    throw new PublicError('INTERNAL_ERROR', 500);
-  } finally {
-    if (timeout !== undefined) clearTimeout(timeout);
+    try {
+      const operation = globalStub(namespace).fetch('https://admission.internal/complete', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+        signal: controller.signal,
+      });
+      const response = await Promise.race([operation, deadline]);
+      if (response.ok) return;
+    } catch {
+      // A lost response is safe to retry because completion is durable and idempotent.
+    } finally {
+      if (timeout !== undefined) clearTimeout(timeout);
+    }
   }
+  throw new PublicError('INTERNAL_ERROR', 503, 1);
 }
 
 export class AdmissionDurableObject {
@@ -174,6 +186,8 @@ export class AdmissionDurableObject {
     this.state.storage.sql.exec('CREATE TABLE IF NOT EXISTS lease_accounting(lease_id TEXT PRIMARY KEY, subject_digest TEXT NOT NULL, period TEXT NOT NULL, route TEXT NOT NULL, day TEXT NOT NULL, provider_units INTEGER NOT NULL, is_probe INTEGER NOT NULL CHECK(is_probe IN (0, 1)))');
     this.state.storage.sql.exec('CREATE TABLE IF NOT EXISTS provider_failures(failure_id TEXT PRIMARY KEY, observed_at INTEGER NOT NULL)');
     this.state.storage.sql.exec('CREATE INDEX IF NOT EXISTS provider_failures_observed_idx ON provider_failures(observed_at)');
+    this.state.storage.sql.exec("CREATE TABLE IF NOT EXISTS accounting_reconciliation(event_id TEXT PRIMARY KEY, observed_at INTEGER NOT NULL, reason TEXT NOT NULL CHECK(reason = 'expired_unresolved'))");
+    this.state.storage.sql.exec('CREATE INDEX IF NOT EXISTS accounting_reconciliation_observed_idx ON accounting_reconciliation(observed_at)');
     this.state.storage.sql.exec("CREATE TABLE IF NOT EXISTS provider_circuit(id INTEGER PRIMARY KEY CHECK(id = 1), state TEXT NOT NULL, opened_at INTEGER NOT NULL, probe_lease_id TEXT)");
     this.state.storage.sql.exec("INSERT OR IGNORE INTO provider_circuit (id, state, opened_at, probe_lease_id) VALUES (1, 'closed', 0, NULL)");
   }
@@ -286,7 +300,8 @@ export class AdmissionDurableObject {
     }
 
     if (outcome !== 'success') {
-      this.refundAccounting(accounting);
+      this.refundUserAllowance(accounting);
+      if (outcome === 'pre_provider_abort') this.refundProviderBudget(accounting);
     }
     this.state.storage.sql.exec('DELETE FROM inflight WHERE lease_id = ?', leaseId);
     this.state.storage.sql.exec('DELETE FROM lease_accounting WHERE lease_id = ?', leaseId);
@@ -296,8 +311,18 @@ export class AdmissionDurableObject {
       return;
     }
 
-    if (outcome === 'invalid_output') {
+    if (outcome === 'pre_provider_abort') {
       if (accounting.is_probe === 1) this.openCircuit(now);
+      return;
+    }
+
+    if (outcome === 'invalid_output' || outcome === 'caller_error') {
+      if (accounting.is_probe === 1) this.openCircuit(now);
+      return;
+    }
+
+    if (outcome === 'configuration_failure') {
+      this.openCircuit(now);
       return;
     }
 
@@ -470,16 +495,9 @@ export class AdmissionDurableObject {
     return row;
   }
 
-  private refundAccounting(accounting: LeaseAccounting): void {
-    const budget = this.providerUnits(accounting.day);
+  private refundUserAllowance(accounting: LeaseAccounting): void {
     const usage = this.usageForPeriod(accounting.subject_digest, accounting.period, accounting.route);
-    if (budget < accounting.provider_units || usage < 1) throw new Error('Invalid refundable accounting state');
-    this.state.storage.sql.exec(
-      'UPDATE daily_budget SET provider_units = provider_units - ? WHERE day = ?',
-      accounting.provider_units,
-      accounting.day,
-    );
-    this.state.storage.sql.exec('DELETE FROM daily_budget WHERE day = ? AND provider_units = 0', accounting.day);
+    if (usage < 1) throw new Error('Invalid refundable allowance state');
     this.state.storage.sql.exec(
       'UPDATE plan_usage SET count = count - 1 WHERE subject_digest = ? AND period = ? AND route = ?',
       accounting.subject_digest,
@@ -492,6 +510,17 @@ export class AdmissionDurableObject {
       accounting.period,
       accounting.route,
     );
+  }
+
+  private refundProviderBudget(accounting: LeaseAccounting): void {
+    const budget = this.providerUnits(accounting.day);
+    if (budget < accounting.provider_units) throw new Error('Invalid refundable provider budget state');
+    this.state.storage.sql.exec(
+      'UPDATE daily_budget SET provider_units = provider_units - ? WHERE day = ?',
+      accounting.provider_units,
+      accounting.day,
+    );
+    this.state.storage.sql.exec('DELETE FROM daily_budget WHERE day = ? AND provider_units = 0', accounting.day);
   }
 
   private assertCircuit(): CircuitRow {
@@ -546,11 +575,22 @@ export class AdmissionDurableObject {
   }
 
   private deleteExpiredLeases(now: number): void {
-    const expiredProbe = this.state.storage.sql.exec<{ lease_id: string }>(
-      'SELECT lease_id FROM lease_accounting WHERE is_probe = 1 AND lease_id IN (SELECT lease_id FROM inflight WHERE expires_at <= ?)',
+    const expired = this.state.storage.sql.exec<LeaseAccounting>(
+      'SELECT lease_id, subject_digest, period, route, day, provider_units, is_probe FROM lease_accounting WHERE lease_id IN (SELECT lease_id FROM inflight WHERE expires_at <= ?)',
       now,
-    ).toArray()[0];
-    if (expiredProbe) this.openCircuit(now);
+    ).toArray();
+    for (const accounting of expired) {
+      const validated = this.leaseAccounting(accounting.lease_id);
+      if (!validated) continue;
+      this.refundUserAllowance(validated);
+      this.state.storage.sql.exec(
+        'INSERT INTO accounting_reconciliation (event_id, observed_at, reason) VALUES (?, ?, ?)',
+        crypto.randomUUID(),
+        now,
+        'expired_unresolved',
+      );
+      if (validated.is_probe === 1) this.openCircuit(now);
+    }
     this.state.storage.sql.exec(
       'DELETE FROM lease_accounting WHERE lease_id IN (SELECT lease_id FROM inflight WHERE expires_at <= ?)',
       now,
@@ -577,6 +617,7 @@ export class AdmissionDurableObject {
       day,
     );
     this.state.storage.sql.exec('DELETE FROM provider_failures WHERE observed_at < ?', now - PROVIDER_FAILURE_WINDOW_MS);
+    this.state.storage.sql.exec('DELETE FROM accounting_reconciliation WHERE observed_at < ?', now - 7 * DAY_MS);
     this.state.storage.sql.exec(
       'INSERT INTO maintenance_state (id, last_retention_day) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET last_retention_day = excluded.last_retention_day',
       day,
@@ -637,7 +678,12 @@ function validTimestamp(value: unknown): value is number {
 }
 
 function isCompletionOutcome(value: unknown): value is AdmissionCompletionOutcome {
-  return value === 'success' || value === 'provider_failure' || value === 'invalid_output';
+  return value === 'success'
+    || value === 'provider_failure'
+    || value === 'invalid_output'
+    || value === 'caller_error'
+    || value === 'configuration_failure'
+    || value === 'pre_provider_abort';
 }
 
 function isInternalReservation(value: unknown): value is InternalReservation {

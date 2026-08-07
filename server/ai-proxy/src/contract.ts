@@ -1,6 +1,10 @@
 import { z } from 'zod';
 
-export const CONSENT_VERSION = '2026-08-07' as const;
+export const CONSENT_VERSION = '2026-08-07.2' as const;
+export const REMOTE_ANALYSIS_MAX_MESSAGES = 10;
+export const REMOTE_ANALYSIS_MAX_TEXT_CODE_POINTS = 280;
+export const REMOTE_ANALYSIS_MAX_INTERPRETATION_CODE_POINTS = 150;
+export const REMOTE_ANALYSIS_MAX_RESPONSE_BYTES = 40 * 1_024;
 
 function codePointString(min: number, max: number) {
   return z.string().superRefine((value, context) => {
@@ -25,6 +29,13 @@ export const InputMessageSchema = z
   })
   .strict();
 
+export const RemoteInputMessageSchema = z
+  .object({
+    sender: AnonymousSenderSchema,
+    text: codePointString(1, REMOTE_ANALYSIS_MAX_TEXT_CODE_POINTS),
+  })
+  .strict();
+
 export const AnalysisMessageSchema = z
   .object({
     sender: AnonymousSenderSchema,
@@ -32,6 +43,16 @@ export const AnalysisMessageSchema = z
     pattern: z.enum(['Criticism', 'Contempt', 'Defensiveness', 'Stonewalling', 'Neutral']),
     egoState: z.enum(['Parent', 'Adult', 'Child']),
     possibleInterpretation: codePointString(1, 300),
+  })
+  .strict();
+
+export const RemoteAnalysisMessageSchema = z
+  .object({
+    sender: AnonymousSenderSchema,
+    text: codePointString(1, REMOTE_ANALYSIS_MAX_TEXT_CODE_POINTS),
+    pattern: z.enum(['Criticism', 'Contempt', 'Defensiveness', 'Stonewalling', 'Neutral']),
+    egoState: z.enum(['Parent', 'Adult', 'Child']),
+    possibleInterpretation: codePointString(1, REMOTE_ANALYSIS_MAX_INTERPRETATION_CODE_POINTS),
   })
   .strict();
 
@@ -52,13 +73,47 @@ export const AnalysisResultSchema = z
   })
   .strict();
 
+export const RemoteAnalysisResultSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    mode: z.literal('ai'),
+    intensityScore: z.number().int().min(0).max(100),
+    conflictMode: z.enum([
+      'Competing',
+      'Avoiding',
+      'Compromising',
+      'Collaborating',
+      'Accommodating',
+      'Competing vs Avoiding',
+    ]),
+    messages: z.array(RemoteAnalysisMessageSchema).min(1).max(REMOTE_ANALYSIS_MAX_MESSAGES),
+  })
+  .strict();
+
+export const RemoteCraftAnalysisResultSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    mode: z.enum(['local', 'ai']),
+    intensityScore: z.number().int().min(0).max(100),
+    conflictMode: z.enum([
+      'Competing',
+      'Avoiding',
+      'Compromising',
+      'Collaborating',
+      'Accommodating',
+      'Competing vs Avoiding',
+    ]),
+    messages: z.array(RemoteAnalysisMessageSchema).min(1).max(REMOTE_ANALYSIS_MAX_MESSAGES),
+  })
+  .strict();
+
 export const AnalyzeRequestSchema = z
   .object({
     schemaVersion: z.literal(1),
     consentVersion: z.literal(CONSENT_VERSION),
     installationToken: InstallationTokenSchema,
     revenueCatAppUserId: RevenueCatAppUserIdSchema.optional(),
-    messages: z.array(InputMessageSchema).min(1).max(100),
+    messages: z.array(RemoteInputMessageSchema).min(1).max(REMOTE_ANALYSIS_MAX_MESSAGES),
   })
   .strict();
 
@@ -71,7 +126,7 @@ export const CraftResponseRequestSchema = z
     sender: AnonymousSenderSchema,
     goal: z.enum(['resolve', 'boundary', 'feelings', 'understand', 'apologize', 'request']),
     tone: z.enum(['empathetic', 'assertive', 'deescalating', 'direct', 'diplomatic']),
-    analysis: AnalysisResultSchema,
+    analysis: RemoteCraftAnalysisResultSchema,
   })
   .strict();
 
@@ -83,7 +138,7 @@ export const ResponseDraftSchema = z
   })
   .strict();
 
-export function normalizeAnalysisProviderOutput(value: unknown): AnalysisResult {
+export function normalizeAnalysisProviderOutput(value: unknown): RemoteAnalysisResult {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new Error('Invalid analysis provider output');
   }
@@ -101,10 +156,11 @@ export function normalizeAnalysisProviderOutput(value: unknown): AnalysisResult 
     })
     : raw.messages;
 
-  return AnalysisResultSchema.parse({ ...raw, schemaVersion: 1, mode: 'ai', messages });
+  return RemoteAnalysisResultSchema.parse({ ...raw, schemaVersion: 1, mode: 'ai', messages });
 }
 
 export type AnalyzeRequest = z.infer<typeof AnalyzeRequestSchema>;
 export type AnalysisResult = z.infer<typeof AnalysisResultSchema>;
+export type RemoteAnalysisResult = z.infer<typeof RemoteAnalysisResultSchema>;
 export type CraftResponseRequest = z.infer<typeof CraftResponseRequestSchema>;
 export type ResponseDraft = z.infer<typeof ResponseDraftSchema>;

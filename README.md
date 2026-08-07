@@ -13,7 +13,7 @@ Live site → **[avinashamanchi.github.io/convoautopsy](https://avinashamanchi.g
 - **Response Crafter** — choose a sender, goal, and tone to generate three editable local drafts for human review
 - **Receipt Export** — download a shareable 9:16 PNG of your analysis (Instagram/TikTok ready)
 - **File Upload** — drag-and-drop .txt chat exports (WhatsApp, Discord, etc.)
-- **Saved History** — analyses are stored locally and can be deleted by the user
+- **Saved History** — analyses are stored locally and can be deleted by the user; legacy multi-profile reports stay in a separate versioned recovery file instead of appearing in the current history
 - **Guest-first web app** — the browser-local guest profile has no ConvoAutopsy account or backend account credentials
 
 ---
@@ -108,7 +108,9 @@ Name:  VITE_AI_PROXY_URL
 Value: https://your-proxy.example
 ```
 
-The browser never receives provider credentials. Before AI use, the site asks for consent and explains that reviewed message text is sent through the ConvoAutopsy server to Groq; on-device analysis remains available without sharing. Participant labels are pseudonymous, not anonymous, and message text may still contain emails, phone numbers, third-party names, and context unless it is reviewed and redacted first.
+The browser never receives provider credentials. Before AI use, the site asks for consent and provides an exact-data review. An AI analysis request sends to ConvoAutopsy's Cloudflare service: schema version, consent version, an installation token, and each reviewed message sender and message text. The service forwards only the reviewed message sender and message text to Groq. An AI response-drafting request sends the service schema version, consent version, the installation token, the chosen response sender, goal, and tone, the analysis mode, intensity score, and conflict mode, and—for each message—the message sender, edited message text, pattern, ego state, and edited possible interpretation. The service forwards the content and drafting fields to Groq; it does not forward schema version, consent version, the installation token, or analysis mode to Groq. Technical identifier values are not displayed in the review.
+
+Person labels are pseudonymous, not anonymous, and message text may still contain emails, phone numbers, third-party names, and context unless it is reviewed and redacted first. On-device analysis and drafts remain available without sharing. Separately, in the native app, Free verification can send a pseudonymous RevenueCat app-user ID even without a subscription; purchase and entitlement checks can send that ID and purchase information to RevenueCat.
 
 ---
 
@@ -159,6 +161,8 @@ Jordan: Whatever. I'm done with this conversation.
 ```
 
 Participant labels are pseudonymous Person A / Person B labels, not proof of anonymity. Parsed and saved message text may still contain emails, phone numbers, third-party names, and context unless it is reviewed and redacted before analysis. Turning off original-source retention does not remove the parsed message text stored inside a saved analysis.
+
+The guest-first web migration never reads retired local credentials. It migrates only the previously selected legacy profile into current history and preserves every legacy report bucket, including other-profile and logged-out buckets, in a schema-validated `convoautopsy.web.legacy-recovery.v1` envelope. The dashboard shows only counts until the user explicitly exports the private recovery file; export leaves the browser recovery copy intact, and Delete All removes it with the other app-owned browser data when deletion succeeds.
 
 ---
 

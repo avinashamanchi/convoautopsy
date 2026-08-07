@@ -30,6 +30,9 @@ export function parseLoadOptions(args) {
       if (!providerAuthorized || !syntheticContentAcknowledged) {
         throw new Error('Refusing non-loopback target without both provider authorization and synthetic-content acknowledgement');
       }
+      if (sustainedSeconds === undefined || burstSeconds === undefined) {
+        throw new Error('Refusing non-loopback target without explicit --sustained-seconds and --burst-seconds cost bounds');
+      }
       mode = 'real-provider-soak';
       if (fixtureSecretFile !== undefined) throw new Error('A fixture secret file is valid only for loopback fixtures');
     } else if (fixtureSecretFile === undefined) {
@@ -45,12 +48,31 @@ export function parseLoadOptions(args) {
     mode,
     startWrangler: target === undefined,
     sustainedRps: 5,
-    sustainedSeconds: sustainedSeconds ?? (ci ? 5 : 60),
+    sustainedSeconds: sustainedSeconds ?? (ci ? 5 : 3_600),
     burstRps: 20,
-    burstSeconds: burstSeconds ?? (ci ? 2 : 30),
+    burstSeconds: burstSeconds ?? (ci ? 2 : 300),
     readinessMs: 30_000,
     diagnosticsMs: 2_000,
     clientMs: 25_000,
+  });
+}
+
+export function createPlannedWorkload(options) {
+  if (!options || typeof options !== 'object' || Array.isArray(options)) throw new Error('Invalid load options');
+  const scheduledRequests = options.sustainedRps * options.sustainedSeconds
+    + options.burstRps * options.burstSeconds;
+  if (!Number.isSafeInteger(scheduledRequests) || scheduledRequests <= 0) throw new Error('Invalid planned request count');
+  const paddingRequests = (10 - (scheduledRequests % 10)) % 10;
+  const totalRequests = scheduledRequests + paddingRequests;
+  const analysisRequests = totalRequests * 7 / 10;
+  const responseRequests = totalRequests * 3 / 10;
+  return Object.freeze({
+    scheduledRequests,
+    paddingRequests,
+    totalRequests,
+    analysisRequests,
+    responseRequests,
+    providerUnits: analysisRequests * 3 + responseRequests,
   });
 }
 
@@ -91,6 +113,70 @@ export function createRequestIdentity(runId, index) {
     installationToken: `load_${runId}_${String(cohortIndex).padStart(3, '0')}`,
     syntheticIp: '198.18.0.1',
   });
+}
+
+export function createFixedWorkloadCohort(totalRequests) {
+  if (!Number.isSafeInteger(totalRequests) || totalRequests <= 0 || totalRequests > INSTALLATION_COHORT_SIZE) {
+    throw new Error('Fixed workload count must fit the installation pool');
+  }
+  return Object.freeze({
+    strategy: 'fixed-pool',
+    installationPoolSize: INSTALLATION_COHORT_SIZE,
+    exercisedInstallations: totalRequests,
+  });
+}
+
+export function createQuotaSafeWorkloadPlan(totalRequests) {
+  if (!Number.isSafeInteger(totalRequests) || totalRequests <= 0 || totalRequests % 10 !== 0) {
+    throw new Error('Quota-safe workload count must be a positive multiple of ten');
+  }
+  const analysisRequests = totalRequests * 7 / 10;
+  const responseRequests = totalRequests * 3 / 10;
+  const analysisInstallations = Math.ceil(analysisRequests / 3);
+  const responseInstallations = Math.ceil(responseRequests / 6);
+  return Object.freeze({
+    totalRequests,
+    analysisRequests,
+    responseRequests,
+    analysisInstallations,
+    responseInstallations,
+    totalInstallations: analysisInstallations + responseInstallations,
+  });
+}
+
+export function createQuotaSafeWorkloadIdentity(runId, index, plan) {
+  if (!/^[A-Za-z0-9_-]{8,128}$/.test(runId)
+    || !Number.isSafeInteger(index)
+    || index < 0
+    || !validQuotaSafeWorkloadPlan(plan)
+    || index >= plan.totalRequests) {
+    throw new Error('Invalid quota-safe workload identity input');
+  }
+  const route = routeForRequestIndex(index);
+  const analysisOrdinal = analysisRequestsBefore(index);
+  const routeOrdinal = route === '/v1/analyses' ? analysisOrdinal : index - analysisOrdinal;
+  const perInstallation = route === '/v1/analyses' ? 3 : 6;
+  const installationIndex = Math.floor(routeOrdinal / perInstallation);
+  const prefix = route === '/v1/analyses' ? 'analysis' : 'response';
+  return Object.freeze({
+    installationToken: `load_${runId}_${prefix}_${String(installationIndex).padStart(5, '0')}`,
+    syntheticIp: '198.18.0.1',
+    route,
+  });
+}
+
+export function requireFreshFinalDiagnostics(observations, finalInjectedStage) {
+  if (!Array.isArray(observations) || typeof finalInjectedStage !== 'string' || !finalInjectedStage) {
+    throw new Error('Invalid final diagnostics input');
+  }
+  const last = observations.at(-1);
+  if (!last
+    || last.stage !== finalInjectedStage
+    || !Number.isSafeInteger(last.activeReservations)
+    || last.activeReservations < 0) {
+    throw new Error('Missing fresh final diagnostics');
+  }
+  return last.activeReservations;
 }
 
 export function routeForRequestIndex(index) {
@@ -225,6 +311,69 @@ export async function fetchBoundedJsonWithDeadline(input, init, {
   }
 }
 
+export async function fetchApiResponseWithDeadline(input, init, {
+  timeoutMs,
+  maxBytes,
+  parentSignal,
+  fetchImplementation = globalThis.fetch,
+}) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error('Invalid API deadline');
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new Error('Invalid API body bound');
+  if (parentSignal.aborted) throw abortReason(parentSignal);
+
+  const controller = new AbortController();
+  const stop = () => controller.abort(abortReason(parentSignal));
+  parentSignal.addEventListener('abort', stop, { once: true });
+  const timer = setTimeout(() => {
+    controller.abort(new DOMException('API request deadline exceeded', 'TimeoutError'));
+  }, timeoutMs);
+  let reader;
+
+  try {
+    const response = await settleBeforeAbort(
+      fetchImplementation(input, { ...init, signal: controller.signal }),
+      controller.signal,
+    );
+    if (response.ok) {
+      if (response.body) await settleBeforeAbort(response.body.cancel(), controller.signal);
+      return Object.freeze({ ok: true, status: response.status });
+    }
+    if (!response.body) throw new Error('missing API error body');
+    reader = response.body.getReader();
+    const chunks = [];
+    let total = 0;
+    while (true) {
+      const { done, value } = await settleBeforeAbort(reader.read(), controller.signal);
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) throw new Error('API error body bound');
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return Object.freeze({
+      ok: false,
+      status: response.status,
+      value: JSON.parse(new TextDecoder().decode(bytes)),
+    });
+  } catch (error) {
+    if (reader) void reader.cancel().catch(() => undefined);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    parentSignal.removeEventListener('abort', stop);
+    try {
+      reader?.releaseLock();
+    } catch {
+      // A pending cancellation owns the reader until it settles.
+    }
+  }
+}
+
 function countBy(values, keyFor, order) {
   const entries = new Map();
   for (const value of values) {
@@ -232,6 +381,28 @@ function countBy(values, keyFor, order) {
     entries.set(key, (entries.get(key) ?? 0) + 1);
   }
   return Object.freeze(Object.fromEntries([...entries].toSorted(([left], [right]) => order(left, right))));
+}
+
+function validQuotaSafeWorkloadPlan(plan) {
+  if (!plan || typeof plan !== 'object' || Array.isArray(plan)) return false;
+  if (!Number.isSafeInteger(plan.totalRequests) || plan.totalRequests <= 0 || plan.totalRequests % 10 !== 0) return false;
+  return plan.analysisRequests === plan.totalRequests * 7 / 10
+    && plan.responseRequests === plan.totalRequests * 3 / 10
+    && plan.analysisInstallations === Math.ceil(plan.analysisRequests / 3)
+    && plan.responseInstallations === Math.ceil(plan.responseRequests / 6)
+    && plan.totalInstallations === plan.analysisInstallations + plan.responseInstallations;
+}
+
+function analysisRequestsBefore(index) {
+  const block = Math.floor(index / INSTALLATION_COHORT_SIZE);
+  const position = index % INSTALLATION_COHORT_SIZE;
+  const shift = block * 3 % 10;
+  let count = block * 70 + Math.floor(position / 10) * 7;
+  const remainder = position % 10;
+  for (let offset = 0; offset < remainder; offset += 1) {
+    if ((offset + shift) % 10 < 7) count += 1;
+  }
+  return count;
 }
 
 function numericKeyOrder(left, right) {

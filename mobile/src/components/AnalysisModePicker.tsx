@@ -6,14 +6,17 @@ type AnalysisModePickerProps = {
   onRunLocal(): void;
   onStartAi(): void;
   aiNotice: string | null;
+  aiDecisionReady: boolean;
+  aiDecisionNotice: string | null;
 };
 
-export function AnalysisModePicker({ onRunLocal, onStartAi, aiNotice }: AnalysisModePickerProps) {
+export function AnalysisModePicker({ onRunLocal, onStartAi, aiNotice, aiDecisionReady, aiDecisionNotice }: AnalysisModePickerProps) {
   return (
     <View style={styles.container}>
       <Text style={styles.description}>Run an on-device estimate, or choose AI-assisted analysis when it is configured.</Text>
       <PrimaryButton label="Run on-device analysis" onPress={onRunLocal} testID="run-local-analysis" />
-      <PrimaryButton label="Use AI-assisted analysis" onPress={onStartAi} />
+      <PrimaryButton disabled={!aiDecisionReady} label="Use AI-assisted analysis" onPress={onStartAi} />
+      {!aiDecisionReady && aiDecisionNotice ? <Text accessibilityRole="alert" style={styles.notice}>{aiDecisionNotice}</Text> : null}
       {aiNotice ? <Text accessibilityRole="alert" style={styles.notice}>{aiNotice}</Text> : null}
     </View>
   );

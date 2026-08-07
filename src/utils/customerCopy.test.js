@@ -38,18 +38,49 @@ describe('customer-facing product truth', () => {
   })
 
   it('ships the public web app as a browser-local guest profile without fake account credentials', async () => {
-    const [app, storage, readme, privacy] = await Promise.all([
+    const [app, storage, authPage, readme, privacy] = await Promise.all([
       fromRoot('src/App.jsx'),
       fromRoot('src/utils/storage.js'),
+      fromRoot('src/pages/AuthPage.jsx'),
       fromRoot('README.md'),
       fromRoot('public/privacy.html'),
     ])
-    const deployedSources = `${app}\n${storage}`
+    const deployedSources = `${app}\n${storage}\n${authPage}`
 
     expect(deployedSources).not.toMatch(/AuthPage|registerUser|loginUser|password|ca_users/)
     expect(`${readme}\n${privacy}`).toMatch(/browser-local (?:guest )?profile/i)
     expect(`${readme}\n${privacy}`).toMatch(/no (?:backend|ConvoAutopsy) account/i)
     expect(`${readme}\n${privacy}`).toMatch(/cannot recall.*(?:provider|backup)/is)
     expect(`${readme}\n${privacy}`).toMatch(/does not cancel.*App Store subscription/is)
+  })
+
+  it('enumerates the exact AI drafting payload and Free RevenueCat identifier use in consent and public documentation', async () => {
+    const [consent, readme, privacy] = await Promise.all([
+      fromRoot('src/components/AiConsentModal.jsx'),
+      fromRoot('README.md'),
+      fromRoot('public/privacy.html'),
+    ])
+    const requiredFields = [
+      'installation token',
+      'response sender',
+      'goal',
+      'tone',
+      'analysis mode',
+      'intensity score',
+      'conflict mode',
+      'message sender',
+      'message text',
+      'pattern',
+      'ego state',
+      'possible interpretation',
+    ]
+
+    for (const copy of [consent, readme, privacy]) {
+      for (const field of requiredFields) expect(copy.toLowerCase()).toContain(field)
+      expect(copy).toMatch(/Free verification.*pseudonymous RevenueCat.*even without a subscription/i)
+      expect(copy).toMatch(/ConvoAutopsy.*Cloudflare.*schema version.*consent version.*installation token/is)
+      expect(copy).toMatch(/not forward.*schema version.*consent version.*installation token.*analysis mode.*Groq/is)
+    }
+    expect(`${consent}\n${readme}\n${privacy}`).not.toMatch(/RevenueCat ID[^.]{0,100}only (?:when|if).*(?:subscribe|subscription)/i)
   })
 })

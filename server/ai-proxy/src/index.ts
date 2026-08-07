@@ -2,12 +2,20 @@ import {
   AnalyzeRequestSchema,
   CONSENT_VERSION,
   CraftResponseRequestSchema,
-  AnalysisResultSchema,
+  RemoteAnalysisResultSchema,
   ResponseDraftSchema,
   type AnalyzeRequest,
   type CraftResponseRequest,
 } from './contract';
-import { asPublicError, ProviderInvalidResponseError, ProviderUnavailableError, PublicError, type PublicErrorCode } from './errors';
+import {
+  asPublicError,
+  ProviderConfigurationError,
+  ProviderInvalidResponseError,
+  ProviderRequestRejectedError,
+  ProviderUnavailableError,
+  PublicError,
+  type PublicErrorCode,
+} from './errors';
 import { resolveEntitlement, type EntitlementResolution } from './entitlements';
 import { createGroqProvider, type AiProvider, type ProviderCraftInput } from './provider';
 import { checkRateLimits, deriveRateLimitKeys } from './fairRateLimit';
@@ -47,9 +55,16 @@ type OperationalContext = {
 
 type Logger = { info(metric: SafeMetric, requestId: string): void | Promise<void> };
 type EntitlementResolver = (appUserId: string | undefined, env: Env, now: number) => Promise<EntitlementResolution>;
-type AppOptions = { provider?: AiProvider; logger?: Logger; rateLimitSecret?: string; entitlementResolver?: EntitlementResolver };
+type AppOptions = {
+  provider?: AiProvider;
+  logger?: Logger;
+  rateLimitSecret?: string;
+  entitlementResolver?: EntitlementResolver;
+  bodyReadTimeoutMs?: number;
+};
 type BodyByteObserver = (bodyBytes: number) => void;
 const MAX_BODY_BYTES = 128 * 1024;
+const DEFAULT_BODY_READ_TIMEOUT_MS = 5_000;
 
 export function createApp(options: AppOptions = {}) {
   return {
@@ -115,9 +130,13 @@ async function handle(
   if (request.method === 'OPTIONS') return corsResponse(origin);
   if (request.method !== 'POST') throw new PublicError('INVALID_REQUEST', 405);
 
-  const boundedBody = await readBoundedJson(request, (bodyBytes) => {
-    operational.bodyBytes = bodyBytes;
-  });
+  const boundedBody = await readBoundedJson(
+    request,
+    (bodyBytes) => {
+      operational.bodyBytes = bodyBytes;
+    },
+    validBodyReadTimeout(options.bodyReadTimeoutMs),
+  );
   const body = boundedBody.value;
   if (hasConsentMismatch(body)) throw new PublicError('CONSENT_REQUIRED', 403);
   const schema = route === '/v1/analyses' ? AnalyzeRequestSchema : CraftResponseRequestSchema;
@@ -137,10 +156,14 @@ async function handle(
 
   const now = Date.now();
   const entitlement = await (options.entitlementResolver ?? resolveEntitlement)(parsed.data.revenueCatAppUserId, env, now);
+  operational.entitlementCache = entitlement.cache;
+  if (entitlement.plan === 'unknown') {
+    operational.plan = 'unknown';
+    throw new PublicError('ENTITLEMENT_UNAVAILABLE', 503, 5);
+  }
   const verifiedPlan = entitlement.plan;
   operational.plan = verifiedPlan;
-  operational.entitlementCache = entitlement.cache;
-  const verifiedCustomerId = verifiedPlan === 'pro' ? parsed.data.revenueCatAppUserId : undefined;
+  const verifiedCustomerId = parsed.data.revenueCatAppUserId;
   const subjectDigest = await deriveAdmissionSubjectDigest(
     verifiedCustomerId ?? parsed.data.installationToken,
     verifiedCustomerId === undefined ? 'installation' : 'customer',
@@ -163,11 +186,18 @@ async function handle(
   operational.providerUnits = route === '/v1/analyses' ? 3 : 1;
   operational.budgetWarning = reservation.budgetWarning;
 
+  if (request.signal.aborted) {
+    await completeAdmission(env.AI_ADMISSION, reservation.leaseId, 'pre_provider_abort', Date.now());
+    throw new PublicError('INTERNAL_ERROR', 503, 1);
+  }
+
   const provider = options.provider ?? createGroqProvider(env.GROQ_API_KEY);
   if (route === '/v1/analyses') {
     let analysis;
     try {
-      analysis = AnalysisResultSchema.parse(await provider.analyze((parsed.data as AnalyzeRequest).messages));
+      const reviewedMessages = (parsed.data as AnalyzeRequest).messages;
+      analysis = RemoteAnalysisResultSchema.parse(await provider.analyze(reviewedMessages));
+      if (!matchesReviewedMessages(analysis.messages, reviewedMessages)) throw new ProviderInvalidResponseError();
     } catch (error) {
       const normalized = normalizeProviderError(error);
       await recordProviderFailure(env.AI_ADMISSION, reservation.leaseId, normalized);
@@ -200,30 +230,50 @@ async function handle(
   return addBudgetWarning(json({ response, requestId }, 200, origin, requestId), reservation.budgetWarning);
 }
 
+function matchesReviewedMessages(
+  output: readonly Readonly<{ sender: string; text: string }>[],
+  reviewed: readonly Readonly<{ sender: string; text: string }>[],
+): boolean {
+  return output.length === reviewed.length
+    && output.every((message, index) => (
+      message.sender === reviewed[index]?.sender && message.text === reviewed[index]?.text
+    ));
+}
+
 async function recordProviderFailure(namespace: DurableObjectNamespace, leaseId: string, error: unknown): Promise<void> {
-  try {
-    const outcome = error instanceof ProviderUnavailableError || (error instanceof DOMException && error.name === 'TimeoutError')
-      ? 'provider_failure'
-      : 'invalid_output';
-    await completeAdmission(namespace, leaseId, outcome, Date.now());
-  } catch {
-    // The provider error remains the public result; lease expiry recovers in-flight capacity.
-  }
+  const outcome = error instanceof ProviderUnavailableError || (error instanceof DOMException && error.name === 'TimeoutError')
+    ? 'provider_failure'
+    : error instanceof ProviderRequestRejectedError
+      ? 'caller_error'
+      : error instanceof ProviderConfigurationError
+        ? 'configuration_failure'
+        : 'invalid_output';
+  await completeAdmission(namespace, leaseId, outcome, Date.now());
 }
 
 async function recordProviderSuccess(namespace: DurableObjectNamespace, leaseId: string): Promise<void> {
-  try {
-    await completeAdmission(namespace, leaseId, 'success', Date.now());
-  } catch {
-    // A valid provider result is not replaced; lease expiry recovers in-flight capacity.
-  }
+  await completeAdmission(namespace, leaseId, 'success', Date.now());
 }
 
 function normalizeProviderError(error: unknown): unknown {
   if (error instanceof DOMException && error.name === 'TimeoutError') return error;
-  if (error instanceof ProviderInvalidResponseError || error instanceof ProviderUnavailableError || error instanceof PublicError) return error;
+  if (error instanceof ProviderInvalidResponseError
+    || error instanceof ProviderUnavailableError
+    || error instanceof ProviderRequestRejectedError
+    || error instanceof ProviderConfigurationError
+    || error instanceof PublicError) return error;
+  if (isProviderFailureKind(error, 'caller')) return new ProviderRequestRejectedError();
+  if (isProviderFailureKind(error, 'configuration')) return new ProviderConfigurationError();
+  if (isProviderFailureKind(error, 'availability')) return new ProviderUnavailableError();
   if (error instanceof Error) return new ProviderInvalidResponseError();
   return error;
+}
+
+function isProviderFailureKind(error: unknown, kind: 'caller' | 'configuration' | 'availability'): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'providerFailureKind' in error
+    && error.providerFailureKind === kind;
 }
 
 function addBudgetWarning(response: Response, warning: 'under-80' | 'at-least-80'): Response {
@@ -237,7 +287,11 @@ function addBudgetWarning(response: Response, warning: 'under-80' | 'at-least-80
   return response;
 }
 
-async function readBoundedJson(request: Request, observeBodyBytes: BodyByteObserver): Promise<{ value: unknown; bodyBytes: number }> {
+async function readBoundedJson(
+  request: Request,
+  observeBodyBytes: BodyByteObserver,
+  timeoutMs: number,
+): Promise<{ value: unknown; bodyBytes: number }> {
   const declaredHeader = request.headers.get('content-length');
   if (declaredHeader !== null) {
     const declaredLength = Number(declaredHeader);
@@ -253,16 +307,23 @@ async function readBoundedJson(request: Request, observeBodyBytes: BodyByteObser
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > MAX_BODY_BYTES) {
-      observeBodyBytes(MAX_BODY_BYTES + 1);
-      await reader.cancel().catch(() => undefined);
-      throw new PublicError('PAYLOAD_TOO_LARGE', 413);
+  const deadline = performance.now() + timeoutMs;
+  try {
+    while (true) {
+      const { done, value } = await readBodyChunk(reader, request.signal, deadline);
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_BODY_BYTES) {
+        observeBodyBytes(MAX_BODY_BYTES + 1);
+        throw new PublicError('PAYLOAD_TOO_LARGE', 413);
+      }
+      chunks.push(value);
     }
-    chunks.push(value);
+  } catch (error) {
+    if (!(error instanceof PublicError) || error.code !== 'PAYLOAD_TOO_LARGE') observeBodyBytes(total);
+    cancelBodyReader(reader);
+    if (error instanceof PublicError) throw error;
+    throw new PublicError('INVALID_REQUEST', 400);
   }
   const bytes = new Uint8Array(total);
   let offset = 0;
@@ -275,6 +336,54 @@ async function readBoundedJson(request: Request, observeBodyBytes: BodyByteObser
     return { value: JSON.parse(new TextDecoder().decode(bytes)), bodyBytes: total };
   } catch {
     throw new PublicError('INVALID_REQUEST', 400);
+  }
+}
+
+function validBodyReadTimeout(configured: number | undefined): number {
+  return Number.isFinite(configured) && configured !== undefined && configured >= 1 && configured <= 30_000
+    ? Math.floor(configured)
+    : DEFAULT_BODY_READ_TIMEOUT_MS;
+}
+
+function readBodyChunk(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  signal: AbortSignal,
+  deadline: number,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  if (signal.aborted || performance.now() >= deadline) {
+    return Promise.reject(new PublicError('INVALID_REQUEST', 408));
+  }
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (operation: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
+      operation();
+    };
+    const onAbort = () => finish(() => reject(new PublicError('INVALID_REQUEST', 408)));
+    const timer = setTimeout(
+      () => finish(() => reject(new PublicError('INVALID_REQUEST', 408))),
+      Math.max(1, deadline - performance.now()),
+    );
+    signal.addEventListener('abort', onAbort, { once: true });
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    reader.read().then(
+      (result) => finish(() => resolve(result)),
+      () => finish(() => reject(new PublicError('INVALID_REQUEST', 400))),
+    );
+  });
+}
+
+function cancelBodyReader(reader: ReadableStreamDefaultReader<Uint8Array>): void {
+  try {
+    void reader.cancel().catch(() => undefined);
+  } catch {
+    // Cancellation is best effort and must not delay the public response.
   }
 }
 

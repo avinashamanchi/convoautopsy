@@ -86,6 +86,41 @@
   gap: 10px;
 }
 
+.remote-review-technical {
+  margin-top: 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.remote-review-settings {
+  display: grid;
+  grid-template-columns: minmax(130px, auto) 1fr;
+  gap: 7px 14px;
+}
+
+.remote-review-settings dt { color: var(--text-muted); }
+.remote-review-settings dd { color: var(--text); overflow-wrap: anywhere; }
+.remote-review-message-fields { margin: 8px 0 12px; padding: 10px; }
+
+.dash-legacy-recovery,
+.dash-persistence-status {
+  margin: 14px;
+  border: 1px solid rgba(182, 167, 255, 0.3);
+  border-radius: 12px;
+  padding: 14px 16px;
+  color: var(--text);
+  background: #14131c;
+}
+
+.dash-legacy-recovery h2 { margin-bottom: 6px; font-size: 16px; }
+.dash-legacy-recovery p,
+.dash-persistence-status p { color: var(--text-muted); }
+.dash-legacy-recovery button,
+.dash-persistence-actions button { margin-top: 10px; margin-right: 8px; padding: 8px 12px; }
+.dash-persistence-status-error { border-color: rgba(248, 113, 113, 0.45); background: #1b1114; }
+.dash-persistence-status-success { border-color: rgba(52, 211, 153, 0.45); background: #111816; }
+.dash-persistence-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
 .dash-delete-all-status {
   position: fixed;
   z-index: 1100;
@@ -752,7 +787,7 @@ body::before {
 }
 /* AI consent and source labels */
 .ai-consent-backdrop { align-items: center; background: rgba(8, 10, 16, .72); display: flex; inset: 0; justify-content: center; padding: 24px; position: fixed; z-index: 100; }
-.ai-consent-modal { background: #171b28; border: 1px solid #36405f; border-radius: 18px; color: #f5f7ff; max-width: 520px; padding: 28px; }
+.ai-consent-modal { background: #171b28; border: 1px solid #36405f; border-radius: 18px; color: #f5f7ff; max-height: calc(100vh - 48px); max-width: 620px; overflow: auto; padding: 28px; }
 .ai-consent-modal h2 { margin-top: 0; }
 .ai-consent-modal p { color: #c4cade; line-height: 1.55; }
 .ai-consent-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }

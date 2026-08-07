@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-
 import { router } from 'expo-router';
 import { Pressable, Text } from 'react-native';
 import ResponsesScreen from '../app/(tabs)/responses';
-import ResponseScreen from '../app/response/[reportId]';
+import ResponseScreen, { analysisWithReviewedText } from '../app/response/[reportId]';
 import { ReportRepositoryProvider, useReportRepository } from '../src/services/reportRepositoryContext';
 import type { AnalysisResult } from '../src/domain/analysis';
 import type { PreferenceStore, ReportRepository, SavedReport } from '../src/services/reportRepository';
@@ -13,6 +13,15 @@ let mockReportId = 'report-1';
 const mockResponseRequest = jest.fn();
 const mockGetConsent = jest.fn();
 const mockGrantConsent = jest.fn();
+let mockBillingState: {
+  appUserId: string | null;
+  identityStatus: 'loading' | 'ready' | 'unavailable';
+  entitlementStatus: 'loading' | 'unknown' | 'free' | 'pro';
+} = {
+  appUserId: '$RCAnonymousID:response-test',
+  identityStatus: 'ready',
+  entitlementStatus: 'free',
+};
 
 jest.mock('expo-router', () => ({
   router: { push: jest.fn() },
@@ -22,7 +31,7 @@ jest.mock('expo-router', () => ({
 
 jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn() }));
 jest.mock('../src/billing/BillingProvider', () => ({
-  useBilling: () => ({ appUserId: '$RCAnonymousID:response-test', identityStatus: 'ready' }),
+  useBilling: () => mockBillingState,
 }));
 jest.mock('expo-sharing', () => ({ isAvailableAsync: jest.fn(), shareAsync: jest.fn() }));
 jest.mock('../src/services/consentStore', () => {
@@ -208,6 +217,7 @@ async function pressAndFlush(element: Parameters<typeof fireEvent.press>[0]) {
 }
 
 beforeEach(() => {
+  mockBillingState = { appUserId: '$RCAnonymousID:response-test', identityStatus: 'ready', entitlementStatus: 'free' };
   mockReportId = 'report-1';
   jest.clearAllMocks();
   mockFiles.splice(0, mockFiles.length);
@@ -215,8 +225,47 @@ beforeEach(() => {
   (jest.requireMock('expo-sharing') as { isAvailableAsync: jest.Mock }).isAvailableAsync.mockResolvedValue(true);
   (jest.requireMock('expo-sharing') as { shareAsync: jest.Mock }).shareAsync.mockResolvedValue(undefined);
   mockGetConsent.mockResolvedValue(null);
-  mockGrantConsent.mockResolvedValue({ version: '2026-08-07', grantedAt: '2026-08-07T12:00:00.000Z', provider: 'Groq' });
+  mockGrantConsent.mockResolvedValue({ version: '2026-08-07.2', grantedAt: '2026-08-07T12:00:00.000Z', provider: 'Groq' });
   mockResponseRequest.mockResolvedValue({ id: 'reviewed-1', text: 'Could we return to this calmly?', hint: 'Review before sending.' });
+});
+
+it('keeps the response conversion boundary aligned at 150 interpretation code points', () => {
+  const baseMessage = result.messages[0];
+  const reviewed = [{ ...baseMessage, possibleInterpretation: '🫠'.repeat(150) }];
+
+  expect(analysisWithReviewedText({ ...result, messages: [baseMessage] }, reviewed)).not.toBeNull();
+  expect(analysisWithReviewedText(
+    { ...result, messages: [baseMessage] },
+    [{ ...baseMessage, possibleInterpretation: '🫠'.repeat(151) }],
+  )).toBeNull();
+});
+
+it.each(['loading', 'unknown'] as const)('blocks AI response decisions while entitlement is %s', async (entitlementStatus) => {
+  mockBillingState = { appUserId: '$RCAnonymousID:response-test', identityStatus: 'ready', entitlementStatus };
+  renderResponse();
+  await selectResponseOptions();
+
+  const action = screen.getByRole('button', { name: 'Review text for one AI draft', disabled: true });
+  fireEvent.press(action);
+
+  expect(screen.getByText('Checking your plan before AI-assisted drafting…')).toBeOnTheScreen();
+  expect(screen.queryByText('Review exact text sent for AI')).toBeNull();
+  expect(mockGetConsent).not.toHaveBeenCalled();
+  expect(mockResponseRequest).not.toHaveBeenCalled();
+});
+
+it('blocks AI response review when the pseudonymous plan identity is unavailable', async () => {
+  mockBillingState = { appUserId: null, identityStatus: 'unavailable', entitlementStatus: 'pro' };
+  renderResponse();
+  await selectResponseOptions();
+
+  const action = screen.getByRole('button', { name: 'Review text for one AI draft', disabled: true });
+  fireEvent.press(action);
+
+  expect(screen.getByText(/AI-assisted drafting is unavailable because plan identity could not be prepared/i)).toBeOnTheScreen();
+  expect(screen.queryByText('Review exact text sent for AI')).toBeNull();
+  expect(mockGetConsent).not.toHaveBeenCalled();
+  expect(mockResponseRequest).not.toHaveBeenCalled();
 });
 
 it('selects a saved report before opening the response wizard', async () => {
@@ -448,6 +497,14 @@ it('reviews exact redacted text and current consent before the optional AI reque
   expect(await screen.findByText('Review exact text sent for AI')).toBeOnTheScreen();
   expect(mockGetConsent).not.toHaveBeenCalled();
   expect(mockResponseRequest).not.toHaveBeenCalled();
+  expect(screen.getByLabelText('Response sender sent, read-only: Person A')).toBeOnTheScreen();
+  expect(screen.getByLabelText('Response goal sent, read-only: resolve')).toBeOnTheScreen();
+  expect(screen.getByLabelText('Response tone sent, read-only: direct')).toBeOnTheScreen();
+  expect(screen.getByLabelText('Analysis intensity sent, read-only: 42')).toBeOnTheScreen();
+  expect(screen.getByLabelText('Analysis conflict sent, read-only: Collaborating')).toBeOnTheScreen();
+  expect(screen.getByLabelText('Message 1 sender sent, read-only: Person A')).toBeOnTheScreen();
+  expect(screen.getByLabelText('Message 1 pattern sent, read-only: Neutral')).toBeOnTheScreen();
+  expect(screen.getByLabelText('Message 1 ego state sent, read-only: Adult')).toBeOnTheScreen();
   expect(screen.getByLabelText('Text sent for Person A message 1: Email me at [EMAIL]')).toBeOnTheScreen();
   expect(screen.getByLabelText('Outgoing possible interpretation for Person A message 1')).toHaveProp(
     'value',
@@ -487,7 +544,7 @@ it('reviews exact redacted text and current consent before the optional AI reque
 });
 
 it('persists one AI-assisted draft without replacing existing drafts', async () => {
-  mockGetConsent.mockResolvedValue({ version: '2026-08-07', grantedAt: '2026-08-07T12:00:00.000Z', provider: 'Groq' });
+  mockGetConsent.mockResolvedValue({ version: '2026-08-07.2', grantedAt: '2026-08-07T12:00:00.000Z', provider: 'Groq' });
   const existing = { id: 'resolve-direct-1', text: 'Existing local draft', hint: 'Keep this.' };
   const repository = new MemoryReportRepository([savedReport({ responseDrafts: [existing] })]);
   const save = jest.spyOn(repository, 'save');
@@ -512,7 +569,7 @@ it('persists one AI-assisted draft without replacing existing drafts', async () 
 });
 
 it('retains a completed paid draft after append failure and retries only persistence', async () => {
-  mockGetConsent.mockResolvedValue({ version: '2026-08-07', grantedAt: '2026-08-07T12:00:00.000Z', provider: 'Groq' });
+  mockGetConsent.mockResolvedValue({ version: '2026-08-07.2', grantedAt: '2026-08-07T12:00:00.000Z', provider: 'Groq' });
   const repository = new MemoryReportRepository();
   const save = jest.spyOn(repository, 'save');
   repository.saveError = new Error('disk full');
@@ -544,7 +601,7 @@ it('retains a completed paid draft after append failure and retries only persist
 });
 
 it('assigns distinct storage IDs when separate paid requests return the same provider draft ID', async () => {
-  mockGetConsent.mockResolvedValue({ version: '2026-08-07', grantedAt: '2026-08-07T12:00:00.000Z', provider: 'Groq' });
+  mockGetConsent.mockResolvedValue({ version: '2026-08-07.2', grantedAt: '2026-08-07T12:00:00.000Z', provider: 'Groq' });
   const repository = new MemoryReportRepository();
   renderResponse(repository);
   await selectResponseOptions();
@@ -587,7 +644,7 @@ it.each([
   [new AiClientError('INVALID_RESPONSE'), 'The AI draft response could not be validated.'],
   [new AiClientError('NOT_CONFIGURED'), 'AI drafting is not configured.'],
 ] as const)('keeps the local option and saved report after a content-free remote failure', async (error, notice) => {
-  mockGetConsent.mockResolvedValue({ version: '2026-08-07', grantedAt: '2026-08-07T12:00:00.000Z', provider: 'Groq' });
+  mockGetConsent.mockResolvedValue({ version: '2026-08-07.2', grantedAt: '2026-08-07T12:00:00.000Z', provider: 'Groq' });
   mockResponseRequest.mockRejectedValue(error);
   const existing = { id: 'existing', text: 'Saved draft stays', hint: 'Keep this.' };
   const repository = new MemoryReportRepository([savedReport({ responseDrafts: [existing] })]);
@@ -603,7 +660,7 @@ it.each([
 });
 
 it('deduplicates confirmation and prevents an unmounted completion from saving', async () => {
-  mockGetConsent.mockResolvedValue({ version: '2026-08-07', grantedAt: '2026-08-07T12:00:00.000Z', provider: 'Groq' });
+  mockGetConsent.mockResolvedValue({ version: '2026-08-07.2', grantedAt: '2026-08-07T12:00:00.000Z', provider: 'Groq' });
   const pending = deferred<{ id: string; text: string; hint: string }>();
   mockResponseRequest.mockReturnValue(pending.promise);
   const repository = new MemoryReportRepository();
@@ -622,7 +679,7 @@ it('deduplicates confirmation and prevents an unmounted completion from saving',
 });
 
 it('prevents a late remote completion from saving after a report switch', async () => {
-  mockGetConsent.mockResolvedValue({ version: '2026-08-07', grantedAt: '2026-08-07T12:00:00.000Z', provider: 'Groq' });
+  mockGetConsent.mockResolvedValue({ version: '2026-08-07.2', grantedAt: '2026-08-07T12:00:00.000Z', provider: 'Groq' });
   const pending = deferred<{ id: string; text: string; hint: string }>();
   mockResponseRequest.mockReturnValue(pending.promise);
   const repository = new MemoryReportRepository([
@@ -649,7 +706,7 @@ it('prevents a late remote completion from saving after a report switch', async 
 });
 
 it('aborts and prevents a stale save when delete-all starts', async () => {
-  mockGetConsent.mockResolvedValue({ version: '2026-08-07', grantedAt: '2026-08-07T12:00:00.000Z', provider: 'Groq' });
+  mockGetConsent.mockResolvedValue({ version: '2026-08-07.2', grantedAt: '2026-08-07T12:00:00.000Z', provider: 'Groq' });
   const pending = deferred<{ id: string; text: string; hint: string }>();
   let requestSignal: AbortSignal | undefined;
   mockResponseRequest.mockImplementation((_input, signal) => {

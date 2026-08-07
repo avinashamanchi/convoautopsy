@@ -98,11 +98,11 @@ afterEach(() => {
 });
 
 describe('RevenueCat entitlement resolution', () => {
-  it('reports bypass when configuration or the identifier is absent', async () => {
+  it('returns verified Free only when the identifier is absent and unknown when identified verification lacks configuration', async () => {
     const fetchImpl = vi.fn<typeof fetch>();
 
     await expect(resolveEntitlement(null, env(fetchImpl), NOW)).resolves.toEqual({ plan: 'free', cache: 'bypass' });
-    await expect(resolveEntitlement(APP_USER_ID, env(fetchImpl, new MemoryCache(), ''), NOW)).resolves.toEqual({ plan: 'free', cache: 'bypass' });
+    await expect(resolveEntitlement(APP_USER_ID, env(fetchImpl, new MemoryCache(), ''), NOW)).resolves.toEqual({ plan: 'unknown', cache: 'error' });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
@@ -123,7 +123,7 @@ describe('RevenueCat entitlement resolution', () => {
     const fetchImpl = vi.fn<typeof fetch>();
 
     await expect(resolveEntitlement(APP_USER_ID, { ...env(fetchImpl), ENTITLEMENT_CACHE: cache }, NOW)).resolves.toEqual({
-      plan: 'free',
+      plan: 'unknown',
       cache: 'error',
     });
   });
@@ -159,7 +159,7 @@ describe('RevenueCat entitlement resolution', () => {
 
     const [{ value }] = [...cache.entries.values()];
     expect(JSON.parse(value)).toEqual({ plan: 'pro', checkedAt: NOW, expiresAt: Date.parse(graceDeadline) });
-    await expect(resolvePlan(APP_USER_ID, env(fetchImpl, cache), Date.parse(graceDeadline))).resolves.toBe('free');
+    await expect(resolvePlan(APP_USER_ID, env(fetchImpl, cache), Date.parse(graceDeadline))).resolves.toBe('unknown');
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
@@ -176,21 +176,21 @@ describe('RevenueCat entitlement resolution', () => {
       customer('2026-09-01T00:00:00Z', 'convo_pro', 'not-a-date'),
     ));
 
-    await expect(resolvePlan(APP_USER_ID, env(fetchImpl), NOW)).resolves.toBe('free');
+    await expect(resolvePlan(APP_USER_ID, env(fetchImpl), NOW)).resolves.toBe('unknown');
   });
 
   it('fails closed without network access when the identifier or server secret is absent', async () => {
     const fetchImpl = vi.fn<typeof fetch>();
 
     await expect(resolvePlan(null, env(fetchImpl), NOW)).resolves.toBe('free');
-    await expect(resolvePlan(APP_USER_ID, env(fetchImpl, new MemoryCache(), ''), NOW)).resolves.toBe('free');
+    await expect(resolvePlan(APP_USER_ID, env(fetchImpl, new MemoryCache(), ''), NOW)).resolves.toBe('unknown');
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it.each(['.', '..'])('rejects dot-segment app-user ID %s before sending Authorization', async (appUserId) => {
     const fetchImpl = vi.fn<typeof fetch>();
 
-    await expect(resolvePlan(appUserId, env(fetchImpl), NOW)).resolves.toBe('free');
+    await expect(resolvePlan(appUserId, env(fetchImpl), NOW)).resolves.toBe('unknown');
 
     expect(fetchImpl).not.toHaveBeenCalled();
   });
@@ -234,7 +234,7 @@ describe('RevenueCat entitlement resolution', () => {
     await expect(resolvePlan(APP_USER_ID, env(initialFetch, cache), NOW)).resolves.toBe('pro');
     const failingFetch = vi.fn<typeof fetch>().mockRejectedValue(new Error('provider payload must not escape'));
 
-    await expect(resolvePlan(APP_USER_ID, env(failingFetch, cache), NOW + 5 * 60_000)).resolves.toBe('free');
+    await expect(resolvePlan(APP_USER_ID, env(failingFetch, cache), NOW + 5 * 60_000)).resolves.toBe('unknown');
   });
 
   it('aborts at the five-second deadline even when fetch ignores AbortSignal', async () => {
@@ -248,7 +248,7 @@ describe('RevenueCat entitlement resolution', () => {
 
     await vi.advanceTimersByTimeAsync(5_000);
 
-    await expect(result).resolves.toBe('free');
+    await expect(result).resolves.toBe('unknown');
     expect(requestSignal?.aborted).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
   });
@@ -270,7 +270,7 @@ describe('RevenueCat entitlement resolution', () => {
     await vi.advanceTimersByTimeAsync(5_000);
     const outcome = await Promise.race([result, Promise.resolve<'pending'>('pending')]);
 
-    expect(outcome).toBe('free');
+    expect(outcome).toBe('unknown');
     expect(cancelled).toBe(true);
   });
 
@@ -286,7 +286,7 @@ describe('RevenueCat entitlement resolution', () => {
     const result = resolvePlan(APP_USER_ID, env(fetchImpl), NOW);
 
     await vi.advanceTimersByTimeAsync(5_000);
-    await expect(result).resolves.toBe('free');
+    await expect(result).resolves.toBe('unknown');
     pendingFetch.resolve(fakeResponse({ getReader, cancel }));
     await Promise.resolve();
     await Promise.resolve();
@@ -310,7 +310,7 @@ describe('RevenueCat entitlement resolution', () => {
     await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(1));
 
     await vi.advanceTimersByTimeAsync(5_000);
-    await expect(result).resolves.toBe('free');
+    await expect(result).resolves.toBe('unknown');
     pendingRead.resolve({ done: false, value: new Uint8Array([123]) });
     await Promise.resolve();
     await Promise.resolve();
@@ -326,7 +326,7 @@ describe('RevenueCat entitlement resolution', () => {
   ])('fails closed for a %s', async (_name, responseFactory) => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(responseFactory());
 
-    await expect(resolvePlan(APP_USER_ID, env(fetchImpl), NOW)).resolves.toBe('free');
+    await expect(resolvePlan(APP_USER_ID, env(fetchImpl), NOW)).resolves.toBe('unknown');
   });
 
   it('cancels and rejects a RevenueCat body larger than 64 KiB', async () => {
@@ -341,7 +341,7 @@ describe('RevenueCat entitlement resolution', () => {
     });
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(stream, { status: 200 }));
 
-    await expect(resolvePlan(APP_USER_ID, env(fetchImpl), NOW)).resolves.toBe('free');
+    await expect(resolvePlan(APP_USER_ID, env(fetchImpl), NOW)).resolves.toBe('unknown');
     expect(cancelled).toBe(true);
   });
 
@@ -351,7 +351,7 @@ describe('RevenueCat entitlement resolution', () => {
       put: vi.fn(),
     } as unknown as KVNamespace;
     const fetchForReadFailure = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(customer('2026-09-01T00:00:00Z')));
-    await expect(resolvePlan(APP_USER_ID, { ...env(fetchForReadFailure), ENTITLEMENT_CACHE: readFailure }, NOW)).resolves.toBe('free');
+    await expect(resolvePlan(APP_USER_ID, { ...env(fetchForReadFailure), ENTITLEMENT_CACHE: readFailure }, NOW)).resolves.toBe('unknown');
     expect(fetchForReadFailure).not.toHaveBeenCalled();
 
     const writeFailure = {
@@ -359,6 +359,6 @@ describe('RevenueCat entitlement resolution', () => {
       put: vi.fn().mockRejectedValue(new Error('raw cache write detail')),
     } as unknown as KVNamespace;
     const fetchForWriteFailure = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(customer('2026-09-01T00:00:00Z')));
-    await expect(resolvePlan(APP_USER_ID, { ...env(fetchForWriteFailure), ENTITLEMENT_CACHE: writeFailure }, NOW)).resolves.toBe('free');
+    await expect(resolvePlan(APP_USER_ID, { ...env(fetchForWriteFailure), ENTITLEMENT_CACHE: writeFailure }, NOW)).resolves.toBe('unknown');
   });
 });

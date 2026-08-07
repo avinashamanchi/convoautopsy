@@ -1,7 +1,14 @@
 export type BillingAvailability = 'ready' | 'preview' | 'unavailable';
+export type EntitlementStatus = 'loading' | 'unknown' | 'free' | 'pro';
+export type VerifiedEntitlementStatus = Extract<EntitlementStatus, 'free' | 'pro'>;
+export type ServiceEntitlementStatus = Exclude<EntitlementStatus, 'loading'>;
 export type BillingPeriod = 'monthly' | 'annual';
 export type BillingProduct = Readonly<{ id: string; title: string; localizedPrice: string; period: BillingPeriod }>;
-export type BillingSnapshot = Readonly<{ availability: BillingAvailability; entitlementActive: boolean; products: readonly BillingProduct[] }>;
+export type BillingSnapshot = Readonly<{
+  availability: BillingAvailability;
+  entitlementStatus: ServiceEntitlementStatus;
+  products: readonly BillingProduct[];
+}>;
 export const CONVO_PRO_ENTITLEMENT = 'convo_pro';
 export const CONVO_PRO_PRODUCT_IDS = Object.freeze([
   'com.avinashamanchi.convoautopsy.pro.monthly',

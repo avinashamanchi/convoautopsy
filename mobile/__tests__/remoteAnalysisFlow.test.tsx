@@ -1,5 +1,5 @@
 jest.mock('../src/services/consentStore', () => ({
-  CONSENT_VERSION: '2026-08-07',
+  CONSENT_VERSION: '2026-08-07.2',
   SECURE_STORAGE_UNAVAILABLE_MESSAGE: 'Secure device storage is unavailable. On-device analysis still works.',
   createConsentStore: jest.fn(),
 }));
@@ -10,7 +10,7 @@ jest.mock('../src/services/aiClient', () => ({
 }));
 jest.mock('../src/billing/BillingProvider', () => ({
   BillingProvider: ({ children }: { children: React.ReactNode }) => children,
-  useBilling: () => ({ appUserId: '$RCAnonymousID:preview-test', identityStatus: 'ready' }),
+  useBilling: () => mockBillingState,
 }));
 
 import { fireEvent, screen } from '@testing-library/react-native';
@@ -30,12 +30,21 @@ const aiResult: AnalysisResult = {
   ],
 };
 
-const currentConsent = { version: '2026-08-07' as const, grantedAt: '2026-08-07T00:00:00.000Z', provider: 'Groq' as const };
+const currentConsent = { version: '2026-08-07.2' as const, grantedAt: '2026-08-07T00:00:00.000Z', provider: 'Groq' as const };
 const mockedCreateAiClient = createAiClient as jest.MockedFunction<typeof createAiClient>;
 const mockedCreateConsentStore = createConsentStore as jest.MockedFunction<typeof createConsentStore>;
 let remoteAnalysis: jest.Mock;
 let grantConsent: jest.Mock;
 let getConsent: jest.Mock;
+let mockBillingState: {
+  appUserId: string | null;
+  identityStatus: 'loading' | 'ready' | 'unavailable';
+  entitlementStatus: 'loading' | 'unknown' | 'free' | 'pro';
+} = {
+  appUserId: '$RCAnonymousID:preview-test',
+  identityStatus: 'ready',
+  entitlementStatus: 'free',
+};
 
 async function renderPreview() {
   const rendered = renderRouter('./app', { initialUrl: '/' });
@@ -64,6 +73,7 @@ async function openFirstConsent() {
 }
 
 beforeEach(() => {
+  mockBillingState = { appUserId: '$RCAnonymousID:preview-test', identityStatus: 'ready', entitlementStatus: 'free' };
   remoteAnalysis = jest.fn();
   grantConsent = jest.fn().mockResolvedValue(currentConsent);
   getConsent = jest.fn().mockResolvedValue(null);
@@ -76,6 +86,32 @@ beforeEach(() => {
     clearRemoteAnalysisData: jest.fn(),
     clearInstallationToken: jest.fn(),
   });
+});
+
+it.each(['loading', 'unknown'] as const)('blocks remote analysis while entitlement is %s', async (entitlementStatus) => {
+  mockBillingState = { appUserId: '$RCAnonymousID:preview-test', identityStatus: 'ready', entitlementStatus };
+  await renderPreview();
+
+  const action = screen.getByRole('button', { name: 'Use AI-assisted analysis', disabled: true });
+  fireEvent.press(action);
+
+  expect(screen.getByText('Checking your plan before AI-assisted analysis…')).toBeOnTheScreen();
+  expect(screen.queryByText('Automatic detection can miss identifying details. Review the exact text below.')).toBeNull();
+  expect(getConsent).not.toHaveBeenCalled();
+  expect(remoteAnalysis).not.toHaveBeenCalled();
+});
+
+it('blocks remote analysis before review when the pseudonymous plan identity is unavailable', async () => {
+  mockBillingState = { appUserId: null, identityStatus: 'unavailable', entitlementStatus: 'free' };
+  await renderPreview();
+
+  const action = screen.getByRole('button', { name: 'Use AI-assisted analysis', disabled: true });
+  fireEvent.press(action);
+
+  expect(screen.getByText(/AI-assisted analysis is unavailable because plan identity could not be prepared/i)).toBeOnTheScreen();
+  expect(screen.queryByText('Automatic detection can miss identifying details. Review the exact text below.')).toBeNull();
+  expect(getConsent).not.toHaveBeenCalled();
+  expect(remoteAnalysis).not.toHaveBeenCalled();
 });
 
 it('always opens the exact outgoing-data review before checking even existing consent', async () => {

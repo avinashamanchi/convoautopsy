@@ -126,8 +126,8 @@ it('accepts only one concurrent free save at the ten-report boundary without del
   const coordinated = createInvalidatingReportRepository(repository);
 
   const [first, second] = await Promise.all([
-    coordinated.saveIfAllowed({ ...report, id: 'candidate-1' }, false),
-    coordinated.saveIfAllowed({ ...report, id: 'candidate-2' }, false),
+    coordinated.saveIfAllowed({ ...report, id: 'candidate-1' }, 'free'),
+    coordinated.saveIfAllowed({ ...report, id: 'candidate-2' }, 'free'),
   ]);
 
   expect([first, second]).toEqual([
@@ -145,8 +145,32 @@ it('does not limit Pro saves', async () => {
     async save(next) { reports.push(next); }, delete: async () => {}, deleteAll: async () => {},
   };
 
-  await expect(createInvalidatingReportRepository(repository).saveIfAllowed({ ...report, id: 'pro-report' }, true)).resolves.toEqual({ allowed: true });
+  await expect(createInvalidatingReportRepository(repository).saveIfAllowed({ ...report, id: 'pro-report' }, 'pro')).resolves.toEqual({ allowed: true });
   expect(reports).toHaveLength(11);
+});
+
+it.each(['loading', 'unknown'] as const)('applies the ten-report Free cap while billing is conservatively %s', async (entitlementStatus) => {
+  const reports: SavedReport[] = [];
+  const repository: ReportRepository = {
+    initialize: async () => {},
+    listPage: async () => page(reports),
+    count: jest.fn(async () => reports.length),
+    getTrendSummary: emptyTrends,
+    get: async () => null,
+    save: jest.fn(async (next) => { reports.push(next); }),
+    delete: async () => {},
+    deleteAll: async () => {},
+  };
+
+  const coordinated = createInvalidatingReportRepository(repository);
+  for (let index = 0; index < 10; index += 1) {
+    await expect(coordinated.saveIfAllowed({ ...report, id: `offline-${index}` }, entitlementStatus))
+      .resolves.toEqual({ allowed: true });
+  }
+  await expect(coordinated.saveIfAllowed({ ...report, id: 'offline-11' }, entitlementStatus))
+    .resolves.toEqual({ allowed: false, reason: 'FREE_HISTORY_LIMIT' });
+  expect(reports).toHaveLength(10);
+  expect(repository.save).toHaveBeenCalledTimes(10);
 });
 
 it('atomically appends a response draft after an already-queued report save without overwriting either revision', async () => {

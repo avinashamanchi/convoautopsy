@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
 import { AiConsentSheet } from '../src/components/AiConsentSheet';
 import { RemoteDataReview } from '../src/components/RemoteDataReview';
+import { PrivacyCopy } from '../app/privacy';
 import type { ParsedMessage } from '../src/domain/analysis';
 
 const messages: ParsedMessage[] = [
@@ -9,9 +10,17 @@ const messages: ParsedMessage[] = [
 ];
 
 const responseMessages = [
-  { ...messages[0], possibleInterpretation: 'Email sam@example.com may be a request.' },
-  { ...messages[1], possibleInterpretation: 'Room 42 could be a meeting place.' },
+  { ...messages[0], pattern: 'Neutral', egoState: 'Adult', possibleInterpretation: 'Email sam@example.com may be a request.' },
+  { ...messages[1], pattern: 'Avoidance', egoState: 'Child', possibleInterpretation: 'Room 42 could be a meeting place.' },
 ];
+
+const responseContext = {
+  sender: 'Person A',
+  goal: 'resolve',
+  tone: 'direct',
+  intensityScore: 42,
+  conflictMode: 'Collaborating',
+} as const;
 
 it('warns that automatic detection can miss details even when no candidates exist', () => {
   render(
@@ -93,7 +102,7 @@ it('keeps an oversized manual paste editable without crashing or allowing confir
   );
 
   expect(screen.getByLabelText('Outgoing text for Person A message 1')).toHaveProp('value', 'x'.repeat(100_001));
-  expect(screen.getByText('Message text must be 1,000 characters or fewer.')).toBeOnTheScreen();
+  expect(screen.getByText('Message text must be 280 characters or fewer for remote AI.')).toBeOnTheScreen();
   expect(screen.getByRole('button', { name: 'Confirm exact text', disabled: true })).toBeOnTheScreen();
   expect(onConfirm).not.toHaveBeenCalled();
 });
@@ -114,9 +123,12 @@ it('separates RevenueCat plan verification metadata from the Groq conversation d
   render(<AiConsentSheet isRunning={false} onAgree={() => {}} onCancel={() => {}} />);
 
   expect(screen.getByText(/Message text is sent to Groq through ConvoAutopsy's server/)).toBeOnTheScreen();
-  expect(screen.getByText(
-    'If you use a subscription, your RevenueCat app user ID may be sent to our server to verify your plan; RevenueCat does not receive your conversation text.',
-  )).toBeOnTheScreen();
+  expect(screen.getByText(/random installation token for abuse prevention/)).toBeOnTheScreen();
+  expect(screen.getByText(/pseudonymous RevenueCat app-user ID for plan and allowance verification/)).toBeOnTheScreen();
+  expect(screen.getByText(/The review does not display either raw identifier/)).toBeOnTheScreen();
+  expect(screen.getByText(/RevenueCat does not receive your conversation text/)).toBeOnTheScreen();
+  expect(screen.getByText(/technical fields are sent to ConvoAutopsy's Cloudflare service/)).toBeOnTheScreen();
+  expect(screen.getByText(/Neither raw technical identifier is forwarded to Groq/)).toBeOnTheScreen();
 });
 
 it('uses response-specific consent copy for a reviewed AI draft', () => {
@@ -129,7 +141,16 @@ it('uses response-specific consent copy for a reviewed AI draft', () => {
 
 it('shows, edits, redacts, and freezes response possible interpretations with message text', () => {
   const onConfirm = jest.fn();
-  render(<RemoteDataReview isConfirming={false} messages={responseMessages} onCancel={() => {}} onConfirm={onConfirm} />);
+  render(<RemoteDataReview isConfirming={false} messages={responseMessages} onCancel={() => {}} onConfirm={onConfirm} responseContext={responseContext} />);
+
+  expect(screen.getByLabelText('Response sender sent, read-only: Person A')).toBeOnTheScreen();
+  expect(screen.getByLabelText('Response goal sent, read-only: resolve')).toBeOnTheScreen();
+  expect(screen.getByLabelText('Response tone sent, read-only: direct')).toBeOnTheScreen();
+  expect(screen.getByLabelText('Analysis intensity sent, read-only: 42')).toBeOnTheScreen();
+  expect(screen.getByLabelText('Analysis conflict sent, read-only: Collaborating')).toBeOnTheScreen();
+  expect(screen.getByLabelText('Message 1 sender sent, read-only: Person A')).toBeOnTheScreen();
+  expect(screen.getByLabelText('Message 1 pattern sent, read-only: Neutral')).toBeOnTheScreen();
+  expect(screen.getByLabelText('Message 1 ego state sent, read-only: Adult')).toBeOnTheScreen();
 
   expect(screen.getByLabelText('Outgoing possible interpretation for Person A message 1')).toHaveProp(
     'value',
@@ -148,4 +169,58 @@ it('shows, edits, redacts, and freezes response possible interpretations with me
   expect(confirmed[0].possibleInterpretation).toBe('New contact [EMAIL] may want space.');
   expect(Object.isFrozen(confirmed)).toBe(true);
   expect(Object.isFrozen(confirmed[0])).toBe(true);
+});
+
+it('keeps a response interpretation above 150 code points editable but blocks remote confirmation', () => {
+  const onConfirm = jest.fn();
+  render(<RemoteDataReview isConfirming={false} messages={responseMessages} onCancel={() => {}} onConfirm={onConfirm} responseContext={responseContext} />);
+
+  fireEvent.changeText(
+    screen.getByLabelText('Outgoing possible interpretation for Person A message 1'),
+    '🧠'.repeat(151),
+  );
+
+  expect(screen.getByText('Possible interpretation must be 150 characters or fewer for remote AI.')).toBeOnTheScreen();
+  expect(screen.getByRole('button', { name: 'Confirm exact text', disabled: true })).toBeOnTheScreen();
+  expect(onConfirm).not.toHaveBeenCalled();
+});
+
+it('validates the expanded outgoing redaction placeholder at the 280-message boundary', () => {
+  const onConfirm = jest.fn();
+  const rawText = `${'x'.repeat(276)} @aa`;
+  render(<RemoteDataReview isConfirming={false} messages={[{ ...messages[0], text: rawText }]} onCancel={() => {}} onConfirm={onConfirm} />);
+
+  expect(Array.from(rawText)).toHaveLength(280);
+  expect(screen.getByLabelText(/Text sent for Person A message 1:/).props.accessibilityLabel).toContain('[HANDLE]');
+  expect(screen.getByText('Message text must be 280 characters or fewer for remote AI.')).toBeOnTheScreen();
+  expect(screen.getByRole('button', { name: 'Confirm exact text', disabled: true })).toBeOnTheScreen();
+  expect(onConfirm).not.toHaveBeenCalled();
+});
+
+it('validates the expanded outgoing redaction placeholder at the 150-interpretation boundary', () => {
+  const onConfirm = jest.fn();
+  const rawInterpretation = `${'x'.repeat(146)} @aa`;
+  render(<RemoteDataReview
+    isConfirming={false}
+    messages={[{ ...responseMessages[0], possibleInterpretation: rawInterpretation }]}
+    onCancel={() => {}}
+    onConfirm={onConfirm}
+    responseContext={responseContext}
+  />);
+
+  expect(Array.from(rawInterpretation)).toHaveLength(150);
+  expect(screen.getByLabelText(/Possible interpretation sent for Person A message 1:/).props.accessibilityLabel).toContain('[HANDLE]');
+  expect(screen.getByText('Possible interpretation must be 150 characters or fewer for remote AI.')).toBeOnTheScreen();
+  expect(screen.getByRole('button', { name: 'Confirm exact text', disabled: true })).toBeOnTheScreen();
+  expect(onConfirm).not.toHaveBeenCalled();
+});
+
+it('enumerates every analysis and response-draft field plus pseudonymous request metadata in privacy copy', () => {
+  render(<PrivacyCopy />);
+
+  expect(screen.getByText(/AI-assisted analysis sends each reviewed message sender label and text/)).toBeOnTheScreen();
+  expect(screen.getByText(/response sender, goal, tone, analysis intensity and conflict/)).toBeOnTheScreen();
+  expect(screen.getByText(/each message sender, reviewed text, pattern, ego state, and reviewed possible interpretation/)).toBeOnTheScreen();
+  expect(screen.getByText(/random installation token and a pseudonymous RevenueCat app-user ID/)).toBeOnTheScreen();
+  expect(screen.queryByText(/\$RCAnonymousID:/)).toBeNull();
 });

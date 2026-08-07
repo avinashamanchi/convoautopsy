@@ -26,15 +26,16 @@ describe('privacy-safe logging', () => {
       provider,
       logger: { info: (metric, requestId) => { records.push({ metric, requestId }); } },
       rateLimitSecret: 'test-only-rate-key',
+      entitlementResolver: async () => ({ plan: 'free', cache: 'miss' }),
     });
     const analysisResponse = await app.fetch(new Request('https://proxy.example/v1/analyses', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ schemaVersion: 1, consentVersion: '2026-08-07', installationToken: token, revenueCatAppUserId: REVENUECAT_ID_MARKER, messages: [{ sender: 'Person A', text: CONTENT_MARKER }] }),
+      body: JSON.stringify({ schemaVersion: 1, consentVersion: '2026-08-07.2', installationToken: token, revenueCatAppUserId: REVENUECAT_ID_MARKER, messages: [{ sender: 'Person A', text: CONTENT_MARKER }] }),
     }), env as unknown as Env);
     const responseResponse = await app.fetch(new Request('https://proxy.example/v1/responses', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        schemaVersion: 1, consentVersion: '2026-08-07', installationToken: token, sender: 'Person A', goal: 'resolve', tone: 'empathetic',
+        schemaVersion: 1, consentVersion: '2026-08-07.2', installationToken: token, sender: 'Person A', goal: 'resolve', tone: 'empathetic',
         analysis: { schemaVersion: 1, mode: 'ai', intensityScore: 1, conflictMode: 'Avoiding', messages: [{ sender: 'Person A', text: CONTENT_MARKER, pattern: 'Neutral', egoState: 'Adult', possibleInterpretation: 'ok' }] },
       }),
     }), env as unknown as Env);
@@ -56,7 +57,7 @@ describe('privacy-safe logging', () => {
       bodySizeBucket: '<1KiB',
       providerUnitBucket: '3',
       inFlightBucket: '<10',
-      entitlementCache: 'bypass',
+      entitlementCache: 'miss',
       budgetWarning: 'under-80',
       outcome: 'allowed',
     });
@@ -80,7 +81,7 @@ describe('privacy-safe logging', () => {
       bodySizeBucket: '<1KiB',
       providerUnitBucket: '1',
       inFlightBucket: '<10',
-      entitlementCache: 'bypass',
+      entitlementCache: 'miss',
       outcome: 'PROVIDER_INVALID_RESPONSE',
     });
   });
@@ -92,7 +93,7 @@ describe('privacy-safe logging', () => {
         mode: 'ai',
         intensityScore: 1,
         conflictMode: 'Avoiding',
-        messages: [{ sender: 'Person A', text: 'Safe output.', pattern: 'Neutral', egoState: 'Adult', possibleInterpretation: 'Safe interpretation.' }],
+        messages: [{ sender: 'Person A', text: 'Safe input.', pattern: 'Neutral', egoState: 'Adult', possibleInterpretation: 'Safe interpretation.' }],
       }),
       craftResponse: async () => ({ id: 'draft', text: 'Safe draft.', hint: 'Safe hint.' }),
     };
@@ -107,7 +108,7 @@ describe('privacy-safe logging', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         schemaVersion: 1,
-        consentVersion: '2026-08-07',
+        consentVersion: '2026-08-07.2',
         installationToken: 'logger-failure-token-long-enough',
         messages: [{ sender: 'Person A', text: 'Safe input.' }],
       }),
@@ -129,7 +130,7 @@ describe('privacy-safe logging', () => {
         mode: 'ai',
         intensityScore: 1,
         conflictMode: 'Avoiding',
-        messages: [{ sender: 'Person A', text: 'Safe output.', pattern: 'Neutral', egoState: 'Adult', possibleInterpretation: 'Safe interpretation.' }],
+        messages: [{ sender: 'Person A', text: 'Safe input.', pattern: 'Neutral', egoState: 'Adult', possibleInterpretation: 'Safe interpretation.' }],
       }),
       craftResponse: async () => ({ id: 'draft', text: 'Safe draft.', hint: 'Safe hint.' }),
     };
@@ -144,7 +145,7 @@ describe('privacy-safe logging', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         schemaVersion: 1,
-        consentVersion: '2026-08-07',
+        consentVersion: '2026-08-07.2',
         installationToken: 'async-logger-token-long-enough',
         messages: [{ sender: 'Person A', text: 'Safe input.' }],
       }),

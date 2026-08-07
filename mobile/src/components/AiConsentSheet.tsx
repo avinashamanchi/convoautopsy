@@ -17,10 +17,12 @@ export function AiConsentSheet({ isRunning, feature = 'analysis', onAgree, onCan
         {responseDraft ? 'Before AI-assisted response drafting' : 'Before AI-assisted analysis'}
       </Text>
       <Text style={styles.copy}>
-        Names are replaced with Person labels. {responseDraft ? 'The reviewed message text' : 'Message text'} is sent to Groq through ConvoAutopsy&apos;s server. ConvoAutopsy does not intentionally store that text. Automated output can be wrong. {responseDraft ? 'On-device response drafts are' : 'On-device analysis is'} available without sharing.
+        Speaker labels are replaced with Person labels. {responseDraft ? 'The reviewed message text' : 'Message text'} is sent to Groq through ConvoAutopsy&apos;s server. {responseDraft
+          ? 'The request also contains the visible read-only response sender, goal, tone, analysis intensity and conflict, plus every message sender, pattern, ego state, and reviewed possible interpretation.'
+          : 'Each reviewed message sender label is sent with its text.'} ConvoAutopsy does not intentionally store that content. Automated output can be wrong. {responseDraft ? 'On-device response drafts are' : 'On-device analysis is'} available without sharing.
       </Text>
       <Text style={styles.copy}>
-        If you use a subscription, your RevenueCat app user ID may be sent to our server to verify your plan; RevenueCat does not receive your conversation text.
+        Remote technical fields are sent to ConvoAutopsy&apos;s Cloudflare service: schema and consent versions, a random installation token for abuse prevention, and a pseudonymous RevenueCat app-user ID for plan and allowance verification. For response drafting, analysis schema and mode are also server-only fields. The service sends the app-user ID to RevenueCat for verification. The review does not display either raw identifier because they are technical pseudonymous values, not conversation content. Neither raw technical identifier is forwarded to Groq. RevenueCat does not receive your conversation text.
       </Text>
       <PrimaryButton
         disabled={isRunning}

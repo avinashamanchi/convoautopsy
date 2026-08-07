@@ -84,7 +84,7 @@ export function localAnalyze(text) {
   return { messages: analyzed, overall_tension_score, conflict_mode, analysis_mode: 'local' }
 }
 
-const CONSENT_VERSION = '2026-08-07'
+const CONSENT_VERSION = '2026-08-07.2'
 const MODES = new Set(['local', 'ai'])
 const CONFLICT_MODES = new Set(['Competing', 'Avoiding', 'Compromising', 'Collaborating', 'Accommodating', 'Competing vs Avoiding'])
 const PATTERNS = new Set(['Criticism', 'Contempt', 'Defensiveness', 'Stonewalling', 'Neutral'])
@@ -146,12 +146,20 @@ export function prepareAnalysisReview(text) {
 }
 
 function reviewedAnalysisMessages(snapshot) {
-  if (!snapshot || !Array.isArray(snapshot.messages) || snapshot.messages.length === 0 || snapshot.messages.length > MAX_MESSAGES) return null
+  if (!snapshot || !Array.isArray(snapshot.messages) || snapshot.messages.length === 0 || snapshot.messages.length > REMOTE_ANALYSIS_MAX_MESSAGES) return null
   if (snapshot.messages.some((message) => !message || typeof message !== 'object' || typeof message.text !== 'string')) return null
   const messages = snapshot.messages.map((message) => ({ sender: message?.sender, text: normalizeText(message?.text) }))
-  return messages.every((message) => isAnonymousSender(message.sender) && isCodePointLength(message.text, 1, MAX_MESSAGE_CHARACTERS))
+  return messages.every((message) => isAnonymousSender(message.sender)
+      && isCodePointLength(message.text, 1, REMOTE_ANALYSIS_MAX_MESSAGE_CHARACTERS))
     ? messages
     : null
+}
+
+export function exceedsRemoteAnalysisLimits(snapshot) {
+  if (!snapshot || !Array.isArray(snapshot.messages)) return false
+  return snapshot.messages.length > REMOTE_ANALYSIS_MAX_MESSAGES
+    || snapshot.messages.some(message => typeof message?.text === 'string'
+      && countCodePoints(normalizeText(message.text)) > REMOTE_ANALYSIS_MAX_MESSAGE_CHARACTERS)
 }
 
 function isRequestId(value) {
@@ -164,11 +172,11 @@ function hasOnlyKeys(value, allowed) {
 
 function isAnalysisResult(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || !hasOnlyKeys(value, ['schemaVersion', 'mode', 'intensityScore', 'conflictMode', 'messages'])) return false
-  if (value.schemaVersion !== 1 || !MODES.has(value.mode) || !Number.isInteger(value.intensityScore) || value.intensityScore < 0 || value.intensityScore > 100 || !CONFLICT_MODES.has(value.conflictMode) || !Array.isArray(value.messages) || value.messages.length === 0 || value.messages.length > MAX_MESSAGES) return false
+  if (value.schemaVersion !== 1 || !MODES.has(value.mode) || !Number.isInteger(value.intensityScore) || value.intensityScore < 0 || value.intensityScore > 100 || !CONFLICT_MODES.has(value.conflictMode) || !Array.isArray(value.messages) || value.messages.length === 0 || value.messages.length > REMOTE_ANALYSIS_MAX_MESSAGES) return false
   return value.messages.every(message => message && typeof message === 'object' && !Array.isArray(message)
     && hasOnlyKeys(message, ['sender', 'text', 'pattern', 'egoState', 'possibleInterpretation'])
     && isAnonymousSender(message.sender)
-    && isCodePointLength(message.text, 1, MAX_MESSAGE_CHARACTERS)
+    && isCodePointLength(message.text, 1, REMOTE_ANALYSIS_MAX_MESSAGE_CHARACTERS)
     && PATTERNS.has(message.pattern)
     && EGO_STATES.has(message.egoState)
     && isCodePointLength(message.possibleInterpretation, 1, 300))
@@ -189,6 +197,7 @@ function requestIdMatchesHeader(response, requestId) {
 export async function analyzeConversation(text, options = {}) {
   const fallback = (fallbackReason) => ({ result: localAnalyze(text), source: 'local', fallbackReason })
   if (!remoteOptionsReady(options)) return fallback('NOT_CONFIGURED')
+  if (exceedsRemoteAnalysisLimits(options.reviewedSnapshot)) return fallback('REMOTE_INPUT_LIMIT')
   const url = proxyUrl('/v1/analyses')
   const messages = reviewedAnalysisMessages(options.reviewedSnapshot)
   if (!url || !messages) return fallback('NOT_CONFIGURED')
@@ -231,6 +240,8 @@ import {
   MAX_MESSAGE_CHARACTERS,
   MAX_MESSAGES,
   MAX_PARTICIPANTS,
+  REMOTE_ANALYSIS_MAX_MESSAGE_CHARACTERS,
+  REMOTE_ANALYSIS_MAX_MESSAGES,
   countCodePoints,
   isAnonymousSender,
   isCodePointLength,

@@ -35,13 +35,13 @@ type RevenueCatBillingServiceOptions = {
 
 const unavailableSnapshot: BillingSnapshot = {
   availability: 'unavailable',
-  entitlementActive: false,
+  entitlementStatus: 'unknown',
   products: [],
 };
 
 const previewSnapshot: BillingSnapshot = {
   availability: 'preview',
-  entitlementActive: false,
+  entitlementStatus: 'unknown',
   products: [],
 };
 
@@ -79,11 +79,11 @@ export class RevenueCatBillingService implements BillingService {
     }
 
     const [offerings, customerInfo] = await Promise.all([
-      revenueCat.getOfferings(),
+      revenueCat.getOfferings().catch(() => null),
       revenueCat.getCustomerInfo(),
     ]);
     this.packagesByProductId.clear();
-    const products = (offerings.current?.availablePackages ?? [])
+    const products = (offerings?.current?.availablePackages ?? [])
       .filter((item) => this.configuredProductIds.has(item.product.identifier))
       .map((item) => {
         this.packagesByProductId.set(item.product.identifier, item);
@@ -92,7 +92,7 @@ export class RevenueCatBillingService implements BillingService {
 
     this.snapshot = {
       availability: products.length > 0 ? 'ready' : 'unavailable',
-      entitlementActive: this.isEntitlementActive(customerInfo),
+      entitlementStatus: this.entitlementStatus(customerInfo),
       products,
     };
     return this.snapshot;
@@ -184,7 +184,7 @@ export class RevenueCatBillingService implements BillingService {
   private applyCustomerInfo(customerInfo: RevenueCatCustomerInfo): BillingSnapshot {
     this.snapshot = {
       ...this.snapshot,
-      entitlementActive: this.isEntitlementActive(customerInfo),
+      entitlementStatus: this.entitlementStatus(customerInfo),
     };
     return this.snapshot;
   }
@@ -199,6 +199,10 @@ export class RevenueCatBillingService implements BillingService {
 
   private isEntitlementActive(customerInfo: RevenueCatCustomerInfo): boolean {
     return Boolean(customerInfo.entitlements.active[this.options.entitlementId]);
+  }
+
+  private entitlementStatus(customerInfo: RevenueCatCustomerInfo): 'free' | 'pro' {
+    return this.isEntitlementActive(customerInfo) ? 'pro' : 'free';
   }
 
   private isPreview(): boolean {

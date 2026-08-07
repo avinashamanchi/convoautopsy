@@ -15,6 +15,17 @@ const {
   scheduledOffsets,
 } = loadGateCore;
 
+const createPlannedWorkload = (loadGateCore as unknown as {
+  createPlannedWorkload?: (options: ReturnType<typeof parseLoadOptions>) => Readonly<{
+    scheduledRequests: number;
+    paddingRequests: number;
+    totalRequests: number;
+    analysisRequests: number;
+    responseRequests: number;
+    providerUnits: number;
+  }>;
+}).createPlannedWorkload!;
+
 type FetchBoundedJsonWithDeadline = (
   input: string,
   init: RequestInit,
@@ -30,24 +41,96 @@ const fetchBoundedJsonWithDeadline = (loadGateCore as unknown as {
   fetchBoundedJsonWithDeadline?: FetchBoundedJsonWithDeadline;
 }).fetchBoundedJsonWithDeadline!;
 
+type QuotaSafeWorkloadPlan = Readonly<{
+  totalRequests: number;
+  analysisRequests: number;
+  responseRequests: number;
+  analysisInstallations: number;
+  responseInstallations: number;
+  totalInstallations: number;
+}>;
+
+const createQuotaSafeWorkloadPlan = (loadGateCore as unknown as {
+  createQuotaSafeWorkloadPlan?: (totalRequests: number) => QuotaSafeWorkloadPlan;
+}).createQuotaSafeWorkloadPlan!;
+const createQuotaSafeWorkloadIdentity = (loadGateCore as unknown as {
+  createQuotaSafeWorkloadIdentity?: (
+    runId: string,
+    index: number,
+    plan: QuotaSafeWorkloadPlan,
+  ) => Readonly<{ installationToken: string; syntheticIp: string; route: '/v1/analyses' | '/v1/responses' }>;
+}).createQuotaSafeWorkloadIdentity!;
+const requireFreshFinalDiagnostics = (loadGateCore as unknown as {
+  requireFreshFinalDiagnostics?: (
+    observations: readonly Readonly<{ stage: string; activeReservations: number }>[] ,
+    finalInjectedStage: string,
+  ) => number;
+}).requireFreshFinalDiagnostics!;
+const fetchApiResponseWithDeadline = (loadGateCore as unknown as {
+  fetchApiResponseWithDeadline?: (
+    input: string,
+    init: RequestInit,
+    options: Readonly<{
+      timeoutMs: number;
+      maxBytes: number;
+      parentSignal: AbortSignal;
+      fetchImplementation?: typeof fetch;
+    }>,
+  ) => Promise<Readonly<{ ok: boolean; status: number; value?: unknown }>>;
+}).fetchApiResponseWithDeadline!;
+const createFixedWorkloadCohort = (loadGateCore as unknown as {
+  createFixedWorkloadCohort?: (totalRequests: number) => Readonly<{
+    strategy: 'fixed-pool';
+    installationPoolSize: number;
+    exercisedInstallations: number;
+  }>;
+}).createFixedWorkloadCohort!;
+
 describe('load gate runner contract', () => {
   it('uses the exact full and CI phase durations and bounded deadlines', () => {
     expect(parseLoadOptions([])).toMatchObject({
       sustainedRps: 5,
-      sustainedSeconds: 60,
+      sustainedSeconds: 3_600,
       burstRps: 20,
-      burstSeconds: 30,
+      burstSeconds: 300,
       readinessMs: 30_000,
       diagnosticsMs: 2_000,
       clientMs: 25_000,
     });
     expect(parseLoadOptions(['--ci'])).toMatchObject({ sustainedSeconds: 5, burstSeconds: 2 });
+    expect(createPlannedWorkload(parseLoadOptions([]))).toEqual({
+      scheduledRequests: 24_000,
+      paddingRequests: 0,
+      totalRequests: 24_000,
+      analysisRequests: 16_800,
+      responseRequests: 7_200,
+      providerUnits: 57_600,
+    });
+  });
+
+  it('reports the fixed short-workload pool separately from installations actually exercised', () => {
+    const ciRequestCount = 5 * 5 + 20 * 2;
+    const paddedRequestCount = ciRequestCount + (10 - (ciRequestCount % 10)) % 10;
+    const identities = Array.from({ length: paddedRequestCount }, (_, index) => createRequestIdentity('short-report-identity', index));
+
+    expect(createFixedWorkloadCohort(paddedRequestCount)).toEqual({
+      strategy: 'fixed-pool',
+      installationPoolSize: 100,
+      exercisedInstallations: new Set(identities.map(({ installationToken }) => installationToken)).size,
+    });
+    expect(new Set(identities.map(({ installationToken }) => installationToken)).size).toBe(70);
   });
 
   it('requires separate provider authorization and synthetic-content acknowledgement for non-loopback targets', () => {
     expect(() => parseLoadOptions(['--target', 'https://example.com'])).toThrow('Refusing non-loopback target');
     expect(() => parseLoadOptions(['--target', 'https://example.com', '--authorize-provider'])).toThrow('Refusing non-loopback target');
     expect(() => parseLoadOptions(['--target', 'https://example.com', '--synthetic-content'])).toThrow('Refusing non-loopback target');
+    expect(() => parseLoadOptions([
+      '--target', 'https://example.com', '--authorize-provider', '--synthetic-content',
+    ])).toThrow('explicit --sustained-seconds and --burst-seconds');
+    expect(() => parseLoadOptions([
+      '--target', 'https://example.com', '--authorize-provider', '--synthetic-content', '--sustained-seconds', '60',
+    ])).toThrow('explicit --sustained-seconds and --burst-seconds');
     expect(() => parseLoadOptions(['--target', 'http://127.0.0.1:8787'])).toThrow('fixture secret file');
     expect(parseLoadOptions([
       '--target',
@@ -65,10 +148,16 @@ describe('load gate runner contract', () => {
       'https://example.com',
       '--authorize-provider',
       '--synthetic-content',
+      '--sustained-seconds',
+      '60',
+      '--burst-seconds',
+      '30',
     ])).toMatchObject({
       target: 'https://example.com',
       startWrangler: false,
       mode: 'real-provider-soak',
+      sustainedSeconds: 60,
+      burstSeconds: 30,
     });
   });
 
@@ -129,6 +218,47 @@ describe('load gate runner contract', () => {
     expect(routesForFirstInstallation.filter((route) => route === '/v1/responses')).toHaveLength(3);
   });
 
+  it.each([
+    { rps: 5, seconds: 3_600, analyses: 12_600, responses: 5_400, analysisIds: 4_200, responseIds: 900, totalIds: 5_100 },
+    { rps: 20, seconds: 300, analyses: 4_200, responses: 1_800, analysisIds: 1_400, responseIds: 300, totalIds: 1_700 },
+  ])('builds a quota-safe real-provider cohort for $rps rps over $seconds seconds', ({ rps, seconds, analyses, responses, analysisIds, responseIds, totalIds }) => {
+    const plan = createQuotaSafeWorkloadPlan(rps * seconds);
+    const identities = Array.from({ length: plan.totalRequests }, (_, index) => (
+      createQuotaSafeWorkloadIdentity('long-profile-abcdef012345', index, plan)
+    ));
+    const counts = new Map<string, { analyses: number; responses: number }>();
+    for (const identity of identities) {
+      const current = counts.get(identity.installationToken) ?? { analyses: 0, responses: 0 };
+      if (identity.route === '/v1/analyses') current.analyses += 1;
+      else current.responses += 1;
+      counts.set(identity.installationToken, current);
+    }
+
+    expect(plan).toEqual({
+      totalRequests: rps * seconds,
+      analysisRequests: analyses,
+      responseRequests: responses,
+      analysisInstallations: analysisIds,
+      responseInstallations: responseIds,
+      totalInstallations: totalIds,
+    });
+    expect(Math.max(...[...counts.values()].map((value) => value.analyses))).toBeLessThanOrEqual(3);
+    expect(Math.max(...[...counts.values()].map((value) => value.responses))).toBeLessThanOrEqual(6);
+    expect(new Set(identities.map((identity) => identity.syntheticIp))).toEqual(new Set(['198.18.0.1']));
+    expect(exactRouteMix({ '/v1/analyses': analyses, '/v1/responses': responses }, rps * seconds)).toBe(true);
+  });
+
+  it('sizes the complete 24,000-request release profile without exceeding Free admission allowances', () => {
+    expect(createQuotaSafeWorkloadPlan(24_000)).toEqual({
+      totalRequests: 24_000,
+      analysisRequests: 16_800,
+      responseRequests: 7_200,
+      analysisInstallations: 5_600,
+      responseInstallations: 1_200,
+      totalInstallations: 6_800,
+    });
+  });
+
   it('requires an intentional repeated-token probe to observe production RATE_LIMITED behavior', () => {
     expect(abusiveRateLimitObserved([
       { route: '/v1/analyses', status: 200, latencyMs: 1, code: 'allowed', injected: true },
@@ -185,6 +315,16 @@ describe('load gate runner contract', () => {
       latencyMs: { p50: 100, p95: 300, p99: 300 },
       activeReservations: 'not-measured',
     });
+  });
+
+  it('refuses to reuse a capacity diagnostic as the final token-abuse diagnostic', () => {
+    expect(() => requireFreshFinalDiagnostics([
+      { stage: 'capacity', activeReservations: 0 },
+    ], 'token-abuse')).toThrow('fresh final diagnostics');
+    expect(requireFreshFinalDiagnostics([
+      { stage: 'capacity', activeReservations: 0 },
+      { stage: 'token-abuse', activeReservations: 0 },
+    ], 'token-abuse')).toBe(0);
   });
 
   it.each([
@@ -265,5 +405,53 @@ describe('load gate runner contract', () => {
 
     expect(result).toEqual({ ok: true, status: 200, value: { activeReservations: 0 } });
     expect(requestSignal?.aborted).toBe(false);
+  });
+
+  it('keeps the request deadline active through a stalled error-body read', async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"error":'));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const fetchImplementation = (async () => new Response(body, { status: 503 })) as typeof fetch;
+    const started = performance.now();
+
+    const error = await fetchApiResponseWithDeadline('https://load.example/v1/analyses', {}, {
+      timeoutMs: 20,
+      maxBytes: 16 * 1_024,
+      parentSignal: new AbortController().signal,
+      fetchImplementation,
+    }).catch((caught: unknown) => caught);
+
+    expect(performance.now() - started).toBeLessThan(500);
+    expect(error).toMatchObject({ name: 'TimeoutError' });
+    expect(cancelled).toBe(true);
+  });
+
+  it('keeps the request deadline active through stalled successful-body cancellation', async () => {
+    let requestSignal: AbortSignal | undefined;
+    const body = {
+      cancel: () => new Promise<void>(() => undefined),
+    } as unknown as ReadableStream<Uint8Array>;
+    const fetchImplementation = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requestSignal = init?.signal as AbortSignal;
+      return { ok: true, status: 200, body } as Response;
+    }) as typeof fetch;
+    const started = performance.now();
+
+    const error = await fetchApiResponseWithDeadline('https://load.example/v1/analyses', {}, {
+      timeoutMs: 20,
+      maxBytes: 16 * 1_024,
+      parentSignal: new AbortController().signal,
+      fetchImplementation,
+    }).catch((caught: unknown) => caught);
+
+    expect(performance.now() - started).toBeLessThan(500);
+    expect(error).toMatchObject({ name: 'TimeoutError' });
+    expect(requestSignal?.aborted).toBe(true);
   });
 });

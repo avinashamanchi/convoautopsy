@@ -27,10 +27,10 @@ const localResult: AnalysisResult = {
   messages: [{ sender: 'Person A', text: 'Can we talk?', pattern: 'Neutral', egoState: 'Adult', possibleInterpretation: 'This may be neutral.' }],
 };
 
-const unavailable: BillingSnapshot = { availability: 'unavailable', entitlementActive: false, products: [] };
+const unavailable: BillingSnapshot = { availability: 'unavailable', entitlementStatus: 'free', products: [] };
 const ready: BillingSnapshot = {
   availability: 'ready',
-  entitlementActive: false,
+  entitlementStatus: 'free',
   products: [{
     id: 'com.avinashamanchi.convoautopsy.pro.monthly',
     title: 'Monthly',
@@ -42,8 +42,8 @@ const ready: BillingSnapshot = {
 function createBillingService(snapshot: BillingSnapshot, overrides: Partial<BillingService> = {}): BillingService {
   return {
     load: jest.fn().mockResolvedValue(snapshot),
-    purchase: jest.fn().mockResolvedValue({ ...snapshot, entitlementActive: true }),
-    restore: jest.fn().mockResolvedValue({ ...snapshot, entitlementActive: true }),
+    purchase: jest.fn().mockResolvedValue({ ...snapshot, entitlementStatus: 'pro' }),
+    restore: jest.fn().mockResolvedValue({ ...snapshot, entitlementStatus: 'pro' }),
     subscribe: jest.fn(() => () => undefined),
     getAppUserId: jest.fn().mockResolvedValue('$RCAnonymousID:test'),
     ...overrides,
@@ -137,7 +137,7 @@ it('discloses renewal, cancellation, restore, uninstall, and App Store account b
 });
 
 it('describes Expo Go as preview-only and names the native purchase test builds', async () => {
-  renderUpgrade(createBillingService({ availability: 'preview', entitlementActive: false, products: [] }));
+  renderUpgrade(createBillingService({ availability: 'preview', entitlementStatus: 'unknown', products: [] }));
 
   expect(await screen.findByText('Expo Go is preview-only for purchases. Use a development, TestFlight, or App Store build to buy or restore Convo Pro.')).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Continue Free' })).toBeTruthy();
@@ -167,21 +167,21 @@ it('starts only one purchase when the product is pressed twice before billing up
   fireEvent.press(product);
   await waitFor(() => expect(purchase).toHaveBeenCalledTimes(1));
 
-  await act(async () => { pendingPurchase.resolve({ ...ready, entitlementActive: true }); });
+  await act(async () => { pendingPurchase.resolve({ ...ready, entitlementStatus: 'pro' }); });
   await waitFor(() => expect(purchase).toHaveBeenCalledTimes(1));
 });
 
 it('does not queue a restore when a purchase is already starting', async () => {
   const pendingPurchase = deferred<BillingSnapshot>();
   const purchase = jest.fn(() => pendingPurchase.promise);
-  const restore = jest.fn().mockResolvedValue({ ...ready, entitlementActive: true });
+  const restore = jest.fn().mockResolvedValue({ ...ready, entitlementStatus: 'pro' });
   renderUpgrade(createBillingService(ready, { purchase, restore }));
 
   fireEvent.press(await screen.findByRole('button', { name: 'Choose Monthly for CA$6.49 per month' }));
   fireEvent.press(screen.getByRole('button', { name: 'Restore Purchases' }));
   await waitFor(() => expect(purchase).toHaveBeenCalledTimes(1));
 
-  await act(async () => { pendingPurchase.resolve({ ...ready, entitlementActive: true }); });
+  await act(async () => { pendingPurchase.resolve({ ...ready, entitlementStatus: 'pro' }); });
   await waitFor(() => expect(restore).not.toHaveBeenCalled());
 });
 
@@ -199,8 +199,8 @@ it('shows an accessible retry and selectable URL when opening Terms fails', asyn
 });
 
 it('blocks the eleventh free save without deleting existing reports', async () => {
-  expect(canSaveReport(10, false)).toEqual({ allowed: false, reason: 'FREE_HISTORY_LIMIT' });
-  expect(canSaveReport(10, true)).toEqual({ allowed: true });
+  expect(canSaveReport(10, 'free')).toEqual({ allowed: false, reason: 'FREE_HISTORY_LIMIT' });
+  expect(canSaveReport(10, 'pro')).toEqual({ allowed: true });
 
   const repository = new MemoryRepository(Array.from({ length: 10 }, (_, index) => savedReport(index)));
   render(
@@ -216,4 +216,29 @@ it('blocks the eleventh free save without deleting existing reports', async () =
   await waitFor(() => expect(router.push).toHaveBeenCalledWith('/upgrade?source=history-limit'));
   expect(repository.save).not.toHaveBeenCalled();
   expect(repository.reports).toHaveLength(10);
+});
+
+it.each(['loading', 'unknown'] as const)('uses the conservative Free save cap while billing is %s', async (entitlementStatus) => {
+  expect(canSaveReport(0, entitlementStatus)).toEqual({ allowed: true });
+  expect(canSaveReport(10, entitlementStatus)).toEqual({ allowed: false, reason: 'FREE_HISTORY_LIMIT' });
+  const repository = new MemoryRepository([]);
+  const save = jest.spyOn(repository, 'save');
+  const count = jest.spyOn(repository, 'count');
+  const load = entitlementStatus === 'loading'
+    ? jest.fn(() => new Promise<BillingSnapshot>(() => undefined))
+    : jest.fn().mockResolvedValue({ ...unavailable, availability: 'preview', entitlementStatus: 'unknown' });
+  render(
+    <BillingProvider service={createBillingService(unavailable, { load })}>
+      <ReportRepositoryProvider preferenceStore={preferences} repository={repository}>
+        <ResultScreen createReportId={() => 'new-report'} />
+      </ReportRepositoryProvider>
+    </BillingProvider>,
+  );
+  fireEvent.press(await screen.findByRole('button', { name: 'Save analysis' }));
+  const saveButton = await screen.findByRole('button', { name: 'Save privately' });
+  fireEvent.press(saveButton);
+
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+  expect(count).toHaveBeenCalledTimes(1);
+  expect(repository.reports).toHaveLength(1);
 });

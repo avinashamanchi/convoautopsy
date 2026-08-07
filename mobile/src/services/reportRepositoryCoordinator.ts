@@ -1,11 +1,12 @@
 import type { ReportRepository, SavedReport } from './reportRepository';
 import type { ResponseDraft } from '../domain/analysis';
 import { canSaveReport, type SaveGate } from '../billing/saveGate';
+import type { EntitlementStatus } from '../billing/contracts';
 
 export type RepositorySnapshot = { revision: number; deletingAll: boolean };
 
 export type InvalidatingReportRepository = ReportRepository & {
-  saveIfAllowed(report: SavedReport, pro: boolean): Promise<SaveGate>;
+  saveIfAllowed(report: SavedReport, entitlementStatus: EntitlementStatus): Promise<SaveGate>;
   appendResponseDraft(reportId: string, draft: ResponseDraft): Promise<SavedReport | null>;
   getSnapshot(): RepositorySnapshot;
   subscribe(listener: (snapshot: RepositorySnapshot) => void): () => void;
@@ -65,8 +66,10 @@ export function createInvalidatingReportRepository(repository: ReportRepository)
     getTrendSummary: (fromInclusive, toExclusive) => read(() => repository.getTrendSummary(fromInclusive, toExclusive)),
     get: (id) => read(() => repository.get(id)),
     save: (report: SavedReport) => mutate(() => repository.save(report)),
-    saveIfAllowed: (report: SavedReport, pro: boolean) => mutate(async () => {
-      const gate = pro ? canSaveReport(0, true) : canSaveReport(await repository.count(), false);
+    saveIfAllowed: (report: SavedReport, entitlementStatus: EntitlementStatus) => mutate(async () => {
+      const gate = entitlementStatus === 'pro'
+        ? canSaveReport(0, entitlementStatus)
+        : canSaveReport(await repository.count(), entitlementStatus);
       if (!gate.allowed) return gate;
       await repository.save(report);
       return gate;

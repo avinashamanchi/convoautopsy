@@ -94,7 +94,7 @@ describe('atomic AI admission', () => {
     if (result.allowed) await release(result.leaseId);
   });
 
-  it('refunds failed provider work and opens a bounded global circuit after five rolling failures', async () => {
+  it('refunds failed user allowance, retains provider cost, and opens a bounded global circuit after five rolling failures', async () => {
     const now = Date.parse('2099-08-07T12:00:00Z');
     for (let index = 0; index < 5; index += 1) {
       const result = await reserve({ plan: 'pro', subjectDigest: `circuit-failure-${index}`, now: now + index });
@@ -102,7 +102,7 @@ describe('atomic AI admission', () => {
       if (result.allowed) await completeFailure(result.leaseId, now + index);
     }
 
-    expect(await counts()).toEqual({ inflight: 0, budget: 0, usage: 0 });
+    expect(await counts()).toEqual({ inflight: 0, budget: 5, usage: 0 });
     await expect(reserve({ plan: 'pro', subjectDigest: 'circuit-open', now: now + 5 })).resolves.toMatchObject({
       allowed: false,
       code: 'PROVIDER_UNAVAILABLE',
@@ -128,7 +128,7 @@ describe('atomic AI admission', () => {
 
     await expect(completeFailure(oldLease, Date.parse('2099-09-01T00:00:00.200Z'))).resolves.toBeUndefined();
 
-    expect(await counts()).toEqual({ inflight: 0, budget: 1, usage: 1 });
+    expect(await counts()).toEqual({ inflight: 0, budget: 4, usage: 1 });
     await runInDurableObject(stub(), (_instance, state) => {
       expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM provider_failures').one().count).toBe(1);
     });
@@ -190,6 +190,128 @@ describe('atomic AI admission', () => {
     if (recovered.allowed) await release(recovered.leaseId);
   });
 
+  it('retains global provider cost while refunding unusable invalid output across rotating subjects', async () => {
+    const now = Date.parse('2099-08-07T12:00:00Z');
+    for (let index = 0; index < 333; index += 1) {
+      const result = await reserve({
+        plan: 'pro',
+        route: '/v1/analyses',
+        subjectDigest: `distributed-invalid-${index}`,
+        now: now + index,
+      });
+      if (!result.allowed) throw new Error(`Expected distributed reservation ${index}`);
+      await completeAdmission(namespace(), result.leaseId, 'invalid_output', now + index);
+    }
+
+    expect(await counts()).toEqual({ inflight: 0, budget: 999, usage: 0 });
+    await expect(reserve({
+      plan: 'pro',
+      route: '/v1/analyses',
+      subjectDigest: 'distributed-invalid-final',
+      now: now + 334,
+    })).resolves.toMatchObject({ allowed: false, code: 'DAILY_BUDGET_REACHED' });
+  });
+
+  it('retains provider cost on the invocation UTC day when failure completes after midnight', async () => {
+    const beforeMidnight = Date.parse('2099-08-07T23:59:59.900Z');
+    const leaseId = await reserveAllowed({
+      plan: 'pro',
+      route: '/v1/analyses',
+      subjectDigest: 'provider-cost-cross-midnight',
+      now: beforeMidnight,
+    });
+
+    await completeAdmission(namespace(), leaseId, 'provider_failure', Date.parse('2099-08-08T00:00:00.100Z'));
+
+    expect(await counts()).toEqual({ inflight: 0, budget: 3, usage: 0 });
+    await runInDurableObject(stub(), (_instance, state) => {
+      expect(state.storage.sql.exec<{ provider_units: number }>(
+        'SELECT provider_units FROM daily_budget WHERE day = ?',
+        '2099-08-07',
+      ).one().provider_units).toBe(3);
+    });
+  });
+
+  it('does not advance the outage circuit for five caller-content rejections', async () => {
+    const now = Date.parse('2099-08-07T12:00:00Z');
+    for (let index = 0; index < 5; index += 1) {
+      const result = await reserve({
+        plan: 'pro',
+        subjectDigest: `caller-rejection-${index}`,
+        now: now + index,
+      });
+      if (!result.allowed) throw new Error('Expected caller-rejection reservation');
+      await completeAdmission(namespace(), result.leaseId, 'caller_error', now + index);
+    }
+
+    const next = await reserve({ plan: 'pro', subjectDigest: 'caller-rejection-next', now: now + 5 });
+    expect(next.allowed).toBe(true);
+    if (next.allowed) await release(next.leaseId);
+    await runInDurableObject(stub(), (_instance, state) => {
+      expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM provider_failures').one().count).toBe(0);
+    });
+    expect(await counts()).toEqual({ inflight: 0, budget: 6, usage: 1 });
+  });
+
+  it('opens a bounded safe circuit immediately for an upstream authentication or model configuration failure', async () => {
+    const now = Date.parse('2099-08-07T12:00:00Z');
+    const result = await reserve({ plan: 'pro', subjectDigest: 'configuration-failure', now });
+    if (!result.allowed) throw new Error('Expected configuration-failure reservation');
+    await completeAdmission(namespace(), result.leaseId, 'configuration_failure', now + 1);
+
+    await expect(reserve({ plan: 'pro', subjectDigest: 'configuration-blocked', now: now + 2 })).resolves.toMatchObject({
+      allowed: false,
+      code: 'PROVIDER_UNAVAILABLE',
+      retryAfterSeconds: 30,
+    });
+
+    const probe = await reserve({ plan: 'pro', subjectDigest: 'configuration-probe', now: now + 30_001 });
+    expect(probe.allowed).toBe(true);
+    if (probe.allowed) await completeAdmission(namespace(), probe.leaseId, 'success', now + 30_002);
+  });
+
+  it('refunds both user allowance and global budget only for a proven pre-provider abort', async () => {
+    const now = Date.parse('2099-08-07T12:00:00Z');
+    const leaseId = await reserveAllowed({
+      plan: 'pro',
+      route: '/v1/analyses',
+      subjectDigest: 'proven-pre-provider-abort',
+      now,
+    });
+
+    await completeAdmission(namespace(), leaseId, 'pre_provider_abort', now + 1);
+
+    expect(await counts()).toEqual({ inflight: 0, budget: 0, usage: 0 });
+  });
+
+  it('retries a response-lost completion idempotently without double-refunding', async () => {
+    const now = Date.parse('2099-08-07T12:00:00Z');
+    const leaseId = await reserveAllowed({
+      plan: 'pro',
+      route: '/v1/analyses',
+      subjectDigest: 'response-lost-completion',
+      now,
+    });
+    const actual = stub();
+    let attempts = 0;
+    const responseLostNamespace = {
+      idFromName: (name: string) => namespace().idFromName(name),
+      get: () => ({
+        fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+          attempts += 1;
+          const response = await actual.fetch(input, init);
+          if (attempts === 1) throw new Error('response lost after durable completion');
+          return response;
+        },
+      }),
+    } as unknown as DurableObjectNamespace;
+
+    await completeAdmission(responseLostNamespace, leaseId, 'invalid_output', now + 1);
+
+    expect(attempts).toBe(2);
+    expect(await counts()).toEqual({ inflight: 0, budget: 3, usage: 0 });
+  });
+
   it('returns the post-reservation global in-flight count for safe bucketing', async () => {
     const first = await reserve({ subjectDigest: 'metric-inflight-first' });
     const second = await reserve({ subjectDigest: 'metric-inflight-second' });
@@ -233,6 +355,32 @@ describe('atomic AI admission', () => {
 
     expect(settled).toBe(true);
     await result;
+    vi.useRealTimers();
+  });
+
+  it.each(['success', 'provider_failure'] as const)('bounds and retries a stalled %s completion before returning a retryable failure', async (outcome) => {
+    vi.useFakeTimers();
+    let attempts = 0;
+    const hangingNamespace = {
+      idFromName: () => ({ toString: () => 'global' }),
+      get: () => ({
+        fetch: () => {
+          attempts += 1;
+          return new Promise<Response>(() => undefined);
+        },
+      }),
+    } as unknown as DurableObjectNamespace;
+    let caught: unknown;
+    const result = completeAdmission(hangingNamespace, 'stalled-completion', outcome, Date.now()).catch((error: unknown) => {
+      caught = error;
+    });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await result;
+
+    expect(attempts).toBe(3);
+    expect(caught).toMatchObject({ code: 'INTERNAL_ERROR', status: 503, retryAfterSeconds: expect.any(Number) });
+    expect(vi.getTimerCount()).toBe(0);
     vi.useRealTimers();
   });
 
@@ -485,6 +633,28 @@ describe('atomic AI admission', () => {
     expect((await counts()).inflight).toBe(1);
     await runInDurableObject(stub(), async (_instance, state) => {
       expect(await state.storage.getAlarm()).toBe(future);
+    });
+  });
+
+  it('reconciles an expired unresolved lease by refunding user allowance but retaining provider cost', async () => {
+    const leaseId = await reserveAllowed({
+      plan: 'pro',
+      route: '/v1/analyses',
+      subjectDigest: 'expired-unresolved-accounting',
+    });
+    await runInDurableObject(stub(), async (_instance, state) => {
+      state.storage.sql.exec('UPDATE inflight SET expires_at = ? WHERE lease_id = ?', Date.now() - 1, leaseId);
+      await state.storage.setAlarm(Date.now() + 1_000);
+    });
+
+    expect(await runDurableObjectAlarm(stub())).toBe(true);
+
+    expect(await counts()).toEqual({ inflight: 0, budget: 3, usage: 0 });
+    await runInDurableObject(stub(), (_instance, state) => {
+      expect(state.storage.sql.exec<{ reason: string }>(
+        'SELECT reason FROM accounting_reconciliation ORDER BY observed_at DESC LIMIT 1',
+      ).one().reason).toBe('expired_unresolved');
+      expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM lease_accounting').one().count).toBe(0);
     });
   });
 

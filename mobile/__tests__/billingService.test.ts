@@ -41,7 +41,7 @@ it('maps only configured products and reads convo_pro entitlement', async () => 
 
   await expect(service.load()).resolves.toMatchObject({
     availability: 'ready',
-    entitlementActive: true,
+    entitlementStatus: 'pro',
     products: [
       { id: monthlyId, localizedPrice: '$7.99', period: 'monthly' },
       { id: annualId, localizedPrice: 'CA$59.99', period: 'annual' },
@@ -95,7 +95,28 @@ it('marks an empty configured offering as unavailable', async () => {
     moduleLoader: async () => fakeRevenueCat,
   });
 
-  await expect(service.load()).resolves.toMatchObject({ availability: 'unavailable', products: [] });
+  await expect(service.load()).resolves.toMatchObject({ availability: 'unavailable', entitlementStatus: 'pro', products: [] });
+  await expect(service.getAppUserId()).resolves.toBe('$RCAnonymousID:test-user');
+});
+
+it('still verifies entitlement and identity when offerings fail transiently', async () => {
+  const fakeRevenueCat = createRevenueCatFake({
+    getOfferings: jest.fn().mockRejectedValue(new Error('catalog temporarily unavailable')),
+  });
+  const service = new RevenueCatBillingService({
+    apiKey: 'appl_public',
+    entitlementId: 'convo_pro',
+    productIds: [monthlyId],
+    executionEnvironment: 'standalone',
+    moduleLoader: async () => fakeRevenueCat,
+  });
+
+  await expect(service.load()).resolves.toEqual({
+    availability: 'unavailable',
+    entitlementStatus: 'pro',
+    products: [],
+  });
+  await expect(service.getAppUserId()).resolves.toBe('$RCAnonymousID:test-user');
 });
 
 it('turns a native purchase cancellation into a PurchaseCancelledError', async () => {
@@ -136,7 +157,7 @@ it('keeps a pre-initialization subscription active until it is unsubscribed', as
 
   expect(listener).toHaveBeenCalledWith({
     availability: 'ready',
-    entitlementActive: false,
+    entitlementStatus: 'free',
     products: [
       { id: monthlyId, title: 'Convo Pro Monthly', localizedPrice: '$7.99', period: 'monthly' },
     ],

@@ -1,6 +1,13 @@
 import { parseConversation, redactKnownParticipantNames } from './analyzeConversation'
 import { fetchBoundedJson } from './fetchBoundedJson'
-import { isAnonymousSender, isCodePointLength, normalizeText } from './textLimits'
+import {
+  isAnonymousSender,
+  isCodePointLength,
+  normalizeText,
+  REMOTE_ANALYSIS_MAX_MESSAGE_CHARACTERS,
+  REMOTE_ANALYSIS_MAX_MESSAGES,
+  REMOTE_RESPONSE_MAX_INTERPRETATION_CHARACTERS,
+} from './textLimits'
 
 const TEMPLATES = {
   resolve: {
@@ -205,7 +212,7 @@ function localCraftResponse({ goal, tone }) {
   return templates.map((t, i) => ({ id: i + 1, text: t.text, hint: t.hint }))
 }
 
-const CONSENT_VERSION = '2026-08-07'
+const CONSENT_VERSION = '2026-08-07.2'
 const MAX_MESSAGES = 100
 const MAX_MESSAGE_LENGTH = 1000
 const CONFLICT_MODES = new Set(['Competing', 'Avoiding', 'Compromising', 'Collaborating', 'Accommodating', 'Competing vs Avoiding'])
@@ -284,7 +291,7 @@ export function prepareResponseReview(params) {
 }
 
 function reviewedResponsePayload(snapshot) {
-  if (!snapshot || !snapshot.analysis || !Array.isArray(snapshot.messages) || snapshot.messages.length === 0 || snapshot.messages.length > MAX_MESSAGES) return null
+  if (!snapshot || !snapshot.analysis || !Array.isArray(snapshot.messages) || snapshot.messages.length === 0 || snapshot.messages.length > REMOTE_ANALYSIS_MAX_MESSAGES) return null
   if (snapshot.messages.some((message) => !message
     || typeof message !== 'object'
     || typeof message.text !== 'string'
@@ -297,10 +304,10 @@ function reviewedResponsePayload(snapshot) {
     possibleInterpretation: normalizeText(message?.possibleInterpretation),
   }))
   if (messages.some((message) => !isAnonymousSender(message.sender)
-    || !isCodePointLength(message.text, 1, MAX_MESSAGE_LENGTH)
+    || !isCodePointLength(message.text, 1, REMOTE_ANALYSIS_MAX_MESSAGE_CHARACTERS)
     || !PATTERNS.has(message.pattern)
     || !EGO_STATES.has(message.egoState)
-    || !isCodePointLength(message.possibleInterpretation, 1, 300))) return null
+    || !isCodePointLength(message.possibleInterpretation, 1, REMOTE_RESPONSE_MAX_INTERPRETATION_CHARACTERS))) return null
   if (!isAnonymousSender(snapshot.sender)
     || typeof snapshot.goal !== 'string'
     || typeof snapshot.tone !== 'string'
@@ -314,6 +321,17 @@ function reviewedResponsePayload(snapshot) {
     || analysis.intensityScore > 100
     || !CONFLICT_MODES.has(analysis.conflictMode)) return null
   return { sender: snapshot.sender, goal: snapshot.goal, tone: snapshot.tone, analysis }
+}
+
+export function exceedsRemoteResponseLimits(snapshot) {
+  if (!snapshot || !Array.isArray(snapshot.messages)) return false
+  return snapshot.messages.length > REMOTE_ANALYSIS_MAX_MESSAGES
+    || snapshot.messages.some((message) => (
+      typeof message?.text === 'string' && Array.from(message.text).length > REMOTE_ANALYSIS_MAX_MESSAGE_CHARACTERS
+    ) || (
+      typeof message?.possibleInterpretation === 'string'
+      && Array.from(message.possibleInterpretation).length > REMOTE_RESPONSE_MAX_INTERPRETATION_CHARACTERS
+    ))
 }
 
 function hasOnlyKeys(value, allowed) {
@@ -344,6 +362,7 @@ export async function craftResponse(params, options = {}) {
   const fallback = (fallbackReason) => ({ drafts: localCraftResponse(params), source: 'local', fallbackReason })
   if (!remoteOptionsReady(options)) return fallback('NOT_CONFIGURED')
   const url = proxyUrl('/v1/responses')
+  if (exceedsRemoteResponseLimits(options.reviewedSnapshot)) return fallback('REMOTE_INPUT_LIMIT')
   const reviewed = reviewedResponsePayload(options.reviewedSnapshot)
   if (!url || !reviewed) return fallback('NOT_CONFIGURED')
   try {

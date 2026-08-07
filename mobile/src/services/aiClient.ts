@@ -8,6 +8,21 @@ import {
 import { fetch as expoFetch } from 'expo/fetch';
 import type { ResponseGoal, ResponseTone } from '../domain/responseCrafter';
 import { CONSENT_VERSION, SecureStorageUnavailableError, type ConsentRecord } from './consentStore';
+import {
+  REMOTE_ANALYSIS_MAX_MESSAGES,
+  REMOTE_ANALYSIS_MAX_RESPONSE_BYTES,
+  REMOTE_ANALYSIS_MAX_TEXT_CODE_POINTS,
+  REMOTE_INTERPRETATION_MAX_CODE_POINTS,
+  REMOTE_DRAFT_MAX_RESPONSE_BYTES,
+} from './remoteLimits';
+
+export {
+  REMOTE_ANALYSIS_MAX_MESSAGES,
+  REMOTE_ANALYSIS_MAX_RESPONSE_BYTES,
+  REMOTE_ANALYSIS_MAX_TEXT_CODE_POINTS,
+  REMOTE_INTERPRETATION_MAX_CODE_POINTS,
+  REMOTE_DRAFT_MAX_RESPONSE_BYTES,
+} from './remoteLimits';
 
 export type AiClientErrorCode =
   | 'OFFLINE'
@@ -124,7 +139,7 @@ export function createAiClient({
         signal: requestController.signal,
       });
       ensureActive();
-      const body = await readBoundedJson(response, requestController.signal);
+      const body = await readBoundedJson(response, requestController.signal, REMOTE_ANALYSIS_MAX_RESPONSE_BYTES);
       ensureActive();
       if (!response.ok) throw publicError(response, body);
       return validAnalysis(response, body);
@@ -207,7 +222,7 @@ export function createResponseClient({
         signal: requestController.signal,
       });
       ensureActive();
-      const body = await readBoundedJson(response, requestController.signal);
+      const body = await readBoundedJson(response, requestController.signal, REMOTE_DRAFT_MAX_RESPONSE_BYTES);
       ensureActive();
       if (!response.ok) throw publicError(response, body);
       return validResponseDraft(response, body);
@@ -247,7 +262,8 @@ function routeUrl(endpoint: string | undefined, path: '/v1/analyses' | '/v1/resp
 function toReviewedResponseInput(input: AiResponseRequest): AiResponseRequest {
   if (!/^Person [A-Z]$/.test(input.sender)
     || !['resolve', 'boundary', 'feelings', 'understand', 'apologize', 'request'].includes(input.goal)
-    || !['empathetic', 'assertive', 'deescalating', 'direct', 'diplomatic'].includes(input.tone)) {
+    || !['empathetic', 'assertive', 'deescalating', 'direct', 'diplomatic'].includes(input.tone)
+    || !withinRemoteResponseBounds(input.analysis.messages)) {
     throw new AiClientError('INVALID_RESPONSE');
   }
   const analysis = AnalysisResultSchema.safeParse({
@@ -270,10 +286,28 @@ function toReviewedResponseInput(input: AiResponseRequest): AiResponseRequest {
 }
 
 function toAnonymousMessages(messages: readonly Readonly<ParsedMessage>[]) {
-  if (messages.length === 0 || messages.some((message) => !/^Person [A-Z]$/.test(message.sender) || !message.text)) {
+  if (!withinRemoteMessageBounds(messages)
+    || messages.some((message) => !/^Person [A-Z]$/.test(message.sender) || !message.text)) {
     throw new AiClientError('INVALID_RESPONSE');
   }
   return messages.map(({ sender, text }) => ({ sender, text }));
+}
+
+function withinRemoteMessageBounds(messages: readonly Readonly<{ text: string }>[]): boolean {
+  return messages.length > 0
+    && messages.length <= REMOTE_ANALYSIS_MAX_MESSAGES
+    && messages.every(({ text }) => Array.from(text).length > 0
+      && Array.from(text).length <= REMOTE_ANALYSIS_MAX_TEXT_CODE_POINTS);
+}
+
+function withinRemoteResponseBounds(
+  messages: readonly Readonly<{ text: string; possibleInterpretation: string }>[],
+): boolean {
+  return withinRemoteMessageBounds(messages)
+    && messages.every(({ possibleInterpretation }) => (
+      Array.from(possibleInterpretation).length > 0
+      && Array.from(possibleInterpretation).length <= REMOTE_INTERPRETATION_MAX_CODE_POINTS
+    ));
 }
 
 async function requireBillingIdentity(getAppUserId: () => Promise<string | null>): Promise<string> {
@@ -289,8 +323,7 @@ async function requireBillingIdentity(getAppUserId: () => Promise<string | null>
   }
 }
 
-async function readBoundedJson(response: Response, signal: AbortSignal): Promise<unknown> {
-  const maximumBytes = 32_768;
+async function readBoundedJson(response: Response, signal: AbortSignal, maximumBytes: number): Promise<unknown> {
   const body = response.body;
   if (!body || typeof body.getReader !== 'function') {
     await body?.cancel?.().catch(() => undefined);
@@ -416,6 +449,9 @@ function publicError(response: Response, body: unknown): AiClientError {
   if (response.status === 429 && body.error.code === 'PLAN_LIMIT_REACHED') return new AiClientError('PLAN_LIMIT_REACHED', retryAfterSeconds);
   if (response.status === 503 && body.error.code === 'SERVICE_BUSY') return new AiClientError('SERVICE_BUSY', retryAfterSeconds);
   if (response.status === 503 && body.error.code === 'DAILY_BUDGET_REACHED') return new AiClientError('DAILY_BUDGET_REACHED', retryAfterSeconds);
+  if (response.status === 503 && (body.error.code === 'ENTITLEMENT_UNAVAILABLE' || body.error.code === 'INTERNAL_ERROR')) {
+    return new AiClientError('SERVICE_UNAVAILABLE', retryAfterSeconds);
+  }
   if (response.status === 503 && body.error.code === 'PROVIDER_UNAVAILABLE') return new AiClientError('SERVICE_UNAVAILABLE', retryAfterSeconds);
   return new AiClientError('INVALID_RESPONSE');
 }

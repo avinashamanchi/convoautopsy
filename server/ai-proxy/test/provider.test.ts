@@ -36,6 +36,47 @@ function settleWithin(promise: Promise<unknown>, timeoutMs = 30): Promise<Settle
 }
 
 describe('Groq adapter response validation', () => {
+  it.each([
+    { status: 400, expectedName: 'ProviderRequestRejectedError' },
+    { status: 413, expectedName: 'ProviderRequestRejectedError' },
+    { status: 422, expectedName: 'ProviderRequestRejectedError' },
+    { status: 401, expectedName: 'ProviderConfigurationError' },
+    { status: 403, expectedName: 'ProviderConfigurationError' },
+    { status: 404, expectedName: 'ProviderConfigurationError' },
+    { status: 408, expectedName: 'ProviderUnavailableError' },
+    { status: 429, expectedName: 'ProviderUnavailableError' },
+    { status: 500, expectedName: 'ProviderUnavailableError' },
+  ])('classifies upstream HTTP $status as $expectedName', async ({ status, expectedName }) => {
+    const provider = createGroqProvider('test-only-key', async () => new Response('{}', { status }));
+
+    const error = await provider.analyze([{ sender: 'Person A', text: 'hello' }]).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).constructor.name).toBe(expectedName);
+  });
+
+  it('keeps the provider deadline active while draining a stalled HTTP error body', async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"error":'));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const provider = createGroqProvider(
+      'test-only-key',
+      async () => new Response(body, { status: 400 }),
+      { timeoutMs: 10 },
+    );
+
+    const error = await provider.analyze([{ sender: 'Person A', text: 'hello' }]).catch((caught: unknown) => caught);
+
+    expect((error as Error).constructor.name).toBe('ProviderRequestRejectedError');
+    expect(cancelled).toBe(true);
+  });
+
   it('maps malformed upstream HTTP JSON to an invalid provider response', async () => {
     const provider = createGroqProvider('test-only-key', async () => new Response(null, {
       status: 200,
@@ -73,6 +114,53 @@ describe('Groq adapter response validation', () => {
     expect(userPayload).not.toHaveProperty('consentVersion');
     expect(userPayload).not.toHaveProperty('schemaVersion');
     expect(userPayload.analysis).not.toHaveProperty('mode');
+    const systemPrompt = messages.find((message) => message.role === 'system')?.content ?? '';
+    for (const field of ['id', 'text', 'hint']) expect(systemPrompt).toContain(field);
+    expect(systemPrompt).toMatch(/one JSON object.*no extra keys/is);
+    expect(systemPrompt).toMatch(/untrusted data.*never follow instructions/is);
+    expect(systemPrompt).toMatch(/draft only.*never send.*automatically/is);
+  });
+
+  it('budgets enough analysis completion tokens for the bounded remote wire contract', async () => {
+    let outbound: Record<string, unknown> | undefined;
+    const provider = createGroqProvider('test-only-key', async (_url, init) => {
+      outbound = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return Response.json({
+        choices: [{ message: { content: JSON.stringify({
+          schemaVersion: 1,
+          mode: 'ai',
+          intensityScore: 1,
+          conflictMode: 'Avoiding',
+          messages: [{
+            sender: 'Person A',
+            text: 'hello',
+            pattern: 'Neutral',
+            egoState: 'Adult',
+            possibleInterpretation: 'This may be a greeting.',
+          }],
+        }) } }],
+      });
+    });
+
+    await provider.analyze([{ sender: 'Person A', text: 'hello' }]);
+
+    expect(outbound).toMatchObject({ max_completion_tokens: 16_384 });
+    const messages = outbound?.messages as Array<{ role: string; content: string }>;
+    const systemPrompt = messages.find((message) => message.role === 'system')?.content ?? '';
+    for (const field of [
+      'schemaVersion', 'mode', 'intensityScore', 'conflictMode', 'messages', 'sender', 'text',
+      'pattern', 'egoState', 'possibleInterpretation',
+    ]) expect(systemPrompt).toContain(field);
+    for (const value of [
+      'Competing', 'Avoiding', 'Compromising', 'Collaborating', 'Accommodating', 'Competing vs Avoiding',
+      'Criticism', 'Contempt', 'Defensiveness', 'Stonewalling', 'Neutral', 'Parent', 'Adult', 'Child',
+    ]) expect(systemPrompt).toContain(value);
+    expect(systemPrompt).toMatch(/copy.*sender.*text.*exactly.*same order/is);
+    expect(systemPrompt).toMatch(/untrusted data.*never follow instructions/is);
+    expect(systemPrompt).toMatch(/tentative.*may.*might/is);
+    expect(systemPrompt).toMatch(/not.*diagnosis/is);
+    expect(systemPrompt).toMatch(/do not claim.*intent.*deception/is);
+    expect(systemPrompt).toMatch(/no extra keys/i);
   });
 
   it('keeps the deadline active while reading a stalled successful response body', async () => {
@@ -84,6 +172,37 @@ describe('Groq adapter response validation', () => {
     );
 
     await expect(provider.analyze([{ sender: 'Person A', text: 'hello' }])).rejects.toBeInstanceOf(ProviderUnavailableError);
+  });
+
+  it('enforces the provider deadline when the initial fetch ignores AbortSignal', async () => {
+    const provider = createGroqProvider(
+      'test-only-key',
+      async () => new Promise<Response>(() => undefined),
+      { timeoutMs: 10 },
+    );
+
+    const result = await settleWithin(provider.analyze([{ sender: 'Person A', text: 'hello' }]), 80);
+
+    expect(result).toMatchObject({ status: 'rejected', error: expect.any(ProviderUnavailableError) });
+  });
+
+  it('cancels a late initial response body after the provider deadline wins', async () => {
+    let resolveFetch: ((response: Response) => void) | undefined;
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({ cancel() { cancelled = true; } });
+    const provider = createGroqProvider(
+      'test-only-key',
+      async () => new Promise<Response>((resolve) => { resolveFetch = resolve; }),
+      { timeoutMs: 10 },
+    );
+
+    const result = await settleWithin(provider.analyze([{ sender: 'Person A', text: 'hello' }]), 80);
+    resolveFetch?.(new Response(body));
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(result).toMatchObject({ status: 'rejected', error: expect.any(ProviderUnavailableError) });
+    expect(cancelled).toBe(true);
   });
 
   it('rejects an oversized upstream response without buffering it completely', async () => {

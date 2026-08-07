@@ -32,7 +32,15 @@ export default function PreviewScreen() {
     cancel,
   } = useAnalysisSession();
   const { preferences } = useReportRepository();
-  const { appUserId, identityStatus } = useBilling();
+  const { appUserId, identityStatus, entitlementStatus } = useBilling();
+  const entitlementDecisionReady = entitlementStatus === 'free' || entitlementStatus === 'pro';
+  const billingIdentityReady = identityStatus === 'ready' && Boolean(appUserId);
+  const remoteDecisionReady = entitlementDecisionReady && billingIdentityReady;
+  const aiDecisionNotice = !entitlementDecisionReady || identityStatus === 'loading'
+    ? 'Checking your plan before AI-assisted analysis…'
+    : !billingIdentityReady
+      ? 'AI-assisted analysis is unavailable because plan identity could not be prepared. Restart the app and try again.'
+      : null;
   const [preview, setPreview] = useState<ParseResult | null>(null);
   const [aiNotice, setAiNotice] = useState<string | null>(null);
   const [reviewVisible, setReviewVisible] = useState(false);
@@ -55,11 +63,11 @@ export default function PreviewScreen() {
       getConsent: consentStore.getConsent,
       getInstallationToken: consentStore.getInstallationToken,
       getRevenueCatAppUserId: async () => {
-        if (identityStatus !== 'ready' || !appUserId) throw new AiClientError('NOT_CONFIGURED');
+        if (!remoteDecisionReady || !appUserId) throw new AiClientError('NOT_CONFIGURED');
         return appUserId;
       },
     }),
-    [appUserId, consentStore, identityStatus],
+    [appUserId, consentStore, remoteDecisionReady],
   );
   const cancelPendingWork = useCallback(() => {
     consentCheckCounterRef.current += 1;
@@ -167,7 +175,7 @@ export default function PreviewScreen() {
   }
 
   function startReviewFlow() {
-    if (!mountedRef.current || remoteWorkflowActiveRef.current || activeRemoteRunRef.current !== null) return;
+    if (!mountedRef.current || !remoteDecisionReady || remoteWorkflowActiveRef.current || activeRemoteRunRef.current !== null) return;
     cancel();
     setAiNotice(null);
     setConsentVisible(false);
@@ -211,7 +219,7 @@ export default function PreviewScreen() {
         <Text style={styles.description}>Check the parsed messages before choosing an analysis mode.</Text>
         <ParsedMessageList parsed={activePreview} />
         <PrimaryButton label="Edit conversation" onPress={editConversation} />
-        <AnalysisModePicker aiNotice={aiNotice} onRunLocal={runLocalAndOpenResult} onStartAi={startReviewFlow} />
+        <AnalysisModePicker aiDecisionNotice={aiDecisionNotice} aiDecisionReady={remoteDecisionReady} aiNotice={aiNotice} onRunLocal={runLocalAndOpenResult} onStartAi={startReviewFlow} />
         {reviewVisible ? (
           <RemoteDataReview
             isConfirming={reviewConfirming}

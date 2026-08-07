@@ -246,6 +246,8 @@ export default function ResponseCrafter({ result, conversationText }) {
                     ? 'AI-assisted draft'
                     : responseSource?.fallbackReason === 'REMOTE_UNAVAILABLE'
                       ? 'AI service unavailable—showing on-device drafts.'
+                      : responseSource?.fallbackReason === 'REMOTE_INPUT_LIMIT'
+                        ? 'Remote AI accepts up to 10 messages, 280 characters per message, and 150 characters per possible interpretation—showing on-device drafts.'
                       : 'On-device drafts'}
                 </div>
                 <div className="rc-responses-list">

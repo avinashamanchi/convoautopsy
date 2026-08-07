@@ -89,7 +89,7 @@ describe('ResponseCrafter request lifecycle', () => {
   })
 
   it('reviews every response free-text field before dispatch and binds the confirmed snapshot', async () => {
-    getAiConsent.mockReturnValue({ version: '2026-08-07', installationToken: 'installation-token-0001' })
+    getAiConsent.mockReturnValue({ version: '2026-08-07.2', installationToken: 'installation-token-0001' })
     craftResponse.mockResolvedValue({ drafts: [{ id: 'd', text: 'Draft text', hint: 'Hint' }], source: 'ai' })
     const { container } = await renderCrafter()
     await chooseAll(container)
@@ -99,6 +99,13 @@ describe('ResponseCrafter request lifecycle', () => {
     expect(container.textContent).toContain('Person A')
     expect(container.textContent).toContain('resolve')
     expect(container.textContent).toContain('empathetic')
+    expect(container.textContent).toMatch(/analysis mode\s*ai/i)
+    expect(container.textContent).toMatch(/intensity score\s*1/i)
+    expect(container.textContent).toMatch(/conflict mode\s*Collaborating/i)
+    expect(container.textContent).toMatch(/pattern\s*Neutral/i)
+    expect(container.textContent).toMatch(/ego state\s*Adult/i)
+    expect(container.textContent).toMatch(/installation token.*identifier values.*not displayed/is)
+    expect(container.textContent).not.toContain('installation-token-0001')
     expect(container.querySelector('[aria-label="Outgoing text for Person A message 1"]')).not.toBeNull()
     expect(container.querySelector('[aria-label="Outgoing possible interpretation for Person A message 1"]')).not.toBeNull()
 
@@ -107,5 +114,17 @@ describe('ResponseCrafter request lifecycle', () => {
 
     expect(craftResponse).toHaveBeenCalledTimes(1)
     expect(craftResponse.mock.calls[0][1]).toMatchObject({ reviewedSnapshot: expect.any(Object) })
+  })
+
+  it('explains a remote response limit fallback instead of labeling it only as on-device', async () => {
+    getAiConsent.mockReturnValue({ version: '2026-08-07.2', installationToken: 'installation-token-0001' })
+    craftResponse.mockResolvedValue({ drafts: [{ id: 'd', text: 'Local draft', hint: 'Local' }], source: 'local', fallbackReason: 'REMOTE_INPUT_LIMIT' })
+    const { container } = await renderCrafter()
+    await chooseAll(container)
+    const confirm = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Confirm exact data')
+
+    await act(async () => { confirm.click(); await Promise.resolve() })
+
+    expect(container.textContent).toMatch(/Remote AI accepts up to 10 messages.*280 characters.*150 characters.*showing on-device drafts/i)
   })
 })

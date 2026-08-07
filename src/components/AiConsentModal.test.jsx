@@ -53,3 +53,30 @@ it('focuses the consent action, traps tabbing, closes on Escape, and restores th
   expect(document.querySelector('[role="dialog"]')).toBeNull()
   expect(document.activeElement).toBe(trigger)
 })
+
+it('discloses every server-bound analysis and drafting field before consent without displaying identifier values', () => {
+  renderHarness()
+  const trigger = document.querySelector('button')
+  act(() => { trigger.click() })
+
+  const disclosure = document.querySelector('[role="dialog"]').textContent
+  for (const field of [
+    'installation token',
+    'response sender',
+    'goal',
+    'tone',
+    'analysis mode',
+    'intensity score',
+    'conflict mode',
+    'message sender',
+    'message text',
+    'pattern',
+    'ego state',
+    'possible interpretation',
+  ]) expect(disclosure.toLowerCase()).toContain(field)
+  expect(disclosure).toMatch(/Free verification.*pseudonymous RevenueCat.*even without a subscription/i)
+  expect(disclosure).toMatch(/identifier values.*not displayed/i)
+  expect(disclosure).toMatch(/ConvoAutopsy.*Cloudflare service.*schema version.*consent version.*installation token/is)
+  expect(disclosure).toMatch(/forwards only.*message sender.*message text.*to Groq/is)
+  expect(disclosure).toMatch(/does not forward.*schema version.*consent version.*installation token.*analysis mode.*to Groq/is)
+})

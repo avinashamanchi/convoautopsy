@@ -45,18 +45,18 @@ it('records the current version, provider, and grant time after an explicit agre
   const consent = await store.grantConsent();
 
   expect(consent).toEqual({
-    version: '2026-08-07',
+    version: '2026-08-07.2',
     grantedAt: expect.any(String),
     provider: 'Groq',
   });
-  expect(CONSENT_VERSION).toBe('2026-08-07');
+  expect(CONSENT_VERSION).toBe('2026-08-07.2');
 });
 
-it('requires renewed consent when the stored disclosure version predates redaction review', async () => {
+it('requires renewed consent when the stored disclosure version predates the current recipient disclosure', async () => {
   const preferences = createPreferences();
   await preferences.set('convoautopsy.ai-consent.v1', JSON.stringify({
-    version: '2026-08-02',
-    grantedAt: '2026-08-02T12:00:00.000Z',
+    version: '2026-08-07',
+    grantedAt: '2026-08-07T12:00:00.000Z',
     provider: 'Groq',
   }));
   const store = createConsentStore({ preferences });

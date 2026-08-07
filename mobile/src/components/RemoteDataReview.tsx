@@ -2,14 +2,32 @@ import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { ParsedMessage } from '../domain/analysis';
 import { applyRedactions, detectRedactions, type RedactionCandidate } from '../domain/redaction';
-import { codePointCount, MAX_INPUT_CODE_POINTS, MAX_MESSAGE_CODE_POINTS } from '../domain/textLimits';
+import { codePointCount, MAX_INPUT_CODE_POINTS } from '../domain/textLimits';
+import {
+  REMOTE_ANALYSIS_MAX_MESSAGES,
+  REMOTE_ANALYSIS_MAX_TEXT_CODE_POINTS,
+  REMOTE_INTERPRETATION_MAX_CODE_POINTS,
+} from '../services/remoteLimits';
 import { tokens } from '../theme/tokens';
 import { PrimaryButton } from './PrimaryButton';
 
-export type ReviewableMessage = ParsedMessage & { possibleInterpretation?: string };
+export type ReviewableMessage = ParsedMessage & {
+  pattern?: string;
+  egoState?: string;
+  possibleInterpretation?: string;
+};
+
+export type ResponseReviewContext = Readonly<{
+  sender: string;
+  goal: string;
+  tone: string;
+  intensityScore: number;
+  conflictMode: string;
+}>;
 
 type RemoteDataReviewProps = {
   messages: ReviewableMessage[];
+  responseContext?: ResponseReviewContext;
   isConfirming: boolean;
   onConfirm(messages: ReviewableMessage[]): void;
   onCancel(): void;
@@ -27,7 +45,7 @@ type ReviewItem = {
   interpretationField?: ReviewField;
 };
 
-export function RemoteDataReview({ messages, isConfirming, onConfirm, onCancel }: RemoteDataReviewProps) {
+export function RemoteDataReview({ messages, responseContext, isConfirming, onConfirm, onCancel }: RemoteDataReviewProps) {
   const [items, setItems] = useState(() => createReviewItems(messages));
   const confirmedRef = useRef(false);
 
@@ -36,9 +54,11 @@ export function RemoteDataReview({ messages, isConfirming, onConfirm, onCancel }
     confirmedRef.current = false;
   }, [messages]);
 
-  const hasInvalidText = items.some(({ messageField, interpretationField }) => (
-    !isValidField(messageField, MAX_MESSAGE_CODE_POINTS)
-    || (interpretationField !== undefined && !isValidField(interpretationField, 300))
+  const hasInvalidText = items.length === 0
+    || items.length > REMOTE_ANALYSIS_MAX_MESSAGES
+    || items.some(({ messageField, interpretationField }) => (
+    !isValidField(messageField, REMOTE_ANALYSIS_MAX_TEXT_CODE_POINTS)
+    || (interpretationField !== undefined && !isValidField(interpretationField, REMOTE_INTERPRETATION_MAX_CODE_POINTS))
   ));
 
   function editField(index: number, field: 'messageField' | 'interpretationField', text: string) {
@@ -79,6 +99,18 @@ export function RemoteDataReview({ messages, isConfirming, onConfirm, onCancel }
       <Text accessibilityRole="alert" style={styles.warning}>
         Automatic detection can miss identifying details. Review the exact text below.
       </Text>
+      {responseContext ? (
+        <View style={styles.readOnlyGroup}>
+          <Text accessibilityLabel={`Response sender sent, read-only: ${responseContext.sender}`} style={styles.readOnly}>Response sender (sent, read-only): {responseContext.sender}</Text>
+          <Text accessibilityLabel={`Response goal sent, read-only: ${responseContext.goal}`} style={styles.readOnly}>Goal (sent, read-only): {responseContext.goal}</Text>
+          <Text accessibilityLabel={`Response tone sent, read-only: ${responseContext.tone}`} style={styles.readOnly}>Tone (sent, read-only): {responseContext.tone}</Text>
+          <Text accessibilityLabel={`Analysis intensity sent, read-only: ${responseContext.intensityScore}`} style={styles.readOnly}>Analysis intensity (sent, read-only): {responseContext.intensityScore}</Text>
+          <Text accessibilityLabel={`Analysis conflict sent, read-only: ${responseContext.conflictMode}`} style={styles.readOnly}>Analysis conflict (sent, read-only): {responseContext.conflictMode}</Text>
+        </View>
+      ) : null}
+      {items.length > REMOTE_ANALYSIS_MAX_MESSAGES ? (
+        <Text accessibilityRole="alert" style={styles.error}>Remote AI can review up to 10 messages at a time. On-device analysis remains available.</Text>
+      ) : null}
       {items.map((item, index) => {
         const messageNumber = index + 1;
         const context = `${item.message.sender} message ${messageNumber}`;
@@ -86,7 +118,19 @@ export function RemoteDataReview({ messages, isConfirming, onConfirm, onCancel }
         const outgoingInterpretation = item.interpretationField ? reviewedField(item.interpretationField) : null;
         return (
           <View key={item.message.id} style={styles.message}>
-            <Text style={styles.sender}>{item.message.sender}</Text>
+            <Text accessibilityLabel={`Message ${messageNumber} sender sent, read-only: ${item.message.sender}`} style={styles.sender}>
+              Sender (sent, read-only): {item.message.sender}
+            </Text>
+            {item.message.pattern !== undefined ? (
+              <Text accessibilityLabel={`Message ${messageNumber} pattern sent, read-only: ${item.message.pattern}`} style={styles.readOnly}>
+                Pattern (sent, read-only): {item.message.pattern}
+              </Text>
+            ) : null}
+            {item.message.egoState !== undefined ? (
+              <Text accessibilityLabel={`Message ${messageNumber} ego state sent, read-only: ${item.message.egoState}`} style={styles.readOnly}>
+                Ego state (sent, read-only): {item.message.egoState}
+              </Text>
+            ) : null}
             <TextInput
               accessibilityLabel={`Outgoing text for ${context}`}
               editable={!isConfirming}
@@ -119,9 +163,9 @@ export function RemoteDataReview({ messages, isConfirming, onConfirm, onCancel }
             <Text accessibilityLabel={`Text sent for ${context}: ${outgoingText}`} style={styles.outgoing}>
               {outgoingText}
             </Text>
-            {!item.messageField.text.trim() ? <Text accessibilityRole="alert" style={styles.error}>Message text cannot be empty.</Text> : null}
-            {codePointCount(item.messageField.text) > MAX_MESSAGE_CODE_POINTS ? (
-              <Text accessibilityRole="alert" style={styles.error}>Message text must be 1,000 characters or fewer.</Text>
+            {!outgoingText.trim() ? <Text accessibilityRole="alert" style={styles.error}>Message text cannot be empty.</Text> : null}
+            {codePointCount(outgoingText) > REMOTE_ANALYSIS_MAX_TEXT_CODE_POINTS ? (
+              <Text accessibilityRole="alert" style={styles.error}>Message text must be 280 characters or fewer for remote AI.</Text>
             ) : null}
             {item.interpretationField ? (
               <>
@@ -157,9 +201,9 @@ export function RemoteDataReview({ messages, isConfirming, onConfirm, onCancel }
                 <Text accessibilityLabel={`Possible interpretation sent for ${context}: ${outgoingInterpretation}`} style={styles.outgoing}>
                   {outgoingInterpretation}
                 </Text>
-                {!item.interpretationField.text.trim() ? <Text accessibilityRole="alert" style={styles.error}>Possible interpretation cannot be empty.</Text> : null}
-                {codePointCount(item.interpretationField.text) > 300 ? (
-                  <Text accessibilityRole="alert" style={styles.error}>Possible interpretation must be 300 characters or fewer.</Text>
+                {!outgoingInterpretation?.trim() ? <Text accessibilityRole="alert" style={styles.error}>Possible interpretation cannot be empty.</Text> : null}
+                {codePointCount(outgoingInterpretation ?? '') > REMOTE_INTERPRETATION_MAX_CODE_POINTS ? (
+                  <Text accessibilityRole="alert" style={styles.error}>Possible interpretation must be 150 characters or fewer for remote AI.</Text>
                 ) : null}
               </>
             ) : null}
@@ -186,7 +230,8 @@ function createReviewField(text: string): ReviewField {
 }
 
 function isValidField(field: ReviewField, maximumCodePoints: number): boolean {
-  return Boolean(field.text.trim()) && codePointCount(field.text) <= maximumCodePoints;
+  const outgoing = reviewedField(field);
+  return Boolean(outgoing.trim()) && codePointCount(outgoing) <= maximumCodePoints;
 }
 
 function createReviewItems(messages: ReviewableMessage[]): ReviewItem[] {
@@ -226,6 +271,8 @@ const styles = StyleSheet.create({
   outgoing: { color: tokens.colors.textSecondary, fontSize: 14, lineHeight: 20 },
   pressed: { opacity: 0.8 },
   selectedCandidate: { borderColor: tokens.colors.accent, borderWidth: 2 },
+  readOnly: { color: tokens.colors.textSecondary, fontSize: 14, lineHeight: 20 },
+  readOnlyGroup: { backgroundColor: tokens.colors.background, borderRadius: tokens.radius.sm, gap: tokens.spacing.xs, padding: tokens.spacing.sm },
   sender: { color: tokens.colors.textPrimary, fontSize: 16, fontWeight: '700' },
   title: { color: tokens.colors.textPrimary, fontSize: 20, fontWeight: '700' },
   warning: { color: tokens.colors.warning, fontSize: 15, lineHeight: 22 },

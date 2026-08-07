@@ -16,7 +16,7 @@ describe('request contract', () => {
   it('accepts a bounded, consented analysis request', () => {
     const result = AnalyzeRequestSchema.safeParse({
       schemaVersion: 1,
-      consentVersion: '2026-08-07',
+      consentVersion: '2026-08-07.2',
       installationToken: 'installation-token-which-is-long-enough',
       messages: [{ sender: 'Person A', text: 'Please listen to me.' }],
     });
@@ -46,7 +46,7 @@ describe('request contract', () => {
   it('rejects extra fields and invalid installation tokens', () => {
     const result = AnalyzeRequestSchema.safeParse({
       schemaVersion: 1,
-      consentVersion: '2026-08-07',
+      consentVersion: '2026-08-07.2',
       installationToken: 'short',
       messages: [{ sender: 'Person A', text: 'Please listen to me.', injected: true }],
     });
@@ -54,39 +54,63 @@ describe('request contract', () => {
     expect(result.success).toBe(false);
   });
 
-  it('rejects more than 100 messages and individual messages longer than 1,000 characters', () => {
-    const manyMessages = Array.from({ length: 101 }, () => ({ sender: 'Person A', text: 'ok' }));
+  it('rejects more than 10 remote-analysis messages and individual messages longer than 280 characters', () => {
+    const manyMessages = Array.from({ length: 11 }, () => ({ sender: 'Person A', text: 'ok' }));
 
     expect(AnalyzeRequestSchema.safeParse({
       schemaVersion: 1,
-      consentVersion: '2026-08-07',
+      consentVersion: '2026-08-07.2',
       installationToken: 'installation-token-which-is-long-enough',
       messages: manyMessages,
     }).success).toBe(false);
     expect(AnalyzeRequestSchema.safeParse({
       schemaVersion: 1,
-      consentVersion: '2026-08-07',
+      consentVersion: '2026-08-07.2',
       installationToken: 'installation-token-which-is-long-enough',
-      messages: [{ sender: 'Person A', text: 'x'.repeat(1_001) }],
+      messages: [{ sender: 'Person A', text: 'x'.repeat(281) }],
     }).success).toBe(false);
   });
 
-  it('counts Unicode code points instead of UTF-16 code units at the 1,000-character boundary', () => {
+  it('applies the same remote message and interpretation bounds to response drafting', () => {
+    const message = {
+      sender: 'Person A',
+      text: 'x'.repeat(280),
+      pattern: 'Neutral',
+      egoState: 'Adult',
+      possibleInterpretation: 'y'.repeat(150),
+    };
+    const request = (messages: unknown[]) => ({
+      schemaVersion: 1,
+      consentVersion: '2026-08-07.2',
+      installationToken: 'installation-token-which-is-long-enough',
+      sender: 'Person A',
+      goal: 'resolve',
+      tone: 'empathetic',
+      analysis: { schemaVersion: 1, mode: 'local', intensityScore: 42, conflictMode: 'Collaborating', messages },
+    });
+
+    expect(CraftResponseRequestSchema.safeParse(request(Array.from({ length: 10 }, () => message))).success).toBe(true);
+    expect(CraftResponseRequestSchema.safeParse(request(Array.from({ length: 11 }, () => message))).success).toBe(false);
+    expect(CraftResponseRequestSchema.safeParse(request([{ ...message, text: '🫠'.repeat(281) }])).success).toBe(false);
+    expect(CraftResponseRequestSchema.safeParse(request([{ ...message, possibleInterpretation: 'y'.repeat(151) }])).success).toBe(false);
+  });
+
+  it('counts Unicode code points instead of UTF-16 code units at the 280-character remote boundary', () => {
     const request = (text: string) => ({
       schemaVersion: 1,
-      consentVersion: '2026-08-07',
+      consentVersion: '2026-08-07.2',
       installationToken: 'installation-token-which-is-long-enough',
       messages: [{ sender: 'Person A', text }],
     });
 
-    expect(AnalyzeRequestSchema.safeParse(request('🫠'.repeat(1_000))).success).toBe(true);
-    expect(AnalyzeRequestSchema.safeParse(request('🫠'.repeat(1_001))).success).toBe(false);
+    expect(AnalyzeRequestSchema.safeParse(request('🫠'.repeat(280))).success).toBe(true);
+    expect(AnalyzeRequestSchema.safeParse(request('🫠'.repeat(281))).success).toBe(false);
   });
 
   it('accepts an optional RevenueCat identifier of at most 100 Unicode code points on both request routes', () => {
     const base = {
       schemaVersion: 1 as const,
-      consentVersion: '2026-08-07' as const,
+      consentVersion: '2026-08-07.2' as const,
       installationToken: 'installation-token-which-is-long-enough',
       revenueCatAppUserId: '🫠'.repeat(100),
     };
@@ -106,7 +130,7 @@ describe('request contract', () => {
   it('rejects client-asserted subscription plan fields', () => {
     const request = {
       schemaVersion: 1,
-      consentVersion: '2026-08-07',
+      consentVersion: '2026-08-07.2',
       installationToken: 'installation-token-which-is-long-enough',
       messages: [{ sender: 'Person A', text: 'Please listen.' }],
     };
@@ -123,7 +147,7 @@ describe('request contract', () => {
   it('enforces anonymous Person A through Person Z labels at every provider boundary', () => {
     const rawInput = {
       schemaVersion: 1,
-      consentVersion: '2026-08-07',
+      consentVersion: '2026-08-07.2',
       installationToken: 'installation-token-which-is-long-enough',
       messages: [{ sender: 'Alice', text: 'Please listen.' }],
     };
@@ -145,7 +169,7 @@ describe('request contract', () => {
     expect(AnalysisResultSchema.safeParse(rawNestedAnalysis).success).toBe(false);
     expect(CraftResponseRequestSchema.safeParse({
       schemaVersion: 1,
-      consentVersion: '2026-08-07',
+      consentVersion: '2026-08-07.2',
       installationToken: 'installation-token-which-is-long-enough',
       sender: 'Alice',
       goal: 'resolve',
@@ -189,6 +213,26 @@ describe('request contract', () => {
         possibleInterpretation: 'This may be an attempt to be heard.',
         extra: 'not allowed',
       }],
+    })).toThrow();
+  });
+
+  it('rejects provider analysis outside the same bounded remote result contract', () => {
+    const message = {
+      sender: 'Person A',
+      text: 'x'.repeat(280),
+      pattern: 'Neutral',
+      egoState: 'Adult',
+      possibleInterpretation: 'y'.repeat(150),
+    };
+    expect(() => normalizeAnalysisProviderOutput({
+      intensityScore: 42,
+      conflictMode: 'Collaborating',
+      messages: Array.from({ length: 11 }, () => message),
+    })).toThrow();
+    expect(() => normalizeAnalysisProviderOutput({
+      intensityScore: 42,
+      conflictMode: 'Collaborating',
+      messages: [{ ...message, possibleInterpretation: 'y'.repeat(151) }],
     })).toThrow();
   });
 });

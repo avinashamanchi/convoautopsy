@@ -10,11 +10,17 @@ import {
   aggregateResults,
   abusiveRateLimitObserved,
   createFatalSummary,
+  createFixedWorkloadCohort,
+  createPlannedWorkload,
+  createQuotaSafeWorkloadIdentity,
+  createQuotaSafeWorkloadPlan,
   createRequestIdentity,
   createWranglerArguments,
   exactRouteMix,
+  fetchApiResponseWithDeadline,
   fetchBoundedJsonWithDeadline,
   parseLoadOptions,
+  requireFreshFinalDiagnostics,
   routeForRequestIndex,
   scheduledOffsets,
 } from './load-gate-core.mjs';
@@ -27,6 +33,7 @@ const PUBLIC_CODES = new Set([
   'PLAN_LIMIT_REACHED',
   'SERVICE_BUSY',
   'DAILY_BUDGET_REACHED',
+  'ENTITLEMENT_UNAVAILABLE',
   'PROVIDER_UNAVAILABLE',
   'PROVIDER_INVALID_RESPONSE',
   'INTERNAL_ERROR',
@@ -46,6 +53,17 @@ const SYNTHETIC_ANALYSIS = Object.freeze({
 });
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const options = parseLoadOptions(process.argv.slice(2));
+const plannedWorkload = createPlannedWorkload(options);
+const workloadRequestCount = plannedWorkload.totalRequests;
+const fixedShortCohort = workloadRequestCount <= 100;
+const quotaSafeWorkloadPlan = fixedShortCohort ? undefined : createQuotaSafeWorkloadPlan(workloadRequestCount);
+const cohorts = Object.freeze({
+  workload: fixedShortCohort
+    ? createFixedWorkloadCohort(workloadRequestCount)
+    : Object.freeze({ strategy: 'quota-safe', ...quotaSafeWorkloadPlan }),
+  capacityInstallations: 100,
+  tokenAbuseInstallations: 1,
+});
 const timers = new Set();
 const outstanding = new AbortController();
 const runId = randomBytes(8).toString('hex');
@@ -58,6 +76,9 @@ let target = options.target;
 let fixtureReady = false;
 let lastObservedReservations;
 const partialSamples = [];
+const diagnosticObservations = [];
+
+process.stdout.write(`${JSON.stringify({ event: 'load-plan', mode: options.mode, ...plannedWorkload })}\n`);
 
 const stopForSignal = () => outstanding.abort();
 process.once('SIGINT', stopForSignal);
@@ -104,6 +125,7 @@ try {
     const capacity = await runCapacityPhase(target);
     samples.push(...capacity.samples);
     activeReservations = capacity.activeReservations;
+    diagnosticObservations.push({ stage: 'capacity', activeReservations });
     capacityPeakReservations = capacity.peakReservations;
     failures.push(...capacity.failures);
 
@@ -111,6 +133,10 @@ try {
     const abusiveToken = await runAbusiveTokenPhase(target);
     samples.push(...abusiveToken);
     if (!abusiveRateLimitObserved(abusiveToken)) failures.push('TOKEN_RATE_LIMIT');
+    const tokenDiagnostic = await pollDiagnostics(target, (value) => value === 0, options.clientMs);
+    diagnosticObservations.push({ stage: 'token-abuse', activeReservations: tokenDiagnostic.value });
+    if (!tokenDiagnostic.matched) failures.push('TOKEN_RELEASE_DIAGNOSTICS');
+    activeReservations = requireFreshFinalDiagnostics(diagnosticObservations, 'token-abuse');
   }
 
   const summary = aggregateResults(samples, activeReservations);
@@ -127,11 +153,15 @@ try {
         gate: failures.length === 0 ? 'pass' : 'fail',
         failureCodes: [...new Set(failures)].sort(),
         capacityPeakReservations,
+        cohorts,
+        plannedWorkload,
         ...summary,
       }
     : {
         gate: failures.length === 0 ? 'pass' : 'fail',
         failureCodes: [...new Set(failures)].sort(),
+        cohorts,
+        plannedWorkload,
         ...summary,
         activeReservations: 'not-measured',
       };
@@ -178,7 +208,7 @@ async function runRouteMixPaddingPhase(target) {
 async function runCapacityPhase(target) {
   const failures = [];
   await fixtureControl(target, 'hold');
-  const pending = Array.from({ length: 100 }, () => sendApiRequest(target, nextIdentity(), false));
+  const pending = Array.from({ length: 100 }, (_, index) => sendApiRequest(target, capacityIdentity(index), true));
   let busySample;
   let activeReservations = 0;
   let peakReservations = 0;
@@ -187,7 +217,7 @@ async function runCapacityPhase(target) {
     peakReservations = heldDiagnostic.peak;
     if (!heldDiagnostic.matched) failures.push('CAPACITY_DIAGNOSTICS');
     else {
-      const responseIdentity = createRequestIdentity(runId, 99);
+      const responseIdentity = createRequestIdentity(`${runId}_capacity`, 99);
       busySample = await sendApiRequest(target, Object.freeze({ ...responseIdentity, route: '/v1/responses' }), true);
       if (busySample.status !== 503 || busySample.code !== 'SERVICE_BUSY') failures.push('CAPACITY_101');
     }
@@ -210,7 +240,7 @@ async function runCapacityPhase(target) {
 }
 
 async function runAbusiveTokenPhase(target) {
-  const identity = Object.freeze({ ...createRequestIdentity(runId, 0), route: '/v1/analyses' });
+  const identity = Object.freeze({ ...createRequestIdentity(`${runId}_abuse`, 0), route: '/v1/analyses' });
   const samples = [];
   for (let index = 0; index < 11; index += 1) {
     samples.push(await sendApiRequest(target, identity, true));
@@ -227,13 +257,16 @@ async function sendApiRequest(target, identity, injected) {
     headers['x-load-fixture-ip'] = identity.syntheticIp;
   }
   try {
-    const response = await fetchWithDeadline(`${target}${route}`, {
+    const response = await fetchApiResponseWithDeadline(`${target}${route}`, {
       method: 'POST',
       headers,
       body: JSON.stringify(createApiPayload(route, identity.installationToken)),
-    }, options.clientMs);
-    const code = response.ok ? 'allowed' : await safePublicCode(response);
-    if (response.ok) await cancelBody(response.body);
+    }, {
+      timeoutMs: options.clientMs,
+      maxBytes: 16 * 1_024,
+      parentSignal: outstanding.signal,
+    });
+    const code = response.ok ? 'allowed' : safePublicCode(response.value);
     return Object.freeze({ route, status: response.status, latencyMs: performance.now() - started, code, injected });
   } catch {
     return Object.freeze({ route, status: 0, latencyMs: performance.now() - started, code: 'CLIENT_FAILURE', injected });
@@ -243,7 +276,7 @@ async function sendApiRequest(target, identity, injected) {
 function createApiPayload(route, installationToken) {
   const common = {
     schemaVersion: 1,
-    consentVersion: '2026-08-07',
+    consentVersion: '2026-08-07.2',
     installationToken,
   };
   if (route === '/v1/analyses') {
@@ -266,10 +299,13 @@ async function waitUntilReady(target) {
   while (performance.now() < deadline) {
     if (child && child.exitCode !== null) throw new Error('fixture exited');
     try {
-      const response = await fetchWithDeadline(`${target}/__fixture/ready`, {
+      const response = await fetchApiResponseWithDeadline(`${target}/__fixture/ready`, {
         headers: { authorization: `Bearer ${fixtureSecret}` },
-      }, options.diagnosticsMs);
-      await cancelBody(response.body);
+      }, {
+        timeoutMs: options.diagnosticsMs,
+        maxBytes: 1_024,
+        parentSignal: outstanding.signal,
+      });
       if (response.ok) return;
     } catch {
       // Readiness polling is bounded by the outer monotonic deadline.
@@ -280,11 +316,14 @@ async function waitUntilReady(target) {
 }
 
 async function fixtureControl(target, action) {
-  const response = await fetchWithDeadline(`${target}/__fixture/control/${action}`, {
+  const response = await fetchApiResponseWithDeadline(`${target}/__fixture/control/${action}`, {
     method: 'POST',
     headers: { authorization: `Bearer ${fixtureSecret}` },
-  }, options.diagnosticsMs);
-  await cancelBody(response.body);
+  }, {
+    timeoutMs: options.diagnosticsMs,
+    maxBytes: 1_024,
+    parentSignal: outstanding.signal,
+  });
   if (response.status !== 204) throw new Error('fixture control failed');
 }
 
@@ -318,7 +357,15 @@ async function fixtureDiagnostics(target) {
 
 function nextIdentity() {
   const index = requestIndex++;
+  if (quotaSafeWorkloadPlan) return createQuotaSafeWorkloadIdentity(runId, index, quotaSafeWorkloadPlan);
   return Object.freeze({ ...createRequestIdentity(runId, index), route: routeForRequestIndex(index) });
+}
+
+function capacityIdentity(index) {
+  return Object.freeze({
+    ...createRequestIdentity(`${runId}_capacity`, index),
+    route: routeForRequestIndex(index),
+  });
 }
 
 function settledSamples(results) {
@@ -327,52 +374,9 @@ function settledSamples(results) {
     : Object.freeze({ route: '/v1/analyses', status: 0, latencyMs: options.clientMs, code: 'CLIENT_FAILURE', injected: false }));
 }
 
-async function safePublicCode(response) {
-  try {
-    const value = await readBoundedJson(response, 16 * 1_024);
-    const code = value?.error?.code;
-    return typeof code === 'string' && PUBLIC_CODES.has(code) ? code : 'UNKNOWN';
-  } catch {
-    return 'UNKNOWN';
-  }
-}
-
-async function readBoundedJson(response, maxBytes) {
-  if (!response.body) throw new Error('missing body');
-  const reader = response.body.getReader();
-  const chunks = [];
-  let total = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > maxBytes) {
-      await reader.cancel().catch(() => undefined);
-      throw new Error('body bound');
-    }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return JSON.parse(new TextDecoder().decode(bytes));
-}
-
-async function fetchWithDeadline(url, init, timeoutMs) {
-  if (outstanding.signal.aborted) throw new DOMException('Load gate stopped', 'AbortError');
-  const controller = new AbortController();
-  const stop = () => controller.abort();
-  outstanding.signal.addEventListener('abort', stop, { once: true });
-  const timer = trackTimer(setTimeout(() => controller.abort(), timeoutMs));
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTrackedTimer(timer);
-    outstanding.signal.removeEventListener('abort', stop);
-  }
+function safePublicCode(value) {
+  const code = value?.error?.code;
+  return typeof code === 'string' && PUBLIC_CODES.has(code) ? code : 'UNKNOWN';
 }
 
 async function waitUntil(deadline) {
@@ -394,14 +398,6 @@ async function delay(milliseconds) {
     }, Math.max(0, milliseconds)));
     outstanding.signal.addEventListener('abort', stop, { once: true });
   });
-}
-
-async function cancelBody(body) {
-  try {
-    await body?.cancel();
-  } catch {
-    // Response disposal is best effort and never changes aggregate gate results.
-  }
 }
 
 function startWrangler(port, persistencePath, envFile) {

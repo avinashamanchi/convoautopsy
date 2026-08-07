@@ -1,7 +1,7 @@
 export type EntitlementPlan = 'free' | 'pro';
 export type EntitlementCacheStatus = 'bypass' | 'hit' | 'miss' | 'error';
 export type EntitlementResolution = Readonly<{
-  plan: EntitlementPlan;
+  plan: EntitlementPlan | 'unknown';
   cache: EntitlementCacheStatus;
 }>;
 export type EntitlementSnapshot = Readonly<{
@@ -27,7 +27,7 @@ export async function resolvePlan(
   appUserId: string | null | undefined,
   env: EntitlementEnv,
   now: number,
-): Promise<EntitlementPlan> {
+): Promise<EntitlementPlan | 'unknown'> {
   return (await resolveEntitlement(appUserId, env, now)).plan;
 }
 
@@ -38,7 +38,8 @@ export async function resolveEntitlement(
 ): Promise<EntitlementResolution> {
   const secret = env.REVENUECAT_SECRET_API_KEY;
   const cache = env.ENTITLEMENT_CACHE;
-  if (!validAppUserId(appUserId) || !secret || !cache) return { plan: 'free', cache: 'bypass' };
+  if (appUserId === null || appUserId === undefined) return { plan: 'free', cache: 'bypass' };
+  if (!validAppUserId(appUserId) || !secret || !cache) return { plan: 'unknown', cache: 'error' };
 
   try {
     const cacheKey = await digestCacheKey(appUserId, secret);
@@ -49,7 +50,7 @@ export async function resolveEntitlement(
     await cache.put(cacheKey, JSON.stringify(snapshot), { expirationTtl: CACHE_TTL_SECONDS });
     return { plan: snapshotIsEntitled(snapshot, now) ? snapshot.plan : 'free', cache: 'miss' };
   } catch {
-    return { plan: 'free', cache: 'error' };
+    return { plan: 'unknown', cache: 'error' };
   }
 }
 

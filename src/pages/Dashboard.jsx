@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
 import {
   getConversations, saveConversation, deleteConversation,
-  clearSession, deleteAllWebData, hasOnboarded
+  clearSession, deleteAllWebData, getLegacyRecoveryExport,
+  getLegacyRecoveryStatus, hasOnboarded
 } from '../utils/storage'
-import { analyzeConversation, DEMO_TEXT, DEMO_RESULT, prepareAnalysisReview } from '../utils/analyzeConversation'
+import { analyzeConversation, DEMO_TEXT, DEMO_RESULT, exceedsRemoteAnalysisLimits, prepareAnalysisReview } from '../utils/analyzeConversation'
 import AnalysisResult from '../components/AnalysisResult'
 import Onboarding from '../components/Onboarding'
 import ResponseCrafter from '../components/ResponseCrafter'
@@ -35,6 +36,15 @@ function generateTitle(text) {
   return txt.length > 36 ? txt.slice(0, 36) + '…' : txt
 }
 
+function downloadJson(json, fileName) {
+  const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }))
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = fileName
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
+
 export default function Dashboard({ user, onLogout }) {
   const [conversations, setConversations] = useState([])
   const [activeConvo, setActiveConvo] = useState(null)
@@ -44,6 +54,7 @@ export default function Dashboard({ user, onLogout }) {
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [deleteConfirm, setDeleteConfirm] = useState(null)
+  const [deleteStatus, setDeleteStatus] = useState('')
   const [dragOver, setDragOver] = useState(false)
   const [showAiConsent, setShowAiConsent] = useState(false)
   const [pendingText, setPendingText] = useState('')
@@ -53,11 +64,17 @@ export default function Dashboard({ user, onLogout }) {
   const [deleteAllPhrase, setDeleteAllPhrase] = useState('')
   const [deleteAllStatus, setDeleteAllStatus] = useState('')
   const [deletingAll, setDeletingAll] = useState(false)
+  const [persistenceStatus, setPersistenceStatus] = useState(null)
+  const [legacyRecovery, setLegacyRecovery] = useState(null)
+  const [recoveryExportStatus, setRecoveryExportStatus] = useState('')
   const fileInputRef = useRef(null)
   const requestRef = useRef(null)
   const requestGeneration = useRef(0)
   const consentBusy = useRef(false)
   const aiConsentTriggerRef = useRef(null)
+  const deleteAllTriggerRef = useRef(null)
+  const deleteAllDialogRef = useRef(null)
+  const deleteAllInputRef = useRef(null)
 
   useEffect(() => () => {
     requestGeneration.current += 1
@@ -66,8 +83,16 @@ export default function Dashboard({ user, onLogout }) {
 
   useEffect(() => {
     setConversations(getConversations())
+    setLegacyRecovery(getLegacyRecoveryStatus())
     if (!hasOnboarded()) setShowOnboarding(true)
   }, [])
+
+  useEffect(() => {
+    if (!showDeleteAll) return undefined
+    const trigger = deleteAllTriggerRef.current
+    deleteAllInputRef.current?.focus()
+    return () => trigger?.focus()
+  }, [showDeleteAll])
 
   const saveAnalysis = (txt, result, source, fallbackReason, title = generateTitle(txt)) => {
     const convo = {
@@ -80,10 +105,82 @@ export default function Dashboard({ user, onLogout }) {
       fallbackReason,
       analysis_mode: result.analysis_mode,
     }
-    saveConversation(convo)
-    setConversations(getConversations())
-    setActiveConvo(convo)
+    let saved
+    try {
+      saved = saveConversation(convo)
+    } catch {
+      saved = { ok: false, error: 'PERSISTENCE_FAILED' }
+    }
+    if (saved?.ok) {
+      setConversations(saved.reports)
+      setActiveConvo({ ...convo, persisted: true })
+      setInputText('')
+      setPersistenceStatus(null)
+      return
+    }
+    setActiveConvo({ ...convo, persisted: false })
+    setInputText(txt)
+    setPersistenceStatus({
+      kind: 'error',
+      conversation: convo,
+      message: 'This analysis is not saved to browser storage. Your source and result remain available here for retry or export.',
+    })
+  }
+
+  const retrySave = () => {
+    const conversation = persistenceStatus?.conversation
+    if (!conversation) return
+    let saved
+    try {
+      saved = saveConversation(conversation)
+    } catch {
+      saved = { ok: false, error: 'PERSISTENCE_FAILED' }
+    }
+    if (!saved?.ok) {
+      setPersistenceStatus(current => ({
+        ...current,
+        kind: 'error',
+        message: 'This analysis is still not saved to browser storage. Retry or export it before leaving this result.',
+      }))
+      return
+    }
+    setConversations(saved.reports)
+    setActiveConvo(current => current ? { ...current, persisted: true } : current)
     setInputText('')
+    setPersistenceStatus({ kind: 'success', conversation, message: 'Analysis saved to this browser.' })
+  }
+
+  const exportUnsavedAnalysis = () => {
+    const conversation = persistenceStatus?.conversation
+    if (!conversation) return
+    try {
+      downloadJson(`${JSON.stringify({ schemaVersion: 1, analysis: conversation }, null, 2)}\n`, `convoautopsy-unsaved-${conversation.id}.json`)
+      setPersistenceStatus(current => ({
+        ...current,
+        kind: 'error',
+        message: 'This analysis is not saved to browser storage. An unsaved-analysis file was exported; you can also retry saving.',
+      }))
+    } catch {
+      setPersistenceStatus(current => ({
+        ...current,
+        kind: 'error',
+        message: 'This analysis is not saved, and the export could not start. Retry saving or use your browser to copy the visible result.',
+      }))
+    }
+  }
+
+  const exportLegacyRecovery = () => {
+    const exported = getLegacyRecoveryExport()
+    if (!exported?.ok) {
+      setRecoveryExportStatus('The legacy recovery file could not be prepared. The preserved browser data was not deleted.')
+      return
+    }
+    try {
+      downloadJson(exported.json, exported.fileName)
+      setRecoveryExportStatus('The legacy recovery file was exported. The preserved browser copy remains until Delete All succeeds.')
+    } catch {
+      setRecoveryExportStatus('The legacy recovery export could not start. The preserved browser copy remains available.')
+    }
   }
 
   const invalidateAnalysisRequest = () => {
@@ -102,8 +199,8 @@ export default function Dashboard({ user, onLogout }) {
     consentBusy.current = false
   }
 
-  const beginRemoteReview = (txt, consent) => {
-    const snapshot = prepareAnalysisReview(txt)
+  const beginRemoteReview = (txt, consent, preparedSnapshot) => {
+    const snapshot = preparedSnapshot ?? prepareAnalysisReview(txt)
     if (!snapshot) {
       setError("Couldn't parse the conversation. Use format: Name: Message")
       return
@@ -156,13 +253,23 @@ export default function Dashboard({ user, onLogout }) {
       saveAnalysis(txt, { ...preResult, analysis_mode: 'local' }, 'local', 'LOCAL_REQUESTED', 'Demo Analysis')
       return
     }
+    const preparedReview = prepareAnalysisReview(txt)
+    if (!preparedReview) {
+      setError("Couldn't parse the conversation. Use format: Name: Message")
+      return
+    }
+    if (exceedsRemoteAnalysisLimits(preparedReview)) {
+      resetPendingFlow()
+      await runAnalysis(txt, { allowRemote: false, localReason: 'REMOTE_INPUT_LIMIT' })
+      return
+    }
     const consent = getAiConsent()
     if (!consent) {
       setPendingText(txt)
       setShowAiConsent(true)
       return
     }
-    beginRemoteReview(txt, consent)
+    beginRemoteReview(txt, consent, preparedReview)
   }
 
   const handleConsent = async () => {
@@ -205,20 +312,64 @@ export default function Dashboard({ user, onLogout }) {
   }
 
   const handleDelete = (id) => {
+    let deleted = false
+    try {
+      deleted = deleteConversation(id)
+    } catch {
+      deleted = false
+    }
+    if (!deleted) {
+      setDeleteStatus('This analysis could not be deleted from browser storage. Retry after closing other ConvoAutopsy tabs.')
+      setDeleteConfirm(null)
+      return
+    }
+    setDeleteStatus('')
     if (activeConvo?.id === id) invalidateAnalysisRequest()
-    deleteConversation(id)
-    setConversations(getConversations())
-    if (activeConvo?.id === id) setActiveConvo(null)
+    setConversations(current => current.filter(conversation => conversation.id !== id))
+    if (activeConvo?.id === id) {
+      setActiveConvo(null)
+      setPersistenceStatus(null)
+    }
     setDeleteConfirm(null)
   }
 
-  const handleLogout = () => { resetPendingFlow(); clearSession(); onLogout() }
+  const handleLogout = () => { resetPendingFlow(); setPersistenceStatus(null); clearSession(); onLogout() }
+
+  const closeDeleteAll = () => {
+    if (deletingAll) return
+    setShowDeleteAll(false)
+    setDeleteAllPhrase('')
+    setDeleteAllStatus('')
+  }
+
+  const handleDeleteAllKeyDown = (event) => {
+    if (event.key === 'Escape' && !deletingAll) {
+      event.preventDefault()
+      closeDeleteAll()
+      return
+    }
+    if (event.key !== 'Tab' || deletingAll) return
+    const controls = [...(deleteAllDialogRef.current?.querySelectorAll('input, button') ?? [])]
+      .filter(control => !control.disabled)
+    if (controls.length === 0) return
+    const currentIndex = controls.indexOf(document.activeElement)
+    const nextIndex = event.shiftKey
+      ? (currentIndex <= 0 ? controls.length - 1 : currentIndex - 1)
+      : (currentIndex === controls.length - 1 ? 0 : currentIndex + 1)
+    event.preventDefault()
+    controls[nextIndex]?.focus()
+  }
 
   const handleDeleteAll = async () => {
     if (deleteAllPhrase !== 'DELETE' || deletingAll) return
     setDeletingAll(true)
     setDeleteAllStatus('')
-    const result = await deleteAllWebData()
+    let result
+    try {
+      result = await deleteAllWebData()
+    } catch {
+      result = { ok: false, failed: ['browser storage'] }
+    }
     setDeletingAll(false)
     if (!result.ok) {
       setDeleteAllStatus('Some browser data could not be deleted. Retry after closing other ConvoAutopsy tabs.')
@@ -228,6 +379,9 @@ export default function Dashboard({ user, onLogout }) {
     setConversations([])
     setActiveConvo(null)
     setInputText('')
+    setPersistenceStatus(null)
+    setLegacyRecovery(null)
+    setRecoveryExportStatus('')
     setShowDeleteAll(false)
     setDeleteAllPhrase('')
     setDeleteAllStatus('All app-owned browser data was deleted. Remote provider copies, backups, and App Store subscriptions are not affected.')
@@ -283,19 +437,28 @@ export default function Dashboard({ user, onLogout }) {
       )}
       {showDeleteAll && (
         <div className="delete-all-backdrop" role="presentation">
-          <section className="delete-all-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-all-title">
+          <section
+            className="delete-all-dialog"
+            ref={deleteAllDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-all-title"
+            aria-describedby="delete-all-description"
+            onKeyDown={handleDeleteAllKeyDown}
+          >
             <h2 id="delete-all-title">Delete all browser data?</h2>
-            <p>This removes ConvoAutopsy reports, drafts, preferences, consent, and cached browser artifacts on this browser.</p>
+            <p id="delete-all-description">This removes ConvoAutopsy reports, drafts, preferences, consent, legacy recovery, and cached browser artifacts on this browser.</p>
             <p>It cannot recall data already shared with providers or backups, and it does not cancel an App Store subscription.</p>
             <label>
               Type DELETE to confirm
-              <input value={deleteAllPhrase} onChange={(event) => setDeleteAllPhrase(event.target.value)} disabled={deletingAll} />
+              <input ref={deleteAllInputRef} value={deleteAllPhrase} onChange={(event) => setDeleteAllPhrase(event.target.value)} disabled={deletingAll} />
             </label>
             {deleteAllStatus && <div role="alert">{deleteAllStatus}</div>}
+            {deletingAll && <div role="status">Deleting app-owned browser data…</div>}
             <button onClick={handleDeleteAll} disabled={deleteAllPhrase !== 'DELETE' || deletingAll}>
               {deletingAll ? 'Deleting…' : 'Delete all browser data'}
             </button>
-            <button onClick={() => { setShowDeleteAll(false); setDeleteAllPhrase(''); setDeleteAllStatus('') }} disabled={deletingAll}>Cancel</button>
+            <button onClick={closeDeleteAll} disabled={deletingAll}>Cancel</button>
           </section>
         </div>
       )}
@@ -316,10 +479,29 @@ export default function Dashboard({ user, onLogout }) {
           </div>
           <a href="privacy.html">Privacy</a>
           <a href="terms.html">Terms</a>
-          <button className="dash-delete-all" onClick={() => { setDeleteAllStatus(''); setShowDeleteAll(true) }}>Delete All</button>
+          <button ref={deleteAllTriggerRef} className="dash-delete-all" onClick={() => { setDeleteAllStatus(''); setShowDeleteAll(true) }}>Delete All</button>
           <button className="dash-logout" onClick={handleLogout}>Exit dashboard</button>
         </div>
       </nav>
+
+      {legacyRecovery?.available && (
+        <section className="dash-legacy-recovery" aria-labelledby="legacy-recovery-title">
+          <h2 id="legacy-recovery-title">Legacy report recovery</h2>
+          <p role="status">
+            {legacyRecovery.reportCount} legacy {legacyRecovery.reportCount === 1 ? 'report' : 'reports'} from {legacyRecovery.bucketCount} previous {legacyRecovery.bucketCount === 1 ? 'profile is' : 'profiles are'} preserved separately. Only the previously selected session could be added to this history automatically.
+            {recoveryExportStatus && <> {recoveryExportStatus}</>}
+          </p>
+          <p>Profile names and report contents stay hidden here. Export the recovery file only when you are ready to review that private legacy data.</p>
+          <button type="button" onClick={exportLegacyRecovery}>Export legacy recovery</button>
+        </section>
+      )}
+      {legacyRecovery?.needsAttention && (
+        <section className="dash-legacy-recovery" aria-labelledby="legacy-recovery-attention-title">
+          <h2 id="legacy-recovery-attention-title">Legacy recovery needs attention</h2>
+          <p role="alert">Legacy browser data could not be validated or preserved safely, so its source keys were left unchanged. Delete All can remove them; otherwise keep this browser data intact for manual recovery.</p>
+        </section>
+      )}
+      {deleteStatus && <p className="dash-delete-status" role="alert">{deleteStatus}</p>}
 
       <div className="dash-body">
         {/* ── Sidebar ── */}
@@ -331,7 +513,7 @@ export default function Dashboard({ user, onLogout }) {
 
           <button
             className="dash-new-btn"
-            onClick={() => { resetPendingFlow(); setActiveConvo(null); setInputText(''); setError('') }}
+            onClick={() => { resetPendingFlow(); setPersistenceStatus(null); setActiveConvo(null); setInputText(''); setError('') }}
           >
             + New Analysis
           </button>
@@ -344,7 +526,7 @@ export default function Dashboard({ user, onLogout }) {
               <div
                 key={c.id}
                 className={`dash-convo-item ${activeConvo?.id === c.id ? 'active' : ''}`}
-                onClick={() => { resetPendingFlow(); setActiveConvo(c) }}
+                onClick={() => { resetPendingFlow(); setPersistenceStatus(null); setActiveConvo(c) }}
               >
                 <div className="dash-convo-title">{c.title}</div>
                 <div className="dash-convo-meta">
@@ -371,6 +553,21 @@ export default function Dashboard({ user, onLogout }) {
         <main className="dash-main">
           {activeConvo ? (
             <div className="dash-result-view">
+              {persistenceStatus && persistenceStatus.conversation?.id === activeConvo.id && (
+                <section
+                  className={`dash-persistence-status dash-persistence-status-${persistenceStatus.kind}`}
+                  role={persistenceStatus.kind === 'error' ? 'alert' : 'status'}
+                  aria-label="Analysis storage status"
+                >
+                  <p>{persistenceStatus.message}</p>
+                  {persistenceStatus.kind === 'error' && (
+                    <div className="dash-persistence-actions">
+                      <button type="button" onClick={retrySave}>Retry saving</button>
+                      <button type="button" onClick={exportUnsavedAnalysis}>Export unsaved analysis</button>
+                    </div>
+                  )}
+                </section>
+              )}
               <div className={`dash-ai-source dash-ai-source-${activeConvo.source || 'local'}`}>
                 {analysisSourceMessage(activeConvo.source, activeConvo.fallbackReason)}
               </div>

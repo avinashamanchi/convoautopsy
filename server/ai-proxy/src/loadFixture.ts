@@ -17,7 +17,7 @@ const analysis: AnalysisResult = {
   conflictMode: 'Collaborating',
   messages: [{
     sender: 'Person A',
-    text: 'I want to understand this calmly.',
+    text: 'Synthetic load-gate conversation.',
     pattern: 'Neutral',
     egoState: 'Adult',
     possibleInterpretation: 'This may be an attempt to find common ground.',

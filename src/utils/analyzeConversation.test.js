@@ -11,7 +11,7 @@ import { readBoundedJson } from './fetchBoundedJson'
 
 const baseOptions = {
   allowRemote: true,
-  consentVersion: '2026-08-07',
+  consentVersion: '2026-08-07.2',
   installationToken: 'installation-token-0001',
 }
 
@@ -66,9 +66,9 @@ describe('analyzeConversation', () => {
     ])
   })
 
-  it('counts message bounds by Unicode code point', async () => {
-    const boundedInput = `Alice: ${'🫠'.repeat(1_000)}`
-    const oversizedInput = `Alice: ${'🫠'.repeat(1_001)}`
+  it('uses the Worker remote-analysis bound of 280 Unicode code points', async () => {
+    const boundedInput = `Alice: ${'🫠'.repeat(280)}`
+    const oversizedInput = `Alice: ${'🫠'.repeat(281)}`
     vi.stubEnv('VITE_AI_PROXY_URL', 'https://proxy.example')
     const fetch = vi.fn().mockResolvedValue(Response.json({
       analysis: {
@@ -76,15 +76,28 @@ describe('analyzeConversation', () => {
         mode: 'ai',
         intensityScore: 1,
         conflictMode: 'Collaborating',
-        messages: [{ sender: 'Person A', text: '🫠'.repeat(1_000), pattern: 'Neutral', egoState: 'Adult', possibleInterpretation: 'Calm.' }],
+        messages: [{ sender: 'Person A', text: '🫠'.repeat(280), pattern: 'Neutral', egoState: 'Adult', possibleInterpretation: 'Calm.' }],
       },
       requestId: 'unicode-request',
     }, { headers: { 'x-request-id': 'unicode-request' } }))
     vi.stubGlobal('fetch', fetch)
 
     await expect(analyzeConversation(boundedInput, reviewedOptions(boundedInput))).resolves.toMatchObject({ source: 'ai' })
-    await expect(analyzeConversation(oversizedInput, reviewedOptions(oversizedInput))).resolves.toMatchObject({ source: 'local', fallbackReason: 'NOT_CONFIGURED' })
+    await expect(analyzeConversation(oversizedInput, reviewedOptions(oversizedInput))).resolves.toMatchObject({ source: 'local', fallbackReason: 'REMOTE_INPUT_LIMIT' })
     expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects an eleventh reviewed message before any remote request', async () => {
+    const input = Array.from({ length: 11 }, (_, index) => `Alice: message ${index + 1}`).join('\n')
+    vi.stubEnv('VITE_AI_PROXY_URL', 'https://proxy.example')
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+
+    await expect(analyzeConversation(input, reviewedOptions(input))).resolves.toMatchObject({
+      source: 'local',
+      fallbackReason: 'REMOTE_INPUT_LIMIT',
+    })
+    expect(fetch).not.toHaveBeenCalled()
   })
 
   it('sends anonymized, participant-redacted messages to the analysis proxy without authorization', async () => {
@@ -111,7 +124,7 @@ describe('analyzeConversation', () => {
     const request = JSON.parse(fetch.mock.calls[0][1].body)
     expect(request).toEqual({
       schemaVersion: 1,
-      consentVersion: '2026-08-07',
+      consentVersion: '2026-08-07.2',
       installationToken: 'installation-token-0001',
       messages: [
         { sender: 'Person A', text: '[Person], please listen.' },

@@ -4,7 +4,7 @@ jest.mock('../src/services/reportRepositoryContext', () => ({
 }));
 jest.mock('../src/services/consentStore', () => ({ createConsentStore: jest.fn() }));
 jest.mock('../src/services/aiClient', () => ({ createAiClient: jest.fn() }));
-jest.mock('../src/billing/BillingProvider', () => ({ useBilling: () => ({ appUserId: '$RCAnonymousID:preview-test', identityStatus: 'ready' }) }));
+jest.mock('../src/billing/BillingProvider', () => ({ useBilling: () => ({ appUserId: '$RCAnonymousID:preview-test', identityStatus: 'ready', entitlementStatus: 'free' }) }));
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { useEffect } from 'react';
@@ -53,7 +53,7 @@ beforeEach(() => {
   mockedCreateAiClient.mockReturnValue(remoteAnalysis);
   mockedCreateConsentStore.mockReturnValue({
     getConsent: jest.fn().mockResolvedValue(null),
-    grantConsent: jest.fn().mockResolvedValue({ version: '2026-08-07', grantedAt: '2026-08-07T00:00:00.000Z', provider: 'Groq' }),
+    grantConsent: jest.fn().mockResolvedValue({ version: '2026-08-07.2', grantedAt: '2026-08-07T00:00:00.000Z', provider: 'Groq' }),
     revokeConsent: jest.fn(),
     getInstallationToken: jest.fn(),
     clearRemoteAnalysisData: jest.fn(), clearInstallationToken: jest.fn(),

@@ -1,4 +1,4 @@
-export const AI_CONSENT_VERSION = '2026-08-07'
+export const AI_CONSENT_VERSION = '2026-08-07.2'
 
 const CONSENT_KEY = 'convoautopsy.ai-consent.v1'
 const INSTALLATION_TOKEN_KEY = 'convoautopsy.installation-token.v1'
