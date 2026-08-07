@@ -1,4 +1,4 @@
-import type { AnalysisResult } from '../src/domain/analysis';
+import type { AnalysisResult, ResponseDraft } from '../src/domain/analysis';
 import type { ReportPage, ReportRepository, SavedReport } from '../src/services/reportRepository';
 import {
   RepositoryInvalidatedError,
@@ -147,4 +147,63 @@ it('does not limit Pro saves', async () => {
 
   await expect(createInvalidatingReportRepository(repository).saveIfAllowed({ ...report, id: 'pro-report' }, true)).resolves.toEqual({ allowed: true });
   expect(reports).toHaveLength(11);
+});
+
+it('atomically appends a response draft after an already-queued report save without overwriting either revision', async () => {
+  const saveGate = deferred<void>();
+  const saveStarted = deferred<void>();
+  const localDraft: ResponseDraft = { id: 'local-new', text: 'Concurrent local draft', hint: 'Keep this local change.' };
+  const aiDraft: ResponseDraft = { id: 'ai-paid', text: 'Paid reviewed result', hint: 'Retry only persistence.' };
+  let current = report;
+  let saveCount = 0;
+  const repository: ReportRepository = {
+    initialize: async () => {},
+    listPage: async () => page([current]),
+    count: async () => 1,
+    getTrendSummary: emptyTrends,
+    get: async (id) => id === current.id ? current : null,
+    async save(next) {
+      saveCount += 1;
+      if (saveCount === 1) {
+        saveStarted.resolve();
+        await saveGate.promise;
+      }
+      current = next;
+    },
+    delete: async () => {},
+    deleteAll: async () => {},
+  };
+  const coordinated = createInvalidatingReportRepository(repository);
+  const concurrentSave = coordinated.save({ ...report, title: 'Concurrent title edit', responseDrafts: [localDraft] });
+  await saveStarted.promise;
+
+  const append = coordinated.appendResponseDraft(report.id, aiDraft);
+  saveGate.resolve();
+
+  await concurrentSave;
+  await expect(append).resolves.toMatchObject({
+    title: 'Concurrent title edit',
+    responseDrafts: [localDraft, aiDraft],
+  });
+  expect(current.title).toBe('Concurrent title edit');
+  expect(current.responseDrafts).toEqual([localDraft, aiDraft]);
+});
+
+it('serializes concurrent response-draft appends so every distinct result is preserved', async () => {
+  let current = report;
+  const repository: ReportRepository = {
+    initialize: async () => {}, listPage: async () => page([current]), count: async () => 1, getTrendSummary: emptyTrends,
+    get: async (id) => id === current.id ? current : null,
+    save: async (next) => { current = next; }, delete: async () => {}, deleteAll: async () => {},
+  };
+  const coordinated = createInvalidatingReportRepository(repository);
+  const first: ResponseDraft = { id: 'ai-first', text: 'First reviewed result', hint: 'First.' };
+  const second: ResponseDraft = { id: 'ai-second', text: 'Second reviewed result', hint: 'Second.' };
+
+  await Promise.all([
+    coordinated.appendResponseDraft(report.id, first),
+    coordinated.appendResponseDraft(report.id, second),
+  ]);
+
+  expect(current.responseDrafts).toEqual([first, second]);
 });

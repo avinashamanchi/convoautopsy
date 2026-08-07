@@ -169,7 +169,7 @@ async function handle(
         if (error instanceof Error && !(error instanceof PublicError)) throw new ProviderInvalidResponseError();
         throw error;
       }
-      return json({ analysis, requestId }, 200, origin);
+      return json({ analysis, requestId }, 200, origin, requestId);
     }
 
     let response;
@@ -192,7 +192,7 @@ async function handle(
       if (error instanceof Error && !(error instanceof PublicError)) throw new ProviderInvalidResponseError();
       throw error;
     }
-    return json({ response, requestId }, 200, origin);
+    return json({ response, requestId }, 200, origin, requestId);
   } finally {
     try {
       await releaseAdmission(env.AI_ADMISSION, reservation.leaseId);
@@ -253,9 +253,10 @@ function toRoute(url: string): MetricRoute {
   return pathname === '/v1/analyses' || pathname === '/v1/responses' ? pathname : 'unknown';
 }
 
-function json(value: unknown, status: number, origin: string | null): Response {
+function json(value: unknown, status: number, origin: string | null, requestId: string): Response {
   const headers = corsHeaders(origin);
   headers.set('content-type', 'application/json; charset=utf-8');
+  headers.set('x-request-id', requestId);
   return new Response(JSON.stringify(value), { status, headers });
 }
 
@@ -263,6 +264,7 @@ function errorResponse(error: PublicError, requestId: string, origin: string | n
   const headers = corsHeaders(origin);
   headers.set('content-type', 'application/json; charset=utf-8');
   headers.set('x-public-error-code', error.code);
+  headers.set('x-request-id', requestId);
   if (error.retryAfterSeconds) headers.set('Retry-After', String(error.retryAfterSeconds));
   return new Response(JSON.stringify({ error: { code: error.code, requestId, ...(error.retryAfterSeconds ? { retryAfterSeconds: error.retryAfterSeconds } : {}) } }), { status: error.status, headers });
 }
@@ -279,7 +281,10 @@ function corsResponse(origin: string | null): Response {
 
 function corsHeaders(origin: string | null): Headers {
   const headers = new Headers({ Vary: 'Origin' });
-  if (isAllowedOrigin(origin) && origin) headers.set('access-control-allow-origin', origin);
+  if (isAllowedOrigin(origin) && origin) {
+    headers.set('access-control-allow-origin', origin);
+    headers.set('access-control-expose-headers', 'x-request-id, retry-after');
+  }
   return headers;
 }
 

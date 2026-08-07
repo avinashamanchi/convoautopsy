@@ -1,10 +1,12 @@
 import type { ReportRepository, SavedReport } from './reportRepository';
+import type { ResponseDraft } from '../domain/analysis';
 import { canSaveReport, type SaveGate } from '../billing/saveGate';
 
 export type RepositorySnapshot = { revision: number; deletingAll: boolean };
 
 export type InvalidatingReportRepository = ReportRepository & {
   saveIfAllowed(report: SavedReport, pro: boolean): Promise<SaveGate>;
+  appendResponseDraft(reportId: string, draft: ResponseDraft): Promise<SavedReport | null>;
   getSnapshot(): RepositorySnapshot;
   subscribe(listener: (snapshot: RepositorySnapshot) => void): () => void;
 };
@@ -69,6 +71,23 @@ export function createInvalidatingReportRepository(repository: ReportRepository)
       await repository.save(report);
       return gate;
     }, (gate) => gate.allowed),
+    appendResponseDraft: (reportId: string, draft: ResponseDraft) => mutate(async () => {
+      const latest = await repository.get(reportId);
+      if (!latest) return { changed: false, report: null };
+      const alreadyStored = latest.responseDrafts.some((item) => (
+        item.id === draft.id && item.text === draft.text && item.hint === draft.hint
+      ));
+      if (alreadyStored) return { changed: false, report: latest };
+
+      const storedDraft = withUniqueDraftId(draft, latest.responseDrafts);
+      const updated: SavedReport = {
+        ...latest,
+        responseDrafts: [...latest.responseDrafts.map((item) => ({ ...item })), storedDraft],
+        updatedAt: new Date().toISOString(),
+      };
+      await repository.save(updated);
+      return { changed: true, report: updated };
+    }, ({ changed }) => changed).then(({ report: updated }) => updated),
     delete: (id) => mutate(() => repository.delete(id)),
     deleteAll() {
       if (deletion) return deletion;
@@ -98,4 +117,17 @@ export function createInvalidatingReportRepository(repository: ReportRepository)
       return () => listeners.delete(listener);
     },
   };
+}
+
+function withUniqueDraftId(draft: ResponseDraft, existing: readonly ResponseDraft[]): ResponseDraft {
+  const existingIds = new Set(existing.map(({ id }) => id));
+  if (!existingIds.has(draft.id)) return { ...draft };
+  let suffix = 2;
+  let id = draft.id;
+  while (existingIds.has(id)) {
+    const marker = `-${suffix}`;
+    id = `${draft.id.slice(0, 100 - marker.length)}${marker}`;
+    suffix += 1;
+  }
+  return { ...draft, id };
 }

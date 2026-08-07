@@ -43,3 +43,23 @@ All commands used Node `22.22.0` where an explicit runtime was required.
 - `git diff --check` passed.
 
 No physical-device, signed build, TestFlight, external service configuration, App Store review, or publication claim is made by this phase.
+
+## Review-fix loop
+
+### RED
+
+The scoped mobile review-fix run produced 7 expected failures and 64 passes. The failures proved that the response client still accepted missing request-ID headers and a no-reader `text()` fallback, did not cancel invalid/error readers, the repository lacked an atomic append operation, a paid result was discarded after append failure, and an unresolved local-save retry did not block remote review.
+
+The focused Worker run produced 1 expected failure and 19 passes: both success/error `x-request-id` headers and the browser-exposed header were absent.
+
+### GREEN
+
+- The focused mobile review-fix suites passed 72/72. They cover the required bounded-reader behavior, cancellation on invalid and failed streams, mandatory matching request IDs, serialized atomic appends, persistence-only paid-result retry, a local-save dispatch barrier, unique IDs for separate paid results, and exact ID reuse during retry.
+- The focused Worker suite passed 20/20. Success and public-error envelopes now carry a matching `x-request-id`, and allowed browser origins expose it.
+- The full mobile suite passed 313/313 across 37 suites. Mobile TypeScript and zero-warning lint passed.
+- Worker TypeScript, zero-warning lint, the production dry build, and the load-fixture dry build passed.
+- The short local load gate passed with 165/165 non-injected requests successful, the intentionally injected 101st-capacity request returning `503/SERVICE_BUSY`, a capacity peak of 100, and zero leaked reservations.
+- The first full Worker run passed 123/126. Its three failures were confined to the untouched admission fixture: the fixture's hard-coded `2026-08-07T12:00:00Z` lease time had crossed the real wall clock, so Miniflare immediately treated the fixture alarms as overdue. This rollover failure is repaired and re-run in a separate test-only commit so it cannot be confused with the response-result implementation.
+- After moving only the admission test timestamps and matching fixture labels to deterministic year 2099 values, the focused admission suite passed 29/29 and the fresh full Worker suite passed 126/126 across 10 suites.
+
+The response client no longer uses an unbounded `response.text()` fallback. Its production default loads Expo's streaming fetch transport, requires a reader, enforces the byte limit while streaming, and cancels every invalid, oversize, reader-error, timeout, and caller-abort path. Injected transports remain supported for deterministic tests.

@@ -33,6 +33,8 @@ const tones: readonly { id: ResponseTone; label: string }[] = [
   { id: 'diplomatic', label: 'Diplomatic & balanced' },
 ];
 
+type PendingAiPersistence = Readonly<{ reportId: string; draft: ResponseDraft }>;
+
 export default function ResponseScreen() {
   const { reportId } = useLocalSearchParams<{ reportId: string }>();
   const { repository, preferences, revision, deletingAll } = useReportRepository();
@@ -51,6 +53,7 @@ export default function ResponseScreen() {
   const [reviewConfirming, setReviewConfirming] = useState(false);
   const [remoteRunning, setRemoteRunning] = useState(false);
   const [remoteNotice, setRemoteNotice] = useState<string | null>(null);
+  const [pendingAiPersistence, setPendingAiPersistence] = useState<PendingAiPersistence | null>(null);
   const loadGeneration = useRef(0);
   const persistenceGeneration = useRef(0);
   const loadedReportId = useRef<string | null>(null);
@@ -114,6 +117,7 @@ export default function ResponseScreen() {
       setTone(null);
       setSaveError(false);
       setSaving(false);
+      setPendingAiPersistence(null);
       setLoadStatus('loading');
       loadedReportId.current = null;
       return () => { loadGeneration.current += 1; cancelRemoteWorkflow(); };
@@ -144,6 +148,16 @@ export default function ResponseScreen() {
 
   const senders = useMemo(() => Array.from(new Set(report?.result.messages.map((message) => message.sender) ?? [])), [report]);
   const progress = !sender ? 'Step 2 of 4: Sender' : !goal ? 'Step 3 of 4: Goal' : !tone ? 'Step 4 of 4: Tone' : 'Ready to generate';
+  const remoteDispatchBlocked = saveError || retryDrafts !== null || pendingAiPersistence !== null;
+  const visibleDrafts = useMemo(() => {
+    if (!pendingAiPersistence || pendingAiPersistence.reportId !== reportId) return drafts;
+    const alreadyVisible = drafts.some((draft) => (
+      draft.id === pendingAiPersistence.draft.id
+      && draft.text === pendingAiPersistence.draft.text
+      && draft.hint === pendingAiPersistence.draft.hint
+    ));
+    return alreadyVisible ? drafts : [...drafts, pendingAiPersistence.draft];
+  }, [drafts, pendingAiPersistence, reportId]);
 
   const persistDrafts = async (nextDrafts: ResponseDraft[]) => {
     if (!report) return;
@@ -195,6 +209,30 @@ export default function ResponseScreen() {
     && !deletingAllRef.current
   );
 
+  async function persistReturnedAiDraft(pending: PendingAiPersistence, generation: number): Promise<boolean> {
+    try {
+      const updated = await repository.appendResponseDraft(pending.reportId, pending.draft);
+      if (!updated) throw new Error('REPORT_NOT_FOUND');
+      if (!isCurrentRemoteRun(generation, pending.reportId)) return false;
+      setReport(updated);
+      setDrafts(updated.responseDrafts.map((item) => ({ ...item })));
+      setRetryDrafts(null);
+      setSaveError(false);
+      setPendingAiPersistence((current) => current?.draft.id === pending.draft.id ? null : current);
+      setRemoteStage('idle');
+      setReviewMessages([]);
+      setRemoteNotice('One AI-assisted draft was saved. Review it before sending.');
+      return true;
+    } catch {
+      if (!isCurrentRemoteRun(generation, pending.reportId)) return false;
+      setPendingAiPersistence(pending);
+      setRemoteStage('idle');
+      setReviewMessages([]);
+      setRemoteNotice('The AI-assisted draft was created but could not be saved. Retry saving without using another AI allowance.');
+      return false;
+    }
+  }
+
   async function runRemoteRequest(grantConsent: boolean) {
     const request = pendingRemoteRequest.current;
     if (!request || remoteRunningRef.current || !mountedRef.current) return;
@@ -205,36 +243,29 @@ export default function ResponseScreen() {
     const controller = new AbortController();
     remoteAbort.current = controller;
     try {
-      if (grantConsent) await consentStore.grantConsent();
-      if (!isCurrentRemoteRun(generation, request.reportId)) return;
-      const remoteInput: AiResponseRequest = {
-        sender: request.sender,
-        goal: request.goal,
-        tone: request.tone,
-        analysis: request.analysis,
-      };
-      const draft = await craftReviewedResponse(remoteInput, controller.signal);
+      let draft: ResponseDraft;
+      try {
+        if (grantConsent) await consentStore.grantConsent();
+        if (!isCurrentRemoteRun(generation, request.reportId)) return;
+        const remoteInput: AiResponseRequest = {
+          sender: request.sender,
+          goal: request.goal,
+          tone: request.tone,
+          analysis: request.analysis,
+        };
+        draft = await craftReviewedResponse(remoteInput, controller.signal);
+      } catch (error) {
+        if (!isCurrentRemoteRun(generation, request.reportId)) return;
+        setRemoteStage('idle');
+        setReviewMessages([]);
+        setRemoteNotice(remoteFailureMessage(error));
+        return;
+      }
       if (controller.signal.aborted || !isCurrentRemoteRun(generation, request.reportId)) return;
-      const latest = await repository.get(request.reportId);
-      if (!latest || !isCurrentRemoteRun(generation, request.reportId)) return;
-      const aiDraft = responseDraftForStorage(draft, latest.responseDrafts);
-      const nextDrafts = [...latest.responseDrafts.map((item) => ({ ...item })), aiDraft];
-      const updated = { ...latest, responseDrafts: nextDrafts, updatedAt: new Date().toISOString() };
-      await repository.save(updated);
-      if (!isCurrentRemoteRun(generation, request.reportId)) return;
-      setReport(updated);
-      setDrafts(nextDrafts);
-      setRetryDrafts(null);
-      setSaveError(false);
-      setRemoteStage('idle');
-      setReviewMessages([]);
-      setRemoteNotice('One AI-assisted draft was saved. Review it before sending.');
+      const pending = { reportId: request.reportId, draft: responseDraftForStorage(draft) };
       pendingRemoteRequest.current = null;
-    } catch (error) {
-      if (!isCurrentRemoteRun(generation, request.reportId)) return;
-      setRemoteStage('idle');
-      setReviewMessages([]);
-      setRemoteNotice(remoteFailureMessage(error));
+      setPendingAiPersistence(pending);
+      await persistReturnedAiDraft(pending, generation);
     } finally {
       if (isCurrentRemoteRun(generation, request.reportId)) {
         remoteRunningRef.current = false;
@@ -244,8 +275,25 @@ export default function ResponseScreen() {
     }
   }
 
+  async function retryAiPersistence() {
+    const pending = pendingAiPersistence;
+    if (!pending || remoteRunningRef.current || !mountedRef.current || loadedReportId.current !== pending.reportId) return;
+    const generation = remoteGeneration.current;
+    remoteRunningRef.current = true;
+    setRemoteRunning(true);
+    setRemoteNotice(null);
+    try {
+      await persistReturnedAiDraft(pending, generation);
+    } finally {
+      if (isCurrentRemoteRun(generation, pending.reportId)) {
+        remoteRunningRef.current = false;
+        setRemoteRunning(false);
+      }
+    }
+  }
+
   function startRemoteReview() {
-    if (!report || !sender || !goal || !tone || saving || remoteRunningRef.current) return;
+    if (!report || !sender || !goal || !tone || saving || remoteRunningRef.current || remoteDispatchBlocked) return;
     cancelRemoteWorkflow();
     const generation = remoteGeneration.current;
     pendingRemoteRequest.current = {
@@ -330,7 +378,7 @@ export default function ResponseScreen() {
               key={person}
               label={person}
               selected={sender === person}
-              disabled={saving || remoteRunning || remoteStage !== 'idle'}
+              disabled={saving || remoteRunning || remoteStage !== 'idle' || pendingAiPersistence !== null}
               onPress={() => { cancelRemoteWorkflow(); setSender(person); setGoal(null); setTone(null); }}
               testID={`sender-${person.toLowerCase().replaceAll(' ', '-')}`}
             />
@@ -345,7 +393,7 @@ export default function ResponseScreen() {
                 key={option.id}
                 label={option.label}
                 selected={goal === option.id}
-                disabled={saving || remoteRunning || remoteStage !== 'idle'}
+                disabled={saving || remoteRunning || remoteStage !== 'idle' || pendingAiPersistence !== null}
                 onPress={() => { cancelRemoteWorkflow(); setGoal(option.id); setTone(null); }}
                 testID={`goal-${option.id}`}
               />
@@ -357,19 +405,19 @@ export default function ResponseScreen() {
             <Text style={styles.sectionTitle}>4. What tone fits?</Text>
             {tone ? <Text style={styles.message}>Selected tone: {tones.find((option) => option.id === tone)?.label}</Text> : null}
             {tones.map((option) => (
-              <PrimaryButton key={option.id} label={option.label} selected={tone === option.id} disabled={saving || remoteRunning || remoteStage !== 'idle'} onPress={() => { cancelRemoteWorkflow(); setTone(option.id); }} testID={`tone-${option.id}`} />
+              <PrimaryButton key={option.id} label={option.label} selected={tone === option.id} disabled={saving || remoteRunning || remoteStage !== 'idle' || pendingAiPersistence !== null} onPress={() => { cancelRemoteWorkflow(); setTone(option.id); }} testID={`tone-${option.id}`} />
             ))}
           </View>
         ) : null}
 
-        <PrimaryButton label="Generate on-device drafts" disabled={!sender || !goal || !tone || saving || remoteRunning} onPress={generate} testID="generate-responses" />
+        <PrimaryButton label="Generate on-device drafts" disabled={!sender || !goal || !tone || saving || remoteRunning || pendingAiPersistence !== null} onPress={generate} testID="generate-responses" />
         <PrimaryButton
           label="Review text for one AI draft"
-          disabled={!sender || !goal || !tone || saving || remoteRunning || remoteStage !== 'idle'}
+          disabled={!sender || !goal || !tone || saving || remoteRunning || remoteStage !== 'idle' || remoteDispatchBlocked}
           onPress={startRemoteReview}
           testID="review-ai-response"
         />
-        <PrimaryButton label="Reset draft choices" disabled={saving || remoteRunning} onPress={resetWizard} />
+        <PrimaryButton label="Reset draft choices" disabled={saving || remoteRunning || pendingAiPersistence !== null} onPress={resetWizard} />
         {remoteStage === 'review' ? (
           <RemoteDataReview
             isConfirming={reviewConfirming}
@@ -387,13 +435,20 @@ export default function ResponseScreen() {
           />
         ) : null}
         {remoteNotice ? <Text accessibilityRole="alert" style={styles.message}>{remoteNotice}</Text> : null}
+        {pendingAiPersistence?.reportId === report.id ? (
+          <PrimaryButton
+            label="Retry saving AI-assisted draft"
+            disabled={remoteRunning}
+            onPress={() => { void retryAiPersistence(); }}
+          />
+        ) : null}
         {saveError ? (
           <View style={styles.section}>
             <Text accessibilityRole="alert" style={styles.error}>Could not save these drafts. Please try again.</Text>
             <PrimaryButton label="Retry saving drafts" disabled={saving || !retryDrafts} onPress={() => { if (retryDrafts) void persistDrafts(retryDrafts); }} />
           </View>
         ) : null}
-        {drafts.map((draft, index) => (
+        {visibleDrafts.map((draft, index) => (
           <View key={draft.id} style={styles.section}>
             <Text style={styles.draftSource}>{draft.id.startsWith('ai-') ? 'AI-assisted draft' : 'On-device draft'}</Text>
             <ResponseDraftCard
@@ -443,17 +498,18 @@ function analysisWithReviewedText(analysis: AnalysisResult, reviewedMessages: Pa
   };
 }
 
-function responseDraftForStorage(draft: ResponseDraft, existing: readonly ResponseDraft[]): ResponseDraft {
-  const existingIds = new Set(existing.map(({ id }) => id));
-  const base = `ai-${draft.id}`.slice(0, 100);
-  let id = base;
-  let suffix = 2;
-  while (existingIds.has(id)) {
-    const marker = `-${suffix}`;
-    id = `${base.slice(0, 100 - marker.length)}${marker}`;
-    suffix += 1;
-  }
-  return { id, text: draft.text, hint: draft.hint };
+let responseDraftStorageSequence = 0;
+
+function responseDraftForStorage(draft: ResponseDraft): ResponseDraft {
+  responseDraftStorageSequence = (responseDraftStorageSequence + 1) % Number.MAX_SAFE_INTEGER;
+  const uniquenessToken = `${Date.now().toString(36)}-${responseDraftStorageSequence.toString(36)}`;
+  const marker = `-${uniquenessToken}`;
+  const base = `ai-${draft.id}`;
+  return {
+    id: `${base.slice(0, 100 - marker.length)}${marker}`,
+    text: draft.text,
+    hint: draft.hint,
+  };
 }
 
 function remoteFailureMessage(error: unknown): string {

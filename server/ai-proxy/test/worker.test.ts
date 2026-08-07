@@ -85,6 +85,19 @@ describe('AI proxy routes', () => {
     await expect(response.json()).resolves.toMatchObject({ analysis, requestId: expect.any(String) });
   });
 
+  it('emits matching request IDs on success and errors and exposes the header to allowed web origins', async () => {
+    const origin = 'https://avinashamanchi.github.io';
+    const success = await app().fetch(request('/v1/analyses', analysisRequest(), { headers: { Origin: origin } }), env as unknown as Env);
+    const failure = await app().fetch(request('/v1/analyses', analysisRequest({ consentVersion: 'old-consent' }), { headers: { Origin: origin } }), env as unknown as Env);
+    const successBody = await success.json() as { requestId: string };
+    const failureBody = await failure.json() as { error: { requestId: string } };
+
+    expect(success.headers.get('x-request-id')).toBe(successBody.requestId);
+    expect(failure.headers.get('x-request-id')).toBe(failureBody.error.requestId);
+    expect(success.headers.get('access-control-expose-headers')).toContain('x-request-id');
+    expect(failure.headers.get('access-control-expose-headers')).toContain('x-request-id');
+  });
+
   it('rejects non-POST methods and unknown routes without echoing request content', async () => {
     const getResponse = await app().fetch(new Request('https://proxy.example/v1/analyses'), env as unknown as Env);
     const unknownResponse = await app().fetch(request('/v1/unknown', analysisRequest()), env as unknown as Env);

@@ -496,6 +496,70 @@ it('persists one AI-assisted draft without replacing existing drafts', async () 
   expect((jest.requireMock('expo-sharing') as { shareAsync: jest.Mock }).shareAsync).not.toHaveBeenCalled();
 });
 
+it('retains a completed paid draft after append failure and retries only persistence', async () => {
+  mockGetConsent.mockResolvedValue({ version: '2026-08-07', grantedAt: '2026-08-07T12:00:00.000Z', provider: 'Groq' });
+  const repository = new MemoryReportRepository();
+  const save = jest.spyOn(repository, 'save');
+  repository.saveError = new Error('disk full');
+  renderResponse(repository);
+  await selectResponseOptions();
+
+  fireEvent.press(screen.getByRole('button', { name: 'Review text for one AI draft' }));
+  fireEvent.press(await screen.findByRole('button', { name: 'Confirm exact text' }));
+
+  expect(await screen.findByText('The AI-assisted draft was created but could not be saved. Retry saving without using another AI allowance.')).toBeOnTheScreen();
+  expect(screen.getByText('Could we return to this calmly?')).toBeOnTheScreen();
+  expect(screen.getByText('AI-assisted draft')).toBeOnTheScreen();
+  expect(screen.getByRole('button', { name: 'Retry saving AI-assisted draft' })).toBeOnTheScreen();
+  expect(screen.getByRole('button', { name: 'Review text for one AI draft' }).props.accessibilityState.disabled).toBe(true);
+  expect(mockResponseRequest).toHaveBeenCalledTimes(1);
+
+  repository.saveError = null;
+  fireEvent.press(screen.getByRole('button', { name: 'Retry saving AI-assisted draft' }));
+
+  await waitFor(() => expect(repository.reports[0].responseDrafts).toEqual([{
+    id: expect.stringMatching(/^ai-reviewed-1-/),
+    text: 'Could we return to this calmly?',
+    hint: 'Review before sending.',
+  }]));
+  expect(mockResponseRequest).toHaveBeenCalledTimes(1);
+  expect(save).toHaveBeenCalledTimes(2);
+  expect(save.mock.calls[0][0].responseDrafts[0].id).toBe(save.mock.calls[1][0].responseDrafts[0].id);
+  expect(screen.queryByRole('button', { name: 'Retry saving AI-assisted draft' })).toBeNull();
+});
+
+it('assigns distinct storage IDs when separate paid requests return the same provider draft ID', async () => {
+  mockGetConsent.mockResolvedValue({ version: '2026-08-07', grantedAt: '2026-08-07T12:00:00.000Z', provider: 'Groq' });
+  const repository = new MemoryReportRepository();
+  renderResponse(repository);
+  await selectResponseOptions();
+
+  for (let request = 1; request <= 2; request += 1) {
+    fireEvent.press(screen.getByRole('button', { name: 'Review text for one AI draft' }));
+    fireEvent.press(await screen.findByRole('button', { name: 'Confirm exact text' }));
+    await waitFor(() => expect(repository.reports[0].responseDrafts).toHaveLength(request));
+  }
+
+  expect(mockResponseRequest).toHaveBeenCalledTimes(2);
+  expect(new Set(repository.reports[0].responseDrafts.map(({ id }) => id))).toHaveProperty('size', 2);
+});
+
+it('does not start reviewed AI flow while a failed on-device save has an unresolved retry payload', async () => {
+  const repository = new MemoryReportRepository();
+  repository.saveError = new Error('disk full');
+  renderResponse(repository);
+  await selectResponseOptions();
+
+  fireEvent.press(screen.getByRole('button', { name: 'Generate on-device drafts' }));
+  expect(await screen.findByText('Could not save these drafts. Please try again.')).toBeOnTheScreen();
+
+  const remoteAction = screen.getByRole('button', { name: 'Review text for one AI draft' });
+  expect(remoteAction.props.accessibilityState.disabled).toBe(true);
+  fireEvent.press(remoteAction);
+  expect(screen.queryByText('Review exact text sent for AI')).toBeNull();
+  expect(mockResponseRequest).not.toHaveBeenCalled();
+});
+
 it.each([
   [new AiClientError('RATE_LIMITED', 31), 'AI draft rate limit reached. Try again in 31 seconds.'],
   [new AiClientError('PLAN_LIMIT_REACHED', 60), 'AI draft allowance has been used for this period.'],

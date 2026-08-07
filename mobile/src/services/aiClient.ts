@@ -34,6 +34,12 @@ export class AiClientError extends Error {
 
 type FetchPort = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
+const expoResponseFetch: FetchPort = async (input, init) => {
+  const { fetch } = await import('expo/fetch');
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+  return fetch(url, init as never) as unknown as Promise<Response>;
+};
+
 type AiClientDependencies = {
   endpoint?: string;
   fetch?: FetchPort;
@@ -141,7 +147,7 @@ export function createAiClient({
 
 export function createResponseClient({
   endpoint = process.env.EXPO_PUBLIC_AI_PROXY_URL,
-  fetch: fetchPort = globalThis.fetch,
+  fetch: fetchPort = expoResponseFetch,
   getConsent,
   getInstallationToken,
   getRevenueCatAppUserId,
@@ -280,65 +286,95 @@ async function readJson(response: Response): Promise<unknown> {
 
 async function readBoundedJson(response: Response, signal: AbortSignal): Promise<unknown> {
   const maximumBytes = 32_768;
-  const contentType = response.headers.get('content-type');
-  if (!contentType?.toLowerCase().startsWith('application/json')) throw new AiClientError('INVALID_RESPONSE');
-  const declaredHeader = response.headers.get('content-length');
-  if (declaredHeader !== null) {
-    const declaredLength = Number(declaredHeader);
-    if (!Number.isSafeInteger(declaredLength) || declaredLength < 0 || declaredLength > maximumBytes) {
-      await response.body?.cancel().catch(() => undefined);
-      throw new AiClientError('INVALID_RESPONSE');
-    }
-  }
-  try {
-    const body = response.body;
-    if (body && typeof body.getReader === 'function') {
-      const reader = body.getReader();
-      const chunks: Uint8Array[] = [];
-      let totalBytes = 0;
-      const cancelReader = () => { void reader.cancel().catch(() => undefined); };
-      signal.addEventListener('abort', cancelReader, { once: true });
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (!(value instanceof Uint8Array)) throw new AiClientError('INVALID_RESPONSE');
-          totalBytes += value.byteLength;
-          if (totalBytes > maximumBytes) {
-            await reader.cancel().catch(() => undefined);
-            throw new AiClientError('INVALID_RESPONSE');
-          }
-          chunks.push(value);
-        }
-      } finally {
-        signal.removeEventListener('abort', cancelReader);
-        reader.releaseLock?.();
-      }
-      const bytes = new Uint8Array(totalBytes);
-      let offset = 0;
-      for (const chunk of chunks) {
-        bytes.set(chunk, offset);
-        offset += chunk.byteLength;
-      }
-      return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown;
-    }
-
-    const text = await response.text();
-    if (utf8ByteLength(text) > maximumBytes) throw new AiClientError('INVALID_RESPONSE');
-    return JSON.parse(text) as unknown;
-  } catch (error) {
-    if (error instanceof AiClientError) throw error;
+  const body = response.body;
+  if (!body || typeof body.getReader !== 'function') {
+    await body?.cancel?.().catch(() => undefined);
     throw new AiClientError('INVALID_RESPONSE');
   }
-}
 
-function utf8ByteLength(value: string): number {
-  let bytes = 0;
-  for (const character of value) {
-    const point = character.codePointAt(0)!;
-    bytes += point <= 0x7f ? 1 : point <= 0x7ff ? 2 : point <= 0xffff ? 3 : 4;
+  let reader: ReadableStreamDefaultReader<Uint8Array>;
+  try {
+    reader = body.getReader();
+  } catch {
+    await body.cancel().catch(() => undefined);
+    throw new AiClientError('INVALID_RESPONSE');
   }
-  return bytes;
+
+  let cancellationStarted = false;
+  const cancelReader = async () => {
+    if (cancellationStarted) return;
+    cancellationStarted = true;
+    await reader.cancel().catch(() => undefined);
+  };
+  const cancelOnAbort = () => { void cancelReader(); };
+  signal.addEventListener('abort', cancelOnAbort, { once: true });
+
+  try {
+    if (signal.aborted) {
+      await cancelReader();
+      throw new DOMException('aborted', 'AbortError');
+    }
+
+    const contentType = response.headers.get('content-type');
+    if (!contentType?.toLowerCase().startsWith('application/json')) {
+      await cancelReader();
+      throw new AiClientError('INVALID_RESPONSE');
+    }
+
+    const declaredHeader = response.headers.get('content-length');
+    if (declaredHeader !== null) {
+      const declaredLength = Number(declaredHeader);
+      if (!Number.isSafeInteger(declaredLength) || declaredLength < 0 || declaredLength > maximumBytes) {
+        await cancelReader();
+        throw new AiClientError('INVALID_RESPONSE');
+      }
+    }
+
+    const chunks: Uint8Array[] = [];
+    let totalBytes = 0;
+    while (true) {
+      let result: ReadableStreamReadResult<Uint8Array>;
+      try {
+        result = await reader.read();
+      } catch {
+        await cancelReader();
+        if (signal.aborted) throw new DOMException('aborted', 'AbortError');
+        throw new AiClientError('INVALID_RESPONSE');
+      }
+      if (result.done) break;
+      if (!(result.value instanceof Uint8Array)) {
+        await cancelReader();
+        throw new AiClientError('INVALID_RESPONSE');
+      }
+      totalBytes += result.value.byteLength;
+      if (totalBytes > maximumBytes) {
+        await cancelReader();
+        throw new AiClientError('INVALID_RESPONSE');
+      }
+      chunks.push(result.value);
+    }
+
+    if (signal.aborted) {
+      await cancelReader();
+      throw new DOMException('aborted', 'AbortError');
+    }
+
+    const bytes = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    try {
+      return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown;
+    } catch {
+      await cancelReader();
+      throw new AiClientError('INVALID_RESPONSE');
+    }
+  } finally {
+    signal.removeEventListener('abort', cancelOnAbort);
+    reader.releaseLock?.();
+  }
 }
 
 function validAnalysis(response: Response, body: unknown): AnalysisResult {
@@ -391,7 +427,7 @@ function isPublicErrorEnvelope(value: unknown): value is PublicErrorEnvelope {
 
 function requestIdMatchesHeader(response: Response, requestId: string): boolean {
   const header = response.headers.get('x-request-id');
-  return header === null || header === requestId;
+  return header === requestId;
 }
 
 function validRetryAfter(value: unknown): number | undefined {

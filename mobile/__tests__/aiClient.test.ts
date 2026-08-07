@@ -33,7 +33,12 @@ const responseDraft = {
 
 function response(body: unknown, init: ResponseInit = {}) {
   const { headers, ...rest } = init;
-  return new Response(JSON.stringify(body), { status: 200, ...rest, headers: { 'content-type': 'application/json', ...headers } });
+  const responseHeaders = new Headers({ 'content-type': 'application/json', ...headers });
+  const requestId = typeof body === 'object' && body !== null && !Array.isArray(body)
+    ? ('requestId' in body ? body.requestId : 'error' in body && typeof body.error === 'object' && body.error !== null && 'requestId' in body.error ? body.error.requestId : null)
+    : null;
+  if (typeof requestId === 'string' && !responseHeaders.has('x-request-id')) responseHeaders.set('x-request-id', requestId);
+  return new Response(JSON.stringify(body), { status: 200, ...rest, headers: responseHeaders });
 }
 
 type FetchMock = jest.Mock<Promise<Response>, [RequestInfo | URL, RequestInit?]>;
@@ -357,6 +362,70 @@ describe('reviewed AI response client', () => {
     }
   });
 
+  it('requires the response request ID header for both success and public errors', async () => {
+    const missingSuccessHeader = new Response(JSON.stringify({ response: responseDraft, requestId: 'req-missing-success' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+    const missingErrorHeader = new Response(JSON.stringify({ error: { code: 'SERVICE_BUSY', requestId: 'req-missing-error' } }), {
+      status: 503,
+      headers: { 'content-type': 'application/json', 'x-public-error-code': 'SERVICE_BUSY' },
+    });
+    const mismatchedErrorHeader = response(
+      { error: { code: 'SERVICE_BUSY', requestId: 'req-error-body' } },
+      { status: 503, headers: { 'x-public-error-code': 'SERVICE_BUSY', 'x-request-id': 'req-error-header' } },
+    );
+
+    for (const item of [missingSuccessHeader, missingErrorHeader, mismatchedErrorHeader]) {
+      const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockResolvedValue(item);
+      await expectCode(responseClient(fetchImpl)(input, new AbortController().signal), 'INVALID_RESPONSE');
+    }
+  });
+
+  it('rejects a response without a bounded reader and never calls text()', async () => {
+    const text = jest.fn().mockResolvedValue(JSON.stringify({ response: responseDraft, requestId: 'req-no-reader' }));
+    const noReader = {
+      body: null,
+      headers: new Headers({ 'content-type': 'application/json', 'x-request-id': 'req-no-reader' }),
+      ok: true,
+      status: 200,
+      text,
+    } as unknown as Response;
+    const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockResolvedValue(noReader);
+
+    await expectCode(responseClient(fetchImpl)(input, new AbortController().signal), 'INVALID_RESPONSE');
+    expect(text).not.toHaveBeenCalled();
+  });
+
+  it('cancels the reader for invalid content type and reader failure', async () => {
+    const invalidTypeCancel = jest.fn().mockResolvedValue(undefined);
+    const invalidTypeRead = jest.fn();
+    const invalidType = {
+      body: { getReader: () => ({ read: invalidTypeRead, cancel: invalidTypeCancel }) },
+      headers: new Headers({ 'content-type': 'text/plain', 'x-request-id': 'req-type' }),
+      ok: true,
+      status: 200,
+      text: jest.fn(),
+    } as unknown as Response;
+    const readerFailureCancel = jest.fn().mockResolvedValue(undefined);
+    const readerFailure = {
+      body: { getReader: () => ({ read: jest.fn().mockRejectedValue(new Error('private stream details')), cancel: readerFailureCancel }) },
+      headers: new Headers({ 'content-type': 'application/json', 'x-request-id': 'req-reader' }),
+      ok: true,
+      status: 200,
+      text: jest.fn(),
+    } as unknown as Response;
+
+    for (const item of [invalidType, readerFailure]) {
+      const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockResolvedValue(item);
+      await expectCode(responseClient(fetchImpl)(input, new AbortController().signal), 'INVALID_RESPONSE');
+    }
+
+    expect(invalidTypeRead).not.toHaveBeenCalled();
+    expect(invalidTypeCancel).toHaveBeenCalledTimes(1);
+    expect(readerFailureCancel).toHaveBeenCalledTimes(1);
+  });
+
   it('stops reading and cancels a chunked response as soon as the byte cap is exceeded', async () => {
     const cancel = jest.fn().mockResolvedValue(undefined);
     const read = jest.fn()
@@ -424,7 +493,7 @@ describe('reviewed AI response client', () => {
     let rejectRead!: (reason?: unknown) => void;
     const read = jest.fn(() => new Promise<ReadableStreamReadResult<Uint8Array>>((_resolve, reject) => { rejectRead = reject; }));
     const cancel = jest.fn().mockImplementation(() => {
-      rejectRead(new DOMException('aborted', 'AbortError'));
+      rejectRead(new Error('native stream stopped without an AbortError name'));
       return Promise.resolve();
     });
     const stalledResponse = {
@@ -454,7 +523,7 @@ describe('reviewed AI response client', () => {
       return new Promise<ReadableStreamReadResult<Uint8Array>>((_resolve, reject) => { rejectRead = reject; });
     });
     const cancel = jest.fn().mockImplementation(() => {
-      rejectRead(new DOMException('aborted', 'AbortError'));
+      rejectRead(new Error('native stream stopped without an AbortError name'));
       return Promise.resolve();
     });
     const stalledResponse = {
