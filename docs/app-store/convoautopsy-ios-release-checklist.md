@@ -6,7 +6,7 @@ This checklist separates repository state from credentialed and externally obser
 
 - [x] Bundle and Maestro app ID are `com.avinashamanchi.convoautopsy`; the app is iPhone-only and declares `ios.usesAppleSignIn: false` because it offers no account or Apple sign-in.
 - [x] The Expo app under `mobile/` is the only supported iOS release target. Root `ios`, `sync`, and `build:app` commands deterministically reject the historical Capacitor path; its old target ID remains historical rather than being presented as a second candidate.
-- [x] Production Expo config fails closed unless the AI proxy is a credential-free HTTPS production DNS origin and the RevenueCat value is a non-placeholder Apple public SDK key. It rejects trailing-dot/single-label hosts, example and special-use suffixes, local/private/reserved/documentation addresses, and literal IPv6. Error messages name only the variable; neither value is copied into Expo `extra`.
+- [x] Production Expo config fails closed unless the AI proxy is a credential-free HTTPS production DNS origin and the RevenueCat value is a non-placeholder Apple public SDK key. It rejects trailing-dot/single-label hosts, example and special-use suffixes including `.alt`, local/private/reserved/documentation addresses, and literal IPv6. Error messages name only the variable; neither value is copied into Expo `extra`.
 - [x] EAS configuration is credential-free, store-distributed, remote-versioned, auto-incrementing, and contains no submit profile or Apple credentials.
 - [x] Billing maps the exact monthly/annual products to their periods while preserving RevenueCat/StoreKit localized prices.
 - [x] The paywall truthfully states Free and Pro local, report, analysis, and draft allowances; UTC/rolling windows; no-rollover fair-use status; renewal/cancellation timing; restore behavior; and deletion-versus-cancellation.
@@ -15,6 +15,8 @@ This checklist separates repository state from credentialed and externally obser
 - [x] Local reports, drafts, preferences, consent, installation token, cache artifacts, and session state have a coordinated best-effort deletion path with visible partial failure and retry.
 - [x] In-app and public Privacy, Terms, and Support content covers local/device/iCloud storage; reviewed Cloudflare-to-Groq processing after confirmation/consent; RevenueCat purchase data; five-minute entitlement cache; HMAC-derived quota/rate identifiers; bounded usage/budget/lease/metric state; and deletion limitations.
 - [x] Legal and marketing copy uses `reviewed` or `pseudonymous` where data has not been proven anonymous. It makes no Pro-only trends claim and no promise to eliminate lawful liability or user rights.
+- [x] Deterministic, demo, and rendered-panel possible-interpretation data is explicitly hedged with `may`, `might`, or `could` plus a context caveat; it does not present `I am`, `I feel`, `I care`, or `I need` as the speaker's hidden state.
+- [x] The approved monetization design and implementation plan match the shipped model: Private Trends is free/local, Pro removes the saved-report cap and raises remote fair-use limits, Free resets on a rolling 30-day window, and Pro resets by UTC calendar month.
 - [x] The redacted scanner denies secret-shaped client-public variables except the exact RevenueCat Apple SDK variable, recognizes RevenueCat `sk_` and Expo/EAS token literals in source or built artifacts, and detects provider, Cloudflare, Apple, App Store Connect, private-key, certificate, and provisioning material. It reports only paths and rule IDs while allowing public `appl_` keys and sanitized examples.
 - [x] Each isolated iOS CI job scans the tracked tree plus only its own built artifacts and audits production dependencies. Worker CI and the Pages pre-upload build both perform production/fixture dry builds, scan `dist-load`, and run the short 100/101 load gate.
 - [x] Manual release readiness is `workflow_dispatch` only, cannot deploy or submit, and specifies the local fixture profile: 5 RPS for 3,600 seconds, 20 RPS for 300 seconds, then 100/101 capacity.
@@ -25,8 +27,8 @@ This checklist separates repository state from credentialed and externally obser
 
 Do not reuse an earlier commit’s results for a later candidate. Record fresh evidence here only after all commands complete.
 
-- [x] Full root: 10 test files / 52 tests, zero-warning source lint, and production build passed locally under Node 22. The documented large-chunk warning remains visible.
-- [x] Full mobile: 38 suites / 356 tests, TypeScript, declared lint, Expo Doctor 18/18, and iOS Expo export passed locally under Node 22.
+- [x] Full root: 12 test files / 55 tests, zero-warning source lint, and production build passed locally under Node 22. The documented large-chunk warning remains visible.
+- [x] Full mobile: 38 suites / 358 tests, TypeScript, declared lint, Expo Doctor 18/18, and iOS Expo export passed locally under Node 22.
 - [x] Full Worker: 10 files / 126 tests, TypeScript, zero-warning lint, production dry build, and local-fixture dry build passed locally under Node 22.
 - [x] Redacted scan of tracked files plus web, mobile, production Worker, and fixture Worker outputs passed.
 - [x] Production dependency audits with `--omit=dev --audit-level=high` returned 0 vulnerabilities for all three lockfiles.
@@ -40,6 +42,7 @@ Historical note: commit `d2a02edbced8d3984058ebc0814b97612824ac22` had a separat
 
 - The independent controller rechecked the original Task 8B candidate: root 45/45, mobile 333/333, Worker 126/126, Expo Doctor 18/18, iOS export, both Worker dry builds, scans, audits, production-config guards, workflow tests, and three consecutive short load gates passed.
 - Reviewer follow-up then found release-truth gaps in proxy-origin validation, client-secret scanning, retained-text wording, marketing claims, the Trends paywall, the legacy Capacitor commands, and the Pages pre-upload workflow. Focused regressions were observed red before each fix category; the appended Task 8B report preserves the counts.
+- A second re-review found `.alt`, certainty inside deterministic/demo interpretation values, and stale Pro-Trends/reset-window instructions in the approved spec and plan. Each was driven red before correction; the Task 8B report records focused and broad evidence.
 - The follow-up does not change any external-state label: signed builds, device tests, purchases, TestFlight, App Store review, and publication remain pending until directly observed.
 
 ## External configuration pending — all unchecked

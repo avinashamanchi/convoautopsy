@@ -4,7 +4,7 @@ type Environment = Readonly<Record<string, string | undefined>>;
 
 const RESERVED_DOMAIN_ENDINGS = [
   '.example', '.invalid', '.localhost', '.local', '.test',
-  '.home.arpa', '.arpa', '.internal', '.lan', '.home', '.corp', '.onion',
+  '.home.arpa', '.arpa', '.internal', '.lan', '.home', '.corp', '.onion', '.alt',
 ];
 const PLACEHOLDER_DOMAIN_BASES = ['example.com', 'example.net', 'example.org'];
 

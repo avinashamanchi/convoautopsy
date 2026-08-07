@@ -12,11 +12,11 @@ const EGO = {
 }
 
 const HIDDEN = {
-  Criticism:    'I feel unheard and resort to blame.',
-  Contempt:     'I care deeply but feel completely powerless.',
-  Defensiveness:'I feel attacked and need to protect myself.',
-  Stonewalling: 'I am overwhelmed and shutting down to cope.',
-  Neutral:      'No clear hostility detected in this message.',
+  Criticism:    'This wording may reflect feeling unheard or moving toward blame; context can change that interpretation.',
+  Contempt:     'This wording might reflect frustration, distance, or powerlessness; context can change that interpretation.',
+  Defensiveness:'This wording may reflect feeling challenged or protecting a perspective; context can change that interpretation.',
+  Stonewalling: 'This wording could reflect overwhelm, disengagement, or a wish to pause; context can change that interpretation.',
+  Neutral:      'This wording may not show a clear hostile pattern; context can change that interpretation.',
 }
 
 const WEIGHTS = { Contempt: 30, Criticism: 22, Stonewalling: 18, Defensiveness: 14, Neutral: 0 }
@@ -195,12 +195,12 @@ export const DEMO_RESULT = {
   overall_tension_score: 84,
   conflict_mode: 'Competing vs Avoiding',
   messages: [
-    { sender: 'Person A', text: "I literally told you I'd be there by 7. Why do you always do this?", gottman_flag: 'Criticism', ego_state: 'Parent', hidden_meaning: 'I feel dismissed and resort to blame to feel heard.' },
-    { sender: 'Person B', text: "I said 7:30. You never listen to anything I say.", gottman_flag: 'Criticism', ego_state: 'Parent', hidden_meaning: 'I feel chronically unheard and need to be validated.' },
-    { sender: 'Person A', text: "That's not what I said. Stop twisting my words.", gottman_flag: 'Defensiveness', ego_state: 'Adult', hidden_meaning: 'I feel attacked and need to defend my reality.' },
-    { sender: 'Person B', text: "Whatever. I'm done with this conversation.", gottman_flag: 'Stonewalling', ego_state: 'Child', hidden_meaning: 'I am overwhelmed and shutting down to protect myself.' },
-    { sender: 'Person A', text: "You always run away when things get hard.", gottman_flag: 'Criticism', ego_state: 'Parent', hidden_meaning: 'I feel abandoned and am lashing out in frustration.' },
-    { sender: 'Person B', text: "I don't even care anymore. Figure it out yourself.", gottman_flag: 'Contempt', ego_state: 'Child', hidden_meaning: 'I care deeply but feel completely powerless in this dynamic.' },
+    { sender: 'Person A', text: "I literally told you I'd be there by 7. Why do you always do this?", gottman_flag: 'Criticism', ego_state: 'Parent', hidden_meaning: 'This wording may reflect feeling dismissed or moving toward blame; context can change that interpretation.' },
+    { sender: 'Person B', text: "I said 7:30. You never listen to anything I say.", gottman_flag: 'Criticism', ego_state: 'Parent', hidden_meaning: 'This wording might reflect feeling unheard or seeking validation; context can change that interpretation.' },
+    { sender: 'Person A', text: "That's not what I said. Stop twisting my words.", gottman_flag: 'Defensiveness', ego_state: 'Adult', hidden_meaning: 'This wording may reflect feeling challenged or defending a perspective; context can change that interpretation.' },
+    { sender: 'Person B', text: "Whatever. I'm done with this conversation.", gottman_flag: 'Stonewalling', ego_state: 'Child', hidden_meaning: 'This wording could reflect overwhelm, disengagement, or a wish to pause; context can change that interpretation.' },
+    { sender: 'Person A', text: "You always run away when things get hard.", gottman_flag: 'Criticism', ego_state: 'Parent', hidden_meaning: 'This wording may reflect frustration or fear of disconnection; context can change that interpretation.' },
+    { sender: 'Person B', text: "I don't even care anymore. Figure it out yourself.", gottman_flag: 'Contempt', ego_state: 'Child', hidden_meaning: 'This wording might reflect frustration, distance, or powerlessness; context can change that interpretation.' },
   ]
 }
 import { fetchBoundedJson } from './fetchBoundedJson'

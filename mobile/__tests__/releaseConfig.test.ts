@@ -57,6 +57,8 @@ describe('App Store release configuration', () => {
     ['home host', 'https://worker.home'],
     ['corporate host', 'https://worker.corp'],
     ['onion host', 'https://worker.onion'],
+    ['alt host', 'https://worker.alt'],
+    ['alt subdomain', 'https://api.worker.alt'],
   ])('rejects a %s production AI proxy origin without exposing its value', (_label, proxyUrl) => {
     const environment = {
       EAS_BUILD_PROFILE: 'production',

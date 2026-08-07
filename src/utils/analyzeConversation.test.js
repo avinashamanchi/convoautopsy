@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { analyzeConversation, parseConversation } from './analyzeConversation'
+import { DEMO_RESULT, analyzeConversation, localAnalyze, parseConversation } from './analyzeConversation'
 import { readBoundedJson } from './fetchBoundedJson'
 
 const options = {
@@ -17,6 +17,29 @@ afterEach(() => {
 })
 
 describe('analyzeConversation', () => {
+  it('keeps every deterministic and demo interpretation explicitly hedged and context-dependent', () => {
+    const local = localAnalyze([
+      'A: You always ignore me.',
+      'B: Whatever, do what you want.',
+      "C: That's not what I said.",
+      "D: I'm done.",
+      'E: Thanks for checking in.',
+    ].join('\n'))
+    expect(local).not.toBeNull()
+    expect(new Set(local.messages.map((message) => message.gottman_flag))).toEqual(new Set([
+      'Criticism', 'Contempt', 'Defensiveness', 'Stonewalling', 'Neutral',
+    ]))
+
+    for (const interpretation of [
+      ...local.messages.map((message) => message.hidden_meaning),
+      ...DEMO_RESULT.messages.map((message) => message.hidden_meaning),
+    ]) {
+      expect(interpretation).toMatch(/\b(?:may|might|could)\b/i)
+      expect(interpretation).toMatch(/context can change/i)
+      expect(interpretation).not.toMatch(/\bI (?:am|feel|care|need)\b/i)
+    }
+  })
+
   it('rejects conversations that would require labels beyond Person Z', () => {
     const input = Array.from({ length: 27 }, (_, index) => `Person${index}: Message ${index}`).join('\n')
 

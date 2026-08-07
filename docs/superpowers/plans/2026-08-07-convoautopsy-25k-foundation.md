@@ -13,7 +13,8 @@
 - Target 25,000 monthly active users, 5 remote requests/second sustained, 20 requests/second burst, and 100 concurrent remote clients.
 - No mandatory registration, cloud conversation history, advertising, automatic messaging, or behavioral analytics.
 - Unlimited deterministic local analysis remains free and usable during every remote outage or budget cutoff.
-- Free remote allowance is 3 analyses and 6 response drafts per rolling 30-day window; Pro allowance is 75 analyses and 150 response drafts per entitlement month.
+- Private Trends is a free local feature computed from saved analyses and never requires purchase entitlement or remote AI.
+- Free remote allowance is 3 analyses and 6 response drafts per rolling 30-day window; Pro allowance is 75 analyses and 150 response drafts per UTC calendar month.
 - RevenueCat entitlement is `convo_pro`; products are `com.avinashamanchi.convoautopsy.pro.monthly` and `com.avinashamanchi.convoautopsy.pro.annual`.
 - Never trust a client-supplied `isPro` value; the Worker verifies current entitlement with a server-only RevenueCat secret.
 - Never hard-code a selling price in the app; display only StoreKit-localized prices returned by RevenueCat.
@@ -320,7 +321,7 @@ it('preserves Pro capacity after 95 percent while rejecting free work', async ()
 });
 ```
 
-Also test free 3/6 and Pro 75/150 monthly route counts, UTC reset, lease alarm expiry, duplicate release, zero/invalid configuration, and provider exceptions releasing the lease.
+Also test Free 3/6 route counts with a rolling 30-day reset, Pro 75/150 route counts with a UTC calendar-month reset, lease alarm expiry, duplicate release, zero/invalid configuration, and provider exceptions releasing the lease.
 
 - [ ] **Step 2: Verify RED**
 
@@ -488,9 +489,9 @@ Use `LIMIT limit + 1` and `(updated_at < ?) OR (updated_at = ? AND id < ?)` for 
 
 Both screens load 50 rows, append on `onEndReached`, cancel stale generations, prevent duplicate page loads, reset on query/revision, and expose retry without discarding already visible rows. The response chooser must no longer map all reports in a `ScrollView`.
 
-- [ ] **Step 5: Implement local-only trend aggregation and Pro gate**
+- [ ] **Step 5: Implement free local-only trend aggregation**
 
-`trends.ts` counts pattern labels, conflict modes, report count, and rounded average intensity. `/trends` explains limitations and opens `/upgrade?source=trends` for free users. It never imports `aiClient` or reads `sourceText`.
+`trends.ts` counts pattern labels, conflict modes, report count, and rounded average intensity. `/trends` explains limitations and is available to Free and Pro users. It never imports `aiClient` or reads `sourceText`.
 
 - [ ] **Step 6: Verify 10,000-row behavior and the full mobile suite**
 
@@ -632,5 +633,5 @@ git commit -m "docs: close ConvoAutopsy paid release gates"
 
 - **Spec coverage:** Tasks 1–2 cover StoreKit/RevenueCat and local gates; Tasks 3–4 cover server verification, quotas, concurrency, and budget; Task 5 covers reviewed redaction; Task 6 covers migrations, paging, and local trends; Task 7 covers metrics/load/runbooks; Task 8 covers native, legal, and external release evidence.
 - **Placeholder scan:** No placeholder markers or unspecified implementation steps remain. External account operations have exact systems and verification scenarios.
-- **Type consistency:** `convo_pro`, both product IDs, free/Pro route allowances, `EntitlementPlan`, `BillingSnapshot`, `ReportPage`, and public admission codes are consistent across tasks.
+- **Type consistency:** `convo_pro`, both product IDs, Free rolling-30-day and Pro UTC-calendar-month route allowances, `EntitlementPlan`, `BillingSnapshot`, `ReportPage`, and public admission codes are consistent across tasks.
 - **Safety boundary:** Local analysis remains available under purchase, entitlement, rate, provider, budget, and network failures. Neither client flags nor webhooks independently authorize paid provider work.

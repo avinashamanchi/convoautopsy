@@ -3,10 +3,10 @@ import { gsap } from 'gsap'
 import './DiagnosisPanel.css'
 
 const MESSAGES = [
-  { sender: 'Person A', text: 'Whatever, do what you want.', tag: 'Stonewalling', ego: 'Child', hidden: 'This wording may reflect hurt or reluctance to engage.' },
-  { sender: 'Person B', text: 'You always do this.', tag: 'Criticism', ego: 'Parent', hidden: 'This wording may reflect feeling unheard.' },
-  { sender: 'Person A', text: "I don't even care anymore.", tag: 'Contempt', ego: 'Child', hidden: 'This wording may reflect frustration or distance.' },
-  { sender: 'Person B', text: "That's not what I said.", tag: 'Defensiveness', ego: 'Adult', hidden: 'This wording may reflect disagreement or feeling challenged.' },
+  { sender: 'Person A', text: 'Whatever, do what you want.', tag: 'Stonewalling', ego: 'Child', hidden: 'This wording may reflect hurt or reluctance to engage; context can change that interpretation.' },
+  { sender: 'Person B', text: 'You always do this.', tag: 'Criticism', ego: 'Parent', hidden: 'This wording may reflect feeling unheard; context can change that interpretation.' },
+  { sender: 'Person A', text: "I don't even care anymore.", tag: 'Contempt', ego: 'Child', hidden: 'This wording might reflect frustration or distance; context can change that interpretation.' },
+  { sender: 'Person B', text: "That's not what I said.", tag: 'Defensiveness', ego: 'Adult', hidden: 'This wording could reflect disagreement or feeling challenged; context can change that interpretation.' },
 ]
 
 const TAG_COLORS = {

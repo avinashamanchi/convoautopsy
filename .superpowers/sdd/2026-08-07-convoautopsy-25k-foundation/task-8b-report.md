@@ -123,3 +123,30 @@ Review then identified release-truth gaps. This follow-up preserved and did not 
 ```
 
 No credential, deployment, signed build, device purchase, TestFlight action, App Store submission, review outcome, publication, or external URL availability is inferred from this follow-up.
+
+## Second re-review: interpretation and product-truth alignment
+
+This pass started from `5e801b322fc30b3c1704fca48a2014ff3554bd10`. It preserved and did not stage the user-owned `server/ai-proxy/src/rateLimit.ts` edit or the untracked readiness plan.
+
+### Second-pass RED evidence
+
+- Root focused: 3 files / 13 tests, with 3 expected failures and 10 passes. Failures proved that deterministic/demo interpretation values were still direct speaker-state assertions, rendered panel values lacked context caveats, and the approved spec/plan still described entitlement-month resets and Pro-gated Trends.
+- Mobile production config: 40 tests, with 2 expected failures and 38 passes. The only failures were `.alt` and its subdomain.
+
+### Second-pass implementation
+
+- Added `.alt` to the fail-closed special-use DNS suffix policy and covered both the suffix and a nested subdomain with value-free errors.
+- Replaced every local `HIDDEN` value, every `DEMO_RESULT.hidden_meaning`, and every rendered `DiagnosisPanel` interpretation with an explicit `may`, `might`, or `could` hedge plus `context can change that interpretation`. None asserts `I am`, `I feel`, `I care`, or `I need` as another person's state.
+- Reconciled the approved monetization design and implementation plan: Private Trends is free/local; paid value is removal of the 10-report cap plus larger remote fair-use allowances; Free uses a rolling 30-day window; Pro uses a UTC calendar month. Task 6 Step 5 now instructs free local aggregation for both tiers and contains no upgrade route.
+
+### Second-pass verification
+
+- Focused green: root 3 files / 13 tests and mobile config 40/40.
+- Full root: 12 files / 55 tests, zero-warning lint, and production build passed under Node 22. The existing 1,467.40 kB large-chunk warning remains visible.
+- Full mobile: 38 suites / 358 tests, TypeScript, declared lint, Expo Doctor 18/18, and iOS export passed under Node 22; export again bundled 1,494 modules into a 5.96 MB Hermes bundle.
+- Actual production-config probes rejected both `worker.alt` and `api.worker.alt`; a synthetic valid origin passed without either public value in Expo `extra`.
+- The tracked plus built-output secret scan and 4 files / 13 relevant publication, release-identity, documentation-consistency, and customer-copy tests passed.
+- Final state scans found no entitlement-month, rolling-entitlement-window, Pro-gated Trends, or Trends upgrade-route instruction in the approved spec/plan. Direct first-person speaker-state assertions remain only inside example conversation text, not possible-interpretation values.
+- Worker code was untouched in this pass; the controller retains final full-Worker verification responsibility.
+
+No external pending item or release-state label changed. This pass does not claim credentials, deployment, a signed build, device purchases, TestFlight, submission, review, publication, or live URL availability.

@@ -6,7 +6,7 @@
 
 ## 1. Outcome
 
-ConvoAutopsy remains a private, guest-first conversation reflection tool. Its deterministic local analysis stays useful without an account, payment, or network. ConvoAutopsy Pro adds bounded remote AI assistance and advanced local insight features through Apple In-App Purchase and RevenueCat. The design does not introduce cloud conversation history, mandatory login, advertising, or claims of therapy, diagnosis, hidden intent, or psychological certainty.
+ConvoAutopsy remains a private, guest-first conversation reflection tool. Its deterministic local analysis and Private Trends stay useful without an account, payment, or network. ConvoAutopsy Pro removes the 10-report local-history cap and provides larger bounded remote-AI fair-use allowances through Apple In-App Purchase and RevenueCat. The design does not introduce cloud conversation history, mandatory login, advertising, or claims of therapy, diagnosis, hidden intent, or psychological certainty.
 
 The launch capacity target is 25,000 monthly active users with:
 
@@ -39,18 +39,17 @@ The free product is not a temporary demo:
 - unlimited deterministic local analyses;
 - up to 10 locally saved reports;
 - deterministic local response templates;
+- Private Trends summaries computed locally from saved analyses;
 - complete redaction preview and data-deletion controls;
-- 3 remote AI analyses per rolling 30-day entitlement window; and
-- 6 remote AI response drafts per rolling 30-day entitlement window.
+- 3 remote AI analyses per rolling 30-day window; and
+- 6 remote AI response drafts per rolling 30-day window.
 
 ConvoAutopsy Pro provides:
 
-- up to 75 remote AI analyses and 150 remote AI response drafts per entitlement month;
-- paginated local report history without an artificial count cap;
-- local pattern-trend summaries that never require raw conversation upload;
-- expanded response goals and tone variants;
-- exportable reflection summaries; and
-- continuing remote-AI and product updates.
+- up to 75 remote AI analyses and 150 remote AI response drafts per UTC calendar month; and
+- paginated local report history without an artificial count cap.
+
+Free remote allowances reset on a rolling 30-day window. Pro remote allowances reset at the start of each UTC calendar month.
 
 These are fair-use ceilings, not expiring purchased credits. When a ceiling is reached, the app explains when the allowance resets and continues to offer local analysis. No screen promises unlimited remote AI.
 
@@ -84,7 +83,7 @@ The Cloudflare Worker adds an `AiAdmissionDurableObject` with one environment-wi
 
 - one in-flight slot;
 - 3 provider units for `/v1/analyses` or 1 provider unit for `/v1/responses`; and
-- the plan-specific monthly route allowance.
+- the plan-specific route allowance for its documented reset window.
 
 Reservations expire automatically and are released in `finally`. Configuration is server-only and validated at startup:
 
@@ -108,11 +107,11 @@ The consent record is versioned again when this screen ships. Remote requests co
 
 ### Local trends
 
-Trend summaries are derived on-device from saved `AnalysisResult` fields only: report date, intensity bucket, conflict mode, and pattern counts. They never require source text, AI calls, account identity, or analytics telemetry. Trends explicitly say that they summarize app classifications and do not establish another person's intent or a clinical condition.
+Private Trends is free. Its summaries are derived on-device from saved `AnalysisResult` fields only: report date, intensity bucket, conflict mode, and pattern counts. They never require source text, AI calls, account identity, purchase entitlement, or analytics telemetry. Trends explicitly say that they summarize app classifications and do not establish another person's intent or a clinical condition.
 
 ### Before-send coaching
 
-The response flow keeps deterministic local templates available to everyone. Pro expands goals and tones and may request a remote draft after reviewed consent. A draft is never sent automatically; the only outbound action is an explicit copy or iOS share-sheet action.
+The response flow keeps deterministic local templates, goals, and tone variants available to everyone. A user may request a remote draft after reviewed consent, subject to the Free or Pro remote fair-use allowance. A draft is never sent automatically; the only outbound action is an explicit copy or iOS share-sheet action.
 
 ## 7. Local data durability and scale
 
@@ -162,4 +161,3 @@ Before production submission:
 - Advertising, data brokerage, or behavioral analytics.
 - Claims of therapy, diagnosis, deception detection, or certainty about hidden intent.
 - A promise of unlimited provider-backed AI.
-
