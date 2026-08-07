@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useBilling } from '../src/billing/BillingProvider';
 import { PrimaryButton } from '../src/components/PrimaryButton';
@@ -13,6 +13,8 @@ export default function UpgradeScreen() {
   const { availability, busy, entitlementActive, message, products, purchase, restore } = useBilling();
   const [purchaseOutcome, setPurchaseOutcome] = useState<PurchaseOutcome>('idle');
   const [restoreOutcome, setRestoreOutcome] = useState<RestoreOutcome>('idle');
+  const [billingActionActive, setBillingActionActive] = useState(false);
+  const billingActionLock = useRef(false);
 
   useEffect(() => {
     if (purchaseOutcome !== 'finishing' || busy) return;
@@ -25,18 +27,36 @@ export default function UpgradeScreen() {
   }, [busy, entitlementActive, message, restoreOutcome]);
 
   const chooseProduct = async (productId: string) => {
+    if (billingActionLock.current) return;
+    billingActionLock.current = true;
+    setBillingActionActive(true);
     setRestoreOutcome('idle');
     setPurchaseOutcome('purchasing');
-    await purchase(productId);
-    setPurchaseOutcome('finishing');
+    try {
+      await purchase(productId);
+      setPurchaseOutcome('finishing');
+    } finally {
+      billingActionLock.current = false;
+      setBillingActionActive(false);
+    }
   };
 
   const restorePurchases = async () => {
+    if (billingActionLock.current) return;
+    billingActionLock.current = true;
+    setBillingActionActive(true);
     setPurchaseOutcome('idle');
     setRestoreOutcome('restoring');
-    await restore();
-    setRestoreOutcome('finishing');
+    try {
+      await restore();
+      setRestoreOutcome('finishing');
+    } finally {
+      billingActionLock.current = false;
+      setBillingActionActive(false);
+    }
   };
+
+  const billingActionsDisabled = busy || billingActionActive;
 
   return (
     <Screen>
@@ -49,7 +69,7 @@ export default function UpgradeScreen() {
             <Text style={styles.productTitle}>{product.title}</Text>
             <Text style={styles.price}>{product.localizedPrice}</Text>
             <PrimaryButton
-              disabled={busy}
+              disabled={billingActionsDisabled}
               label={`Choose ${product.title} for ${product.localizedPrice}`}
               onPress={() => { void chooseProduct(product.id); }}
             />
@@ -66,7 +86,7 @@ export default function UpgradeScreen() {
         {restoreOutcome === 'success' ? <Text accessibilityLiveRegion="polite" style={styles.success}>Purchases restored. Convo Pro is active.</Text> : null}
         {restoreOutcome === 'none' ? <Text accessibilityLiveRegion="polite" style={styles.notice}>No Convo Pro purchase was found for this App Store account.</Text> : null}
         {restoreOutcome === 'failed' ? <Text accessibilityRole="alert" style={styles.error}>Could not restore purchases. Please try again.</Text> : null}
-        <PrimaryButton disabled={busy} label={busy && restoreOutcome !== 'idle' ? 'Restoring Purchases…' : 'Restore Purchases'} onPress={() => { void restorePurchases(); }} />
+        <PrimaryButton disabled={billingActionsDisabled} label={billingActionsDisabled && restoreOutcome !== 'idle' ? 'Restoring Purchases…' : 'Restore Purchases'} onPress={() => { void restorePurchases(); }} />
         <PrimaryButton label="Continue Free" onPress={() => router.back()} />
         <View style={styles.legal}>
           <PrimaryButton label="Privacy" onPress={() => router.push('/privacy')} />

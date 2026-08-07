@@ -1,8 +1,10 @@
 import type { ReportRepository, SavedReport } from './reportRepository';
+import { canSaveReport, type SaveGate } from '../billing/saveGate';
 
 export type RepositorySnapshot = { revision: number; deletingAll: boolean };
 
 export type InvalidatingReportRepository = ReportRepository & {
+  saveIfAllowed(report: SavedReport, pro: boolean): Promise<SaveGate>;
   getSnapshot(): RepositorySnapshot;
   subscribe(listener: (snapshot: RepositorySnapshot) => void): () => void;
 };
@@ -40,14 +42,15 @@ export function createInvalidatingReportRepository(repository: ReportRepository)
     return value;
   }
 
-  function mutate(operation: () => Promise<void>): Promise<void> {
+  function mutate<T>(operation: () => Promise<T>, shouldPublish: (value: T) => boolean = () => true): Promise<T> {
     const capturedGeneration = generation;
     if (deletingAll) return Promise.reject(new RepositoryInvalidatedError());
     const pending = mutationTail.then(async () => {
       assertCurrent(capturedGeneration);
-      await operation();
+      const value = await operation();
       assertCurrent(capturedGeneration);
-      publish();
+      if (shouldPublish(value)) publish();
+      return value;
     });
     mutationTail = pending.then(() => undefined, () => undefined);
     return pending;
@@ -58,6 +61,12 @@ export function createInvalidatingReportRepository(repository: ReportRepository)
     list: (query) => read(() => repository.list(query)),
     get: (id) => read(() => repository.get(id)),
     save: (report: SavedReport) => mutate(() => repository.save(report)),
+    saveIfAllowed: (report: SavedReport, pro: boolean) => mutate(async () => {
+      const gate = canSaveReport((await repository.list()).length, pro);
+      if (!gate.allowed) return gate;
+      await repository.save(report);
+      return gate;
+    }, (gate) => gate.allowed),
     delete: (id) => mutate(() => repository.delete(id)),
     deleteAll() {
       if (deletion) return deletion;

@@ -1,7 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { Linking } from 'react-native';
 import { router } from 'expo-router';
 import UpgradeScreen from '../app/upgrade';
 import ResultScreen from '../app/result';
+import TermsScreen from '../app/terms';
 import { BillingProvider } from '../src/billing/BillingProvider';
 import { PurchaseCancelledError } from '../src/billing/revenueCatService';
 import { canSaveReport } from '../src/billing/saveGate';
@@ -41,6 +43,12 @@ function createBillingService(snapshot: BillingSnapshot, overrides: Partial<Bill
     getAppUserId: jest.fn().mockResolvedValue('$RCAnonymousID:test'),
     ...overrides,
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((complete) => { resolve = complete; });
+  return { promise, resolve };
 }
 
 function renderUpgrade(service: BillingService) {
@@ -105,6 +113,48 @@ it('keeps the user on the upgrade screen after a cancelled purchase', async () =
 
   expect(await screen.findByText('Purchase cancelled. You can continue using the free plan.')).toBeTruthy();
   expect(router.back).not.toHaveBeenCalled();
+});
+
+it('starts only one purchase when the product is pressed twice before billing updates', async () => {
+  const pendingPurchase = deferred<BillingSnapshot>();
+  const purchase = jest.fn(() => pendingPurchase.promise);
+  const service = createBillingService(ready, { purchase });
+  renderUpgrade(service);
+
+  const product = await screen.findByRole('button', { name: 'Choose Monthly for CA$6.49' });
+  fireEvent.press(product);
+  fireEvent.press(product);
+  await waitFor(() => expect(purchase).toHaveBeenCalledTimes(1));
+
+  await act(async () => { pendingPurchase.resolve({ ...ready, entitlementActive: true }); });
+  await waitFor(() => expect(purchase).toHaveBeenCalledTimes(1));
+});
+
+it('does not queue a restore when a purchase is already starting', async () => {
+  const pendingPurchase = deferred<BillingSnapshot>();
+  const purchase = jest.fn(() => pendingPurchase.promise);
+  const restore = jest.fn().mockResolvedValue({ ...ready, entitlementActive: true });
+  renderUpgrade(createBillingService(ready, { purchase, restore }));
+
+  fireEvent.press(await screen.findByRole('button', { name: 'Choose Monthly for CA$6.49' }));
+  fireEvent.press(screen.getByRole('button', { name: 'Restore Purchases' }));
+  await waitFor(() => expect(purchase).toHaveBeenCalledTimes(1));
+
+  await act(async () => { pendingPurchase.resolve({ ...ready, entitlementActive: true }); });
+  await waitFor(() => expect(restore).not.toHaveBeenCalled());
+});
+
+it('shows an accessible retry and selectable URL when opening Terms fails', async () => {
+  const openURL = jest.spyOn(Linking, 'openURL').mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(true);
+  render(<TermsScreen />);
+
+  fireEvent.press(screen.getByRole('link', { name: 'Open full Terms of Use' }));
+
+  expect(await screen.findByRole('alert')).toHaveTextContent('Could not open the Terms of Use. Check your connection and try again.');
+  expect(screen.getByText('https://avinashamanchi.github.io/convoautopsy/terms.html').props.selectable).toBe(true);
+  fireEvent.press(screen.getByRole('button', { name: 'Retry opening Terms of Use' }));
+  await waitFor(() => expect(openURL).toHaveBeenCalledTimes(2));
+  openURL.mockRestore();
 });
 
 it('blocks the eleventh free save without deleting existing reports', async () => {

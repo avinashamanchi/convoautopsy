@@ -100,3 +100,39 @@ it('publishes revisions for successful save, delete, and delete-all transitions'
     { revision: 4, deletingAll: false },
   ]);
 });
+
+it('accepts only one concurrent free save at the ten-report boundary without deleting existing reports', async () => {
+  const reports = Array.from({ length: 9 }, (_, index) => ({ ...report, id: `existing-${index}` }));
+  const repository: ReportRepository = {
+    initialize: async () => {},
+    list: async () => [...reports],
+    get: async (id) => reports.find((item) => item.id === id) ?? null,
+    async save(next) { reports.push(next); },
+    async delete() {},
+    async deleteAll() { reports.splice(0, reports.length); },
+  };
+  const coordinated = createInvalidatingReportRepository(repository);
+
+  const [first, second] = await Promise.all([
+    coordinated.saveIfAllowed({ ...report, id: 'candidate-1' }, false),
+    coordinated.saveIfAllowed({ ...report, id: 'candidate-2' }, false),
+  ]);
+
+  expect([first, second]).toEqual([
+    { allowed: true },
+    { allowed: false, reason: 'FREE_HISTORY_LIMIT' },
+  ]);
+  expect(reports).toHaveLength(10);
+  expect(reports.filter((item) => item.id.startsWith('existing-'))).toHaveLength(9);
+});
+
+it('does not limit Pro saves', async () => {
+  const reports = Array.from({ length: 10 }, (_, index) => ({ ...report, id: `existing-${index}` }));
+  const repository: ReportRepository = {
+    initialize: async () => {}, list: async () => [...reports], get: async () => null,
+    async save(next) { reports.push(next); }, delete: async () => {}, deleteAll: async () => {},
+  };
+
+  await expect(createInvalidatingReportRepository(repository).saveIfAllowed({ ...report, id: 'pro-report' }, true)).resolves.toEqual({ allowed: true });
+  expect(reports).toHaveLength(11);
+});

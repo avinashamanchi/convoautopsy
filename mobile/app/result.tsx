@@ -11,7 +11,6 @@ import { useAnalysisSession } from '../src/state/AnalysisSession';
 import { tokens } from '../src/theme/tokens';
 import { createNativeUuid, type UuidProvider } from '../src/services/uuid';
 import { useBilling } from '../src/billing/BillingProvider';
-import { canSaveReport } from '../src/billing/saveGate';
 
 type ResultScreenProps = { createReportId?: UuidProvider };
 
@@ -40,14 +39,8 @@ export default function ResultScreen({ createReportId = createNativeUuid }: Resu
   const save = async () => {
     setSaveStatus('saving');
     try {
-      const gate = canSaveReport((await repository.list()).length, entitlementActive);
-      if (!gate.allowed) {
-        setSaveStatus('idle');
-        router.push('/upgrade?source=history-limit');
-        return;
-      }
       const timestamp = new Date().toISOString();
-      await repository.save({
+      const gate = await repository.saveIfAllowed({
         id: createReportId(),
         title: title.trim() || 'Saved analysis',
         createdAt: timestamp,
@@ -55,7 +48,12 @@ export default function ResultScreen({ createReportId = createNativeUuid }: Resu
         sourceText: retainSourceText ? draft : null,
         result: activeResult,
         responseDrafts: [],
-      });
+      }, entitlementActive);
+      if (!gate.allowed) {
+        setSaveStatus('idle');
+        router.push('/upgrade?source=history-limit');
+        return;
+      }
       setSaveStatus('saved');
       setSaveOptionsVisible(false);
     } catch {
