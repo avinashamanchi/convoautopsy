@@ -52,3 +52,21 @@ Each new behavior began with a focused failing test:
 
 - No real-provider soak was run. It requires explicit provider authorization and synthetic-content acknowledgement and is not represented as green.
 - No Groq, RevenueCat, Apple, Cloudflare production deployment, TestFlight, or device operation was performed.
+
+## Review-fix follow-up
+
+The Task 7 review findings were fixed in the separate commit with subject `fix: harden ConvoAutopsy operational gates`:
+
+- Fatal load-gate output now retains every completed phase sample and its status, public code, and latency distribution. A reachable fixture receives a bounded final diagnostics attempt; the fatal summary emits `activeReservations: "not-measured"` unless a reservation count was actually observed, including preserving an observed held value rather than fabricating zero.
+- Body-size metrics are recorded before JSON parsing: invalid JSON reports observed bytes, declared and streamed oversize bodies report the bounded `>128KiB` bucket, and an absent body reports `0`. The byte observer carries only a number and never request content.
+- The logger contract accepts `void | Promise<void>` and detaches a rejection handler without awaiting, delaying, or replacing the response.
+- The fixture Worker rejects every non-loopback entry request, including valid fixture credentials. It also requires the runner-only `LOAD_FIXTURE_LOCAL_ONLY=1` marker, which is supplied only through the per-run temporary mode-`0600` env file; production configuration remains unchanged.
+
+### Review-fix TDD evidence
+
+- RED: the three focused test files produced **10 expected failures and 12 passes**: three missing fatal-summary cases, five fixture-boundary denials, one unhandled async-logger case, and one rejected-body byte-bucket case.
+- GREEN: the focused suite passed **3 files, 22 tests**.
+- Full Worker Vitest passed **10 files, 123 tests**.
+- TypeScript, ESLint with zero warnings, Node syntax checks, both Wrangler dry builds, and `git diff --check` passed.
+- Exact CI load gate passed: **165 ordinary successes**, one expected injected `503 SERVICE_BUSY`, peak reservations **100**, p95 **1742.36ms**, p99 **1988.02ms**, and final observed reservations **0**.
+- Exact full load gate passed: **1,000 ordinary successes**, one expected injected `503 SERVICE_BUSY`, no ordinary failures or 429s, peak reservations **100**, p95 **1913.73ms**, p99 **1919.65ms**, and final observed reservations **0**.

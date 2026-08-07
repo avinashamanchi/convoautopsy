@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { LoadControlDurableObject, prepareFixtureApiRequest, validFixtureSecret } from '../src/loadFixture';
+import loadFixture, { LoadControlDurableObject, prepareFixtureApiRequest, validFixtureSecret } from '../src/loadFixture';
 
 const secret = 'a'.repeat(64);
 
@@ -60,5 +60,48 @@ describe('local load fixture boundary', () => {
     await waiting;
     expect(settled).toBe(true);
     expect((await call('/wait', 'GET')).status).toBe(204);
+  });
+
+  it.each([
+    { path: '/__fixture/ready', method: 'GET', headers: new Headers({ authorization: `Bearer ${secret}` }), body: undefined },
+    { path: '/__fixture/control/hold', method: 'POST', headers: new Headers({ authorization: `Bearer ${secret}` }), body: undefined },
+    { path: '/__fixture/diagnostics', method: 'GET', headers: new Headers({ authorization: `Bearer ${secret}` }), body: undefined },
+    {
+      path: '/v1/analyses',
+      method: 'POST',
+      headers: new Headers({ 'content-type': 'application/json', 'x-load-fixture-secret': secret, 'x-load-fixture-ip': '198.18.0.1' }),
+      body: '{}',
+    },
+  ])('rejects remote access to $path even with fixture credentials', async ({ path, method, headers, body }) => {
+    const namespace = {
+      idFromName: () => ({ toString: () => 'global' }),
+      get: () => ({
+        fetch: async (input: RequestInfo | URL) => new URL(String(input)).pathname.includes('diagnostics')
+          ? Response.json({ activeReservations: 0 })
+          : new Response(null, { status: 204 }),
+      }),
+    } as unknown as DurableObjectNamespace;
+    const fixtureEnv = {
+      LOAD_FIXTURE_SECRET: secret,
+      LOAD_FIXTURE_LOCAL_ONLY: '1',
+      LOAD_CONTROL: namespace,
+      AI_ADMISSION: namespace,
+    } as never;
+
+    const response = await loadFixture.fetch(new Request(`https://fixture.example${path}`, {
+      method,
+      headers,
+      body,
+    }), fixtureEnv);
+
+    expect(response.status).toBe(404);
+  });
+
+  it('rejects a loopback request when the runner-only binding is absent', async () => {
+    const response = await loadFixture.fetch(new Request('http://127.0.0.1:8787/__fixture/ready', {
+      headers: { authorization: `Bearer ${secret}` },
+    }), { LOAD_FIXTURE_SECRET: secret } as never);
+
+    expect(response.status).toBe(404);
   });
 });

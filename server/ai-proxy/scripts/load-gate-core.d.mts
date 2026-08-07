@@ -31,6 +31,12 @@ export type LoadSummary = Readonly<{
   activeReservations: number;
 }>;
 
+export type FatalLoadSummary = Readonly<Omit<LoadSummary, 'activeReservations'> & {
+  gate: 'fail';
+  failureCodes: readonly string[];
+  activeReservations: number | 'not-measured';
+}>;
+
 export function parseLoadOptions(args: readonly string[]): LoadOptions;
 export function createWranglerArguments(options: Readonly<{
   root: string;
@@ -42,3 +48,8 @@ export function scheduledOffsets(rps: number, seconds: number): number[];
 export function createRequestIdentity(runId: string, index: number): Readonly<{ installationToken: string; syntheticIp: string }>;
 export function nearestRank(values: readonly number[], percentile: number): number;
 export function aggregateResults(samples: readonly LoadSample[], activeReservations: number): LoadSummary;
+export function createFatalSummary(options: Readonly<{
+  stage: string;
+  samples: readonly LoadSample[];
+  activeReservations?: number;
+}>): FatalLoadSummary;

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   aggregateResults,
+  createFatalSummary,
   createWranglerArguments,
   createRequestIdentity,
   nearestRank,
@@ -110,5 +111,39 @@ describe('load gate runner contract', () => {
       activeReservations: 0,
     });
     expect(JSON.stringify(summary)).not.toMatch(/body|token|identity|message|error|content/i);
+  });
+
+  it('preserves partial samples and reports unavailable final diagnostics as not measured', () => {
+    const summary = createFatalSummary({
+      stage: 'CAPACITY',
+      samples: [
+        { status: 200, latencyMs: 100, code: 'allowed', injected: false },
+        { status: 503, latencyMs: 300, code: 'PROVIDER_UNAVAILABLE', injected: false },
+      ],
+      activeReservations: undefined,
+    });
+
+    expect(summary).toEqual({
+      gate: 'fail',
+      failureCodes: ['LOAD_GATE_CAPACITY'],
+      requests: 2,
+      nonInjectedRequests: 2,
+      nonInjectedFailures: 1,
+      nonInjectedFailureRate: 0.5,
+      statusCounts: { '200': 1, '503': 1 },
+      codeCounts: { allowed: 1, PROVIDER_UNAVAILABLE: 1 },
+      latencyMs: { p50: 100, p95: 300, p99: 300 },
+      activeReservations: 'not-measured',
+    });
+  });
+
+  it.each([
+    { observed: 100, expected: 100 },
+    { observed: 0, expected: 0 },
+  ])('keeps the actually observed reservation value $expected in fatal output', ({ observed, expected }) => {
+    expect(createFatalSummary({ stage: 'CAPACITY', samples: [], activeReservations: observed })).toMatchObject({
+      requests: 0,
+      activeReservations: expected,
+    });
   });
 });

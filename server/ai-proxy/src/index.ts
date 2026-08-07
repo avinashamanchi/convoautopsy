@@ -43,8 +43,9 @@ type OperationalContext = {
   entitlementCache: EntitlementCacheMetric;
 };
 
-type Logger = { info(metric: SafeMetric, requestId: string): void };
+type Logger = { info(metric: SafeMetric, requestId: string): void | Promise<void> };
 type AppOptions = { provider?: AiProvider; logger?: Logger; rateLimitSecret?: string };
+type BodyByteObserver = (bodyBytes: number) => void;
 const MAX_BODY_BYTES = 128 * 1024;
 
 export function createApp(options: AppOptions = {}) {
@@ -86,7 +87,8 @@ export function createApp(options: AppOptions = {}) {
           outcome: code ?? 'allowed',
         });
         try {
-          (options.logger ?? consoleLogger).info(metric, requestId);
+          const logging = (options.logger ?? consoleLogger).info(metric, requestId);
+          if (logging !== undefined) void Promise.resolve(logging).catch(() => undefined);
         } catch {
           // Operational telemetry must never replace or delay the request result.
         }
@@ -108,9 +110,10 @@ async function handle(
   if (request.method === 'OPTIONS') return corsResponse(origin);
   if (request.method !== 'POST') throw new PublicError('INVALID_REQUEST', 405);
 
-  const boundedBody = await readBoundedJson(request);
+  const boundedBody = await readBoundedJson(request, (bodyBytes) => {
+    operational.bodyBytes = bodyBytes;
+  });
   const body = boundedBody.value;
-  operational.bodyBytes = boundedBody.bodyBytes;
   if (hasConsentMismatch(body)) throw new PublicError('CONSENT_REQUIRED', 403);
   const schema = route === '/v1/analyses' ? AnalyzeRequestSchema : CraftResponseRequestSchema;
   const parsed = schema.safeParse(body);
@@ -199,10 +202,19 @@ async function handle(
   }
 }
 
-async function readBoundedJson(request: Request): Promise<{ value: unknown; bodyBytes: number }> {
-  const declaredLength = Number(request.headers.get('content-length'));
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) throw new PublicError('PAYLOAD_TOO_LARGE', 413);
-  if (!request.body) throw new PublicError('INVALID_REQUEST', 400);
+async function readBoundedJson(request: Request, observeBodyBytes: BodyByteObserver): Promise<{ value: unknown; bodyBytes: number }> {
+  const declaredHeader = request.headers.get('content-length');
+  if (declaredHeader !== null) {
+    const declaredLength = Number(declaredHeader);
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
+      observeBodyBytes(MAX_BODY_BYTES + 1);
+      throw new PublicError('PAYLOAD_TOO_LARGE', 413);
+    }
+  }
+  if (!request.body) {
+    observeBodyBytes(0);
+    throw new PublicError('INVALID_REQUEST', 400);
+  }
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
@@ -211,7 +223,8 @@ async function readBoundedJson(request: Request): Promise<{ value: unknown; body
     if (done) break;
     total += value.byteLength;
     if (total > MAX_BODY_BYTES) {
-      await reader.cancel();
+      observeBodyBytes(MAX_BODY_BYTES + 1);
+      await reader.cancel().catch(() => undefined);
       throw new PublicError('PAYLOAD_TOO_LARGE', 413);
     }
     chunks.push(value);
@@ -222,6 +235,7 @@ async function readBoundedJson(request: Request): Promise<{ value: unknown; body
     bytes.set(chunk, offset);
     offset += chunk.byteLength;
   }
+  observeBodyBytes(total);
   try {
     return { value: JSON.parse(new TextDecoder().decode(bytes)), bodyBytes: total };
   } catch {

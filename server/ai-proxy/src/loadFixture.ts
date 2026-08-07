@@ -6,6 +6,7 @@ export { RateLimitDurableObject } from './rateLimit';
 
 type LoadFixtureEnv = Env & {
   LOAD_FIXTURE_SECRET?: string;
+  LOAD_FIXTURE_LOCAL_ONLY?: string;
   LOAD_CONTROL: DurableObjectNamespace;
 };
 
@@ -85,7 +86,11 @@ export function prepareFixtureApiRequest(request: Request, configuredSecret: str
 
 const worker = {
   async fetch(request: Request, env: LoadFixtureEnv): Promise<Response> {
-    const path = new URL(request.url).pathname;
+    const url = new URL(request.url);
+    if (env.LOAD_FIXTURE_LOCAL_ONLY !== '1' || !isLoopbackHostname(url.hostname)) {
+      return new Response(null, { status: 404 });
+    }
+    const path = url.pathname;
     if (!validFixtureSecret(env.LOAD_FIXTURE_SECRET)) return new Response(null, { status: 500 });
 
     if (path === '/__fixture/ready') {
@@ -167,6 +172,10 @@ function validSyntheticIp(value: string | null): value is string {
     && (octets[1] === 18 || octets[1] === 19)
     && octets[2] >= 0 && octets[2] <= 255
     && octets[3] >= 0 && octets[3] <= 255;
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]';
 }
 
 function isDiagnostic(value: unknown): value is { activeReservations: number } {

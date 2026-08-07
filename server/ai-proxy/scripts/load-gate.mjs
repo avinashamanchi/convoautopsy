@@ -8,6 +8,7 @@ import { randomBytes } from 'node:crypto';
 
 import {
   aggregateResults,
+  createFatalSummary,
   createRequestIdentity,
   createWranglerArguments,
   parseLoadOptions,
@@ -36,13 +37,16 @@ let requestIndex = 0;
 let child;
 let temporaryState;
 let currentStage = 'STARTUP';
+let target = options.target;
+let fixtureReady = false;
+let lastObservedReservations;
+const partialSamples = [];
 
 const stopForSignal = () => outstanding.abort();
 process.once('SIGINT', stopForSignal);
 process.once('SIGTERM', stopForSignal);
 
 try {
-  let target = options.target;
   if (options.startWrangler) {
     const port = await reserveLoopbackPort();
     target = `http://127.0.0.1:${port}`;
@@ -56,12 +60,17 @@ try {
   }
   if (!target) throw new Error('missing target');
 
-  if (options.mode === 'fixture') await waitUntilReady(target);
+  if (options.mode === 'fixture') {
+    await waitUntilReady(target);
+    fixtureReady = true;
+  }
   currentStage = 'SUSTAINED';
   const sustained = await runScheduledPhase(target, options.sustainedRps, options.sustainedSeconds);
+  partialSamples.push(...sustained);
   currentStage = 'BURST';
   const burst = await runScheduledPhase(target, options.burstRps, options.burstSeconds);
-  const samples = [...sustained, ...burst];
+  partialSamples.push(...burst);
+  const samples = partialSamples;
   let activeReservations = 0;
   let capacityPeakReservations = 0;
   const failures = [];
@@ -102,15 +111,18 @@ try {
   process.stdout.write(`${JSON.stringify(output)}\n`);
   if (failures.length > 0) process.exitCode = 1;
 } catch {
-  process.stdout.write(`${JSON.stringify({
-    gate: 'fail',
-    failureCodes: [`LOAD_GATE_${currentStage}`],
-    requests: 0,
-    statusCounts: {},
-    codeCounts: {},
-    latencyMs: { p50: 0, p95: 0, p99: 0 },
-    activeReservations: options.mode === 'fixture' ? 0 : 'not-measured',
-  })}\n`);
+  if (options.mode === 'fixture' && fixtureReady && target) {
+    try {
+      await fixtureDiagnostics(target);
+    } catch {
+      // A bounded final diagnostic is best effort; absence is reported explicitly.
+    }
+  }
+  process.stdout.write(`${JSON.stringify(createFatalSummary({
+    stage: currentStage,
+    samples: partialSamples,
+    activeReservations: options.mode === 'fixture' ? lastObservedReservations : undefined,
+  }))}\n`);
   process.exitCode = 1;
 } finally {
   outstanding.abort();
@@ -239,6 +251,7 @@ async function fixtureDiagnostics(target) {
   }
   const value = await readBoundedJson(response, 1_024);
   if (!isDiagnostic(value)) throw new Error('invalid diagnostics');
+  lastObservedReservations = value.activeReservations;
   return value.activeReservations;
 }
 
@@ -345,6 +358,7 @@ async function writeFixtureEnv(path, secret) {
   const rateLimitSecret = randomBytes(32).toString('hex');
   await writeFile(path, [
     `LOAD_FIXTURE_SECRET=${secret}`,
+    'LOAD_FIXTURE_LOCAL_ONLY=1',
     `RATE_LIMIT_HMAC_SECRET=${rateLimitSecret}`,
     'GROQ_API_KEY=fixture-unused',
     '',

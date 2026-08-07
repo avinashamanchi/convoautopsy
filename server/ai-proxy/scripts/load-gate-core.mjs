@@ -127,6 +127,19 @@ export function aggregateResults(samples, activeReservations) {
   });
 }
 
+export function createFatalSummary({ stage, samples, activeReservations }) {
+  const observedReservations = Number.isSafeInteger(activeReservations) && activeReservations >= 0
+    ? activeReservations
+    : undefined;
+  const summary = aggregateResults(samples, observedReservations ?? 0);
+  return Object.freeze({
+    gate: 'fail',
+    failureCodes: [`LOAD_GATE_${safeStage(stage)}`],
+    ...summary,
+    activeReservations: observedReservations ?? 'not-measured',
+  });
+}
+
 function countBy(values, keyFor, order) {
   const entries = new Map();
   for (const value of values) {
@@ -142,6 +155,10 @@ function numericKeyOrder(left, right) {
 
 function lexicalKeyOrder(left, right) {
   return left.localeCompare(right);
+}
+
+function safeStage(stage) {
+  return ['STARTUP', 'SUSTAINED', 'BURST', 'CAPACITY', 'EVALUATION'].includes(stage) ? stage : 'INTERNAL';
 }
 
 function requiredValue(values, index, flag) {
