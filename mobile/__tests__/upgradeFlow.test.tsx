@@ -31,7 +31,12 @@ const unavailable: BillingSnapshot = { availability: 'unavailable', entitlementA
 const ready: BillingSnapshot = {
   availability: 'ready',
   entitlementActive: false,
-  products: [{ id: 'com.avinashamanchi.convoautopsy.pro.monthly', title: 'Monthly', localizedPrice: 'CA$6.49' }],
+  products: [{
+    id: 'com.avinashamanchi.convoautopsy.pro.monthly',
+    title: 'Monthly',
+    localizedPrice: 'CA$6.49',
+    period: 'monthly',
+  } as unknown as BillingSnapshot['products'][number]],
 };
 
 function createBillingService(snapshot: BillingSnapshot, overrides: Partial<BillingService> = {}): BillingService {
@@ -101,8 +106,42 @@ it('keeps Continue Free and Restore Purchases available when products fail to lo
 it('renders only the StoreKit localized price for a purchasable subscription', async () => {
   renderUpgrade(createBillingService(ready));
 
-  expect(await screen.findByRole('button', { name: 'Choose Monthly for CA$6.49' })).toBeTruthy();
+  expect(await screen.findByRole('button', { name: 'Choose Monthly for CA$6.49 per month' })).toBeTruthy();
+  expect(screen.getByText('CA$6.49 / month')).toBeTruthy();
   expect(screen.queryByText(/\$4\.99|USD/)).toBeNull();
+});
+
+it('states the exact Free and Pro local, storage, and remote fair-use allowances', async () => {
+  renderUpgrade(createBillingService(ready));
+
+  expect(await screen.findByText('Free')).toBeTruthy();
+  expect(screen.getAllByText(/Unlimited on-device analyses and response drafts/)).toHaveLength(2);
+  expect(screen.getByText(/Save up to 10 reports/)).toBeTruthy();
+  expect(screen.getByText(/3 remote AI analyses and 6 remote AI-assisted drafts per rolling 30 days/)).toBeTruthy();
+  expect(screen.getAllByText('Convo Pro')).toHaveLength(2);
+  expect(screen.getByText(/Unlimited saved reports/)).toBeTruthy();
+  expect(screen.getByText(/75 remote AI analyses and 150 remote AI-assisted drafts per UTC calendar month/)).toBeTruthy();
+  expect(screen.getByText(/fair-use limits, are not credits, and do not roll over/)).toBeTruthy();
+  expect(screen.queryByText(/Pro-only trends/i)).toBeNull();
+});
+
+it('discloses renewal, cancellation, restore, uninstall, and App Store account behavior', async () => {
+  renderUpgrade(createBillingService(ready));
+
+  expect(await screen.findByText(/Apple ID is charged when you confirm a purchase/)).toBeTruthy();
+  expect(screen.getByText(/automatically renews unless canceled at least 24 hours before/)).toBeTruthy();
+  expect(screen.getByText(/renewal within 24 hours before the current period ends/)).toBeTruthy();
+  expect(screen.getByText(/Manage or cancel in your App Store account settings/)).toBeTruthy();
+  expect(screen.getByText(/Uninstalling ConvoAutopsy or deleting app data does not cancel/)).toBeTruthy();
+  expect(screen.getByText(/Restore Purchases checks this App Store account/)).toBeTruthy();
+});
+
+it('describes Expo Go as preview-only and names the native purchase test builds', async () => {
+  renderUpgrade(createBillingService({ availability: 'preview', entitlementActive: false, products: [] }));
+
+  expect(await screen.findByText('Expo Go is preview-only for purchases. Use a development, TestFlight, or App Store build to buy or restore Convo Pro.')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Continue Free' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Restore Purchases' })).toBeTruthy();
 });
 
 it('keeps the user on the upgrade screen after a cancelled purchase', async () => {
@@ -111,7 +150,7 @@ it('keeps the user on the upgrade screen after a cancelled purchase', async () =
   });
   renderUpgrade(service);
 
-  fireEvent.press(await screen.findByRole('button', { name: 'Choose Monthly for CA$6.49' }));
+  fireEvent.press(await screen.findByRole('button', { name: 'Choose Monthly for CA$6.49 per month' }));
 
   expect(await screen.findByText('Purchase cancelled. You can continue using the free plan.')).toBeTruthy();
   expect(router.back).not.toHaveBeenCalled();
@@ -123,7 +162,7 @@ it('starts only one purchase when the product is pressed twice before billing up
   const service = createBillingService(ready, { purchase });
   renderUpgrade(service);
 
-  const product = await screen.findByRole('button', { name: 'Choose Monthly for CA$6.49' });
+  const product = await screen.findByRole('button', { name: 'Choose Monthly for CA$6.49 per month' });
   fireEvent.press(product);
   fireEvent.press(product);
   await waitFor(() => expect(purchase).toHaveBeenCalledTimes(1));
@@ -138,7 +177,7 @@ it('does not queue a restore when a purchase is already starting', async () => {
   const restore = jest.fn().mockResolvedValue({ ...ready, entitlementActive: true });
   renderUpgrade(createBillingService(ready, { purchase, restore }));
 
-  fireEvent.press(await screen.findByRole('button', { name: 'Choose Monthly for CA$6.49' }));
+  fireEvent.press(await screen.findByRole('button', { name: 'Choose Monthly for CA$6.49 per month' }));
   fireEvent.press(screen.getByRole('button', { name: 'Restore Purchases' }));
   await waitFor(() => expect(purchase).toHaveBeenCalledTimes(1));
 

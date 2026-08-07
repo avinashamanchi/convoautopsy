@@ -15,10 +15,45 @@ const sensitiveAssignment = new RegExp(
   'i',
 )
 
+function credentialAssignmentPattern(names) {
+  return new RegExp(
+    `(?:${names.join('|')})["']?\\s*(?:=|:)\\s*["']?(?!\\$\\{\\{?|<|your-|test-|example|placeholder)[A-Za-z0-9_./+=-]{16,}`,
+    'i',
+  )
+}
+
+const revenueCatSecretAssignment = credentialAssignmentPattern([
+  ['REVENUECAT', 'SECRET', 'API', 'KEY'].join('_'),
+  ['REVENUECAT', 'API', 'SECRET'].join('_'),
+])
+const cloudflareCredentialAssignment = credentialAssignmentPattern([
+  ['CLOUDFLARE', 'API', 'TOKEN'].join('_'),
+  ['CLOUDFLARE', 'API', 'KEY'].join('_'),
+  ['CF', 'API', 'TOKEN'].join('_'),
+  ['CF', 'API', 'KEY'].join('_'),
+])
+const expoCredentialAssignment = credentialAssignmentPattern([
+  ['EXPO', 'TOKEN'].join('_'),
+])
+const appleCredentialAssignment = credentialAssignmentPattern([
+  ['APPLE', 'APP', 'SPECIFIC', 'PASSWORD'].join('_'),
+  ['APPLE', 'ID', 'PASSWORD'].join('_'),
+])
+const appStoreConnectCredentialAssignment = credentialAssignmentPattern([
+  ['APP', 'STORE', 'CONNECT', 'API', 'KEY'].join('_'),
+  ['ASC', 'API', 'KEY'].join('_'),
+  ['ASC', 'PRIVATE', 'KEY'].join('_'),
+])
+
 const contentRules = [
   { rule: 'github-token', pattern: /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/ },
   { rule: 'provider-token', pattern: /\b(?:gsk_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{20,})\b/ },
   { rule: 'private-key', pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----/ },
+  { rule: 'revenuecat-secret', pattern: revenueCatSecretAssignment },
+  { rule: 'cloudflare-credential', pattern: cloudflareCredentialAssignment },
+  { rule: 'expo-credential', pattern: expoCredentialAssignment },
+  { rule: 'apple-credential', pattern: appleCredentialAssignment },
+  { rule: 'app-store-connect-credential', pattern: appStoreConnectCredentialAssignment },
   { rule: 'secret-assignment', pattern: sensitiveAssignment },
   { rule: 'public-provider-secret-name', pattern: /(?:VITE|EXPO_PUBLIC)_(?:GROQ|OPENAI)_API_KEY/ },
 ]
@@ -28,6 +63,7 @@ export function scanEntries(entries) {
   for (const entry of [...entries].sort((left, right) => left.path.localeCompare(right.path))) {
     const basename = entry.path.split('/').at(-1)
     if (isSecretFilename(basename)) findings.push({ path: entry.path, rule: 'secret-file' })
+    if (isSigningMaterialFilename(basename)) findings.push({ path: entry.path, rule: 'signing-material' })
     for (const { rule, pattern } of contentRules) {
       pattern.lastIndex = 0
       if (pattern.test(entry.content)) findings.push({ path: entry.path, rule })
@@ -37,6 +73,10 @@ export function scanEntries(entries) {
     }
   }
   return findings.sort((left, right) => left.path.localeCompare(right.path) || left.rule.localeCompare(right.rule))
+}
+
+function isSigningMaterialFilename(basename) {
+  return typeof basename === 'string' && /\.(?:p8|p12|mobileprovision|provisionprofile)$/i.test(basename)
 }
 
 export function formatFindings(findings) {

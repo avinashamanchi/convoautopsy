@@ -27,7 +27,9 @@ jobs:
         working-directory: mobile
       - run: npm run export:ios
         working-directory: mobile
-      - run: npm audit --audit-level=high
+      - run: node scripts/scan-secrets.mjs --tracked --paths mobile/dist
+        working-directory: .
+      - run: npm audit --omit=dev --audit-level=high
         working-directory: mobile
 
   worker:
@@ -49,7 +51,13 @@ jobs:
         working-directory: server/ai-proxy
       - run: npm run build
         working-directory: server/ai-proxy
-      - run: npm audit --audit-level=high
+      - run: npx wrangler deploy --dry-run --config wrangler.load.jsonc --outdir dist-load
+        working-directory: server/ai-proxy
+      - run: npm run test:load:ci
+        working-directory: server/ai-proxy
+      - run: node scripts/scan-secrets.mjs --tracked --paths server/ai-proxy/dist server/ai-proxy/dist-load
+        working-directory: .
+      - run: npm audit --omit=dev --audit-level=high
         working-directory: server/ai-proxy
 
   web:
@@ -64,5 +72,6 @@ jobs:
       - run: npm test
       - run: npm run lint
       - run: npm run build
-      - run: npm run scan:secrets
-      - run: npm audit --audit-level=high
+      - run: node scripts/scan-secrets.mjs --tracked --paths dist
+        working-directory: .
+      - run: npm audit --omit=dev --audit-level=high

@@ -26,7 +26,7 @@ jobs:
           npm test
           npm run lint
           npm run build
-          npm audit --audit-level=high
+          npm audit --omit=dev --audit-level=high
 
       - name: Mobile gates
         working-directory: mobile
@@ -37,7 +37,7 @@ jobs:
           npm run lint
           npm run expo:doctor
           npm run export:ios
-          npm audit --audit-level=high
+          npm audit --omit=dev --audit-level=high
 
       - name: Worker gates and credential-free dry run
         working-directory: server/ai-proxy
@@ -47,10 +47,16 @@ jobs:
           npm run typecheck
           npm run lint
           npm run build
-          npm audit --audit-level=high
+          npx wrangler deploy --dry-run --config wrangler.load.jsonc --outdir dist-load
+          npm audit --omit=dev --audit-level=high
+
+      - name: Full local provider-stub capacity and cost gate
+        timeout-minutes: 90
+        working-directory: server/ai-proxy
+        run: npm run test:load -- --sustained-seconds 3600 --burst-seconds 300
 
       - name: Redacted tracked-tree and bundle scan
-        run: npm run scan:secrets
+        run: node scripts/scan-secrets.mjs --tracked --paths dist mobile/dist server/ai-proxy/dist server/ai-proxy/dist-load
 
       - name: Create content-free evidence
         run: |

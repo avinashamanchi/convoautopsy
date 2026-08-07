@@ -7,7 +7,7 @@ import type { BillingService, BillingSnapshot } from '../src/billing/contracts';
 const readySnapshot: BillingSnapshot = {
   availability: 'ready',
   entitlementActive: true,
-  products: [{ id: 'com.avinashamanchi.convoautopsy.pro.monthly', title: 'Monthly', localizedPrice: '$7.99' }],
+  products: [{ id: 'com.avinashamanchi.convoautopsy.pro.monthly', title: 'Monthly', localizedPrice: '$7.99', period: 'monthly' }],
 };
 
 function createBillingService(overrides: Partial<BillingService> = {}): BillingService {

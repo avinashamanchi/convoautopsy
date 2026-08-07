@@ -55,11 +55,49 @@ describe('publication gate', () => {
     const workflow = await fromRoot('.github/workflows/release-readiness.yml')
     expect(workflow).toMatch(/on:\s*\n\s*workflow_dispatch:/)
     expect(workflow).not.toMatch(/\bpush:|pull_request:|deploy-pages|\beas(?:-cli)?\b[^\n]*submit|\bwrangler\b[^\n]*deploy(?! --dry-run)/i)
-    for (const command of ['npm test', 'npm run lint', 'npm run build', 'npm run typecheck', 'npm run expo:doctor', 'npm run export:ios', 'npm run scan:secrets', 'npm audit --audit-level=high']) {
+    for (const command of ['npm test', 'npm run lint', 'npm run build', 'npm run typecheck', 'npm run expo:doctor', 'npm run export:ios', 'scan-secrets.mjs --tracked', 'npm audit --omit=dev --audit-level=high']) {
       expect(workflow).toContain(command)
     }
     expect(workflow).toContain('deployed=false')
     expect(workflow).toContain('submitted=false')
+  })
+
+  it('scans each isolated CI build, audits production dependencies, and runs the short Worker capacity gate', async () => {
+    const workflow = await fromRoot('.github/workflows/ios-ci.yml')
+    expect(workflow).toContain('node scripts/scan-secrets.mjs --tracked --paths mobile/dist')
+    expect(workflow).toContain('node scripts/scan-secrets.mjs --tracked --paths server/ai-proxy/dist server/ai-proxy/dist-load')
+    expect(workflow).toContain('node scripts/scan-secrets.mjs --tracked --paths dist')
+    for (const artifactPaths of ['mobile/dist', 'server/ai-proxy/dist server/ai-proxy/dist-load', 'dist']) {
+      const escaped = artifactPaths.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      expect(workflow).toMatch(new RegExp(`- run: node scripts/scan-secrets\\.mjs --tracked --paths ${escaped}\\n\\s+working-directory: \\.`))
+    }
+    expect(workflow).toContain('npm run test:load:ci')
+    expect(workflow).toContain('wrangler.load.jsonc')
+    expect(workflow.match(/npm audit --omit=dev --audit-level=high/g)).toHaveLength(3)
+  })
+
+  it('runs the full local provider-stub profile in manual readiness without deployment or submission', async () => {
+    const workflow = await fromRoot('.github/workflows/release-readiness.yml')
+    expect(workflow).toContain('npm run test:load -- --sustained-seconds 3600 --burst-seconds 300')
+    expect(workflow).toContain('wrangler.load.jsonc')
+    expect(workflow).toContain('timeout-minutes: 90')
+    expect(workflow.match(/npm audit --omit=dev --audit-level=high/g)).toHaveLength(3)
+    expect(workflow).toContain('deployed=false')
+    expect(workflow).toContain('submitted=false')
+    expect(workflow).not.toMatch(/\beas(?:-cli)?\b[^\n]*submit|\bwrangler\b[^\n]*deploy(?! --dry-run)/i)
+  })
+
+  it('ships first-party privacy, terms, and content-free support pages together', async () => {
+    const [privacy, terms, support] = await Promise.all([
+      fromRoot('public/privacy.html'),
+      fromRoot('public/terms.html'),
+      fromRoot('public/support.html'),
+    ])
+    expect(privacy).toMatch(/href="terms\.html"/)
+    expect(privacy).toMatch(/href="support\.html"/)
+    expect(terms).toMatch(/href="privacy\.html"/)
+    expect(terms).toMatch(/href="support\.html"/)
+    expect(support).toMatch(/Do not (?:post|include) conversation text/)
   })
 
   it('uses a 1024-square opaque RGB iOS icon', async () => {

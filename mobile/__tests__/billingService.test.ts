@@ -14,6 +14,7 @@ function createRevenueCatFake(overrides: Partial<RevenueCatModule> = {}): Revenu
       current: {
         availablePackages: [
           { product: { identifier: monthlyId, title: 'Convo Pro Monthly', priceString: '$7.99' } },
+          { product: { identifier: annualId, title: 'Convo Pro Annual', priceString: 'CA$59.99' } },
           { product: { identifier: 'unconfigured.product', title: 'Other', priceString: '$1.99' } },
         ],
       },
@@ -41,7 +42,10 @@ it('maps only configured products and reads convo_pro entitlement', async () => 
   await expect(service.load()).resolves.toMatchObject({
     availability: 'ready',
     entitlementActive: true,
-    products: [{ id: monthlyId, localizedPrice: '$7.99' }],
+    products: [
+      { id: monthlyId, localizedPrice: '$7.99', period: 'monthly' },
+      { id: annualId, localizedPrice: 'CA$59.99', period: 'annual' },
+    ],
   });
   await expect(service.getAppUserId()).resolves.toBe('$RCAnonymousID:test-user');
   expect(fakeRevenueCat.configure).toHaveBeenCalledTimes(1);
@@ -133,7 +137,9 @@ it('keeps a pre-initialization subscription active until it is unsubscribed', as
   expect(listener).toHaveBeenCalledWith({
     availability: 'ready',
     entitlementActive: false,
-    products: [{ id: monthlyId, title: 'Convo Pro Monthly', localizedPrice: '$7.99' }],
+    products: [
+      { id: monthlyId, title: 'Convo Pro Monthly', localizedPrice: '$7.99', period: 'monthly' },
+    ],
   });
 
   unsubscribe();

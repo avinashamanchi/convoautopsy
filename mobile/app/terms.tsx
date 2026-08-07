@@ -21,8 +21,11 @@ export default function TermsScreen() {
     <Screen>
       <ScrollView contentContainerStyle={styles.container}>
         <Text accessibilityRole="header" style={styles.title}>Terms of Use</Text>
-        <Text style={styles.copy}>ConvoAutopsy provides educational conversation-analysis tools. It does not provide medical, legal, or relationship advice, and its estimates can be wrong.</Text>
-        <Text style={styles.copy}>Subscriptions are optional. Your saved reports remain on this device unless you explicitly share them.</Text>
+        <Text style={styles.copy}>ConvoAutopsy is an educational tool for personal reflection and is not medical, legal, relationship, crisis, or other professional advice. Its on-device estimates and optional AI output can be incomplete, biased, or wrong and are not factual conclusions about another person.</Text>
+        <Text style={styles.copy}>Use only content you have the right to process. You are responsible for reviewing output and deciding whether, when, and how to communicate. Do not use ConvoAutopsy to harass, surveil, threaten, defame, violate privacy, or break the law.</Text>
+        <Text style={styles.copy}>Do not rely on ConvoAutopsy in an emergency or when someone may be in danger. Contact appropriate local emergency or professional services.</Text>
+        <Text style={styles.copy}>Monthly and annual subscriptions automatically renew unless canceled at least 24 hours before the current billing period ends. Your Apple ID is charged at confirmation and may be charged for renewal within 24 hours before the period ends. Manage or cancel in App Store account settings. Uninstalling the app or deleting app data does not cancel a subscription. Restore Purchases checks the current App Store account.</Text>
+        <Text style={styles.copy}>The app and third-party services may be unavailable or change. To the extent permitted by law, ConvoAutopsy is provided as available without a promise of uninterrupted or error-free operation. Nothing here excludes rights or remedies that cannot legally be excluded.</Text>
         <Pressable accessibilityRole="link" onPress={() => { void openTerms(); }} style={styles.link}>
           <Text style={styles.linkText}>Open full Terms of Use</Text>
         </Pressable>

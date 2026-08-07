@@ -1,4 +1,4 @@
-appId: io.convoautopsy.app
+appId: com.avinashamanchi.convoautopsy
 ---
 - launchApp:
     clearState: true

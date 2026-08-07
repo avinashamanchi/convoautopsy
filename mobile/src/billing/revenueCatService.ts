@@ -1,5 +1,5 @@
 import Constants from 'expo-constants';
-import type { BillingProduct, BillingService, BillingSnapshot } from './contracts';
+import { billingPeriodForProductId, type BillingProduct, type BillingService, type BillingSnapshot } from './contracts';
 
 type RevenueCatCustomerInfo = {
   entitlements: { active: Record<string, unknown> };
@@ -206,10 +206,15 @@ export class RevenueCatBillingService implements BillingService {
   }
 
   private toBillingProduct(item: RevenueCatPackage): BillingProduct {
+    const period = billingPeriodForProductId(item.product.identifier);
+    if (!period) {
+      throw new Error('Configured subscription identity is not supported.');
+    }
     return {
       id: item.product.identifier,
       title: item.product.title,
       localizedPrice: item.product.priceString,
+      period,
     };
   }
 

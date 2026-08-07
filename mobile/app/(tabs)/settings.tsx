@@ -62,7 +62,7 @@ export default function SettingsScreen({ onDeleteStatusCommit }: SettingsScreenP
         <View style={styles.section}>
           <Text accessibilityRole="header" style={styles.heading}>Privacy and retention</Text>
           <Text style={styles.copy}>Reports remain on this device unless you explicitly share them. AI-assisted analysis is optional and on-device analysis never needs a network connection.</Text>
-          <PrimaryButton label="Privacy and retention" onPress={() => router.push('/privacy')} />
+          <PrimaryButton label="Privacy, terms, and support" onPress={() => router.push('/privacy')} />
           <PrimaryButton label="Revoke AI consent" onPress={() => { void revokeConsent(); }} />
           {consentStatus === 'revoked' ? <Text accessibilityLiveRegion="polite" style={styles.status}>AI consent was revoked. Future AI-assisted analysis will ask again.</Text> : null}
           {consentStatus === 'failed' ? <Text accessibilityRole="alert" style={styles.error}>Could not revoke AI consent. Please try again.</Text> : null}
@@ -71,7 +71,7 @@ export default function SettingsScreen({ onDeleteStatusCommit }: SettingsScreenP
 
         <View style={[styles.section, styles.dangerSection]}>
           <Text accessibilityRole="header" style={styles.dangerHeading}>Delete all app data</Text>
-          <Text style={styles.copy}>This attempts to remove saved reports, preferences, AI consent, the local installation token, ConvoAutopsy cache files, and this in-memory analysis session. It cannot undo data already shared outside the app.</Text>
+          <Text style={styles.copy}>This best-effort action attempts to remove saved reports, drafts, preferences, AI consent, the local installation token, ConvoAutopsy cache files, and this in-memory analysis session. It cannot recall shared or backed-up data, remove provider data, or immediately remove short-lived service safety and accounting records. It does not cancel an App Store subscription.</Text>
           <Text style={styles.label}>Type DELETE to permanently erase local ConvoAutopsy data.</Text>
           <TextInput
             accessibilityLabel="Type DELETE to confirm"
@@ -83,7 +83,7 @@ export default function SettingsScreen({ onDeleteStatusCommit }: SettingsScreenP
             value={phrase}
           />
           <PrimaryButton disabled={!canDelete} label={deleteStatus === 'deleting' ? 'Deleting app data…' : 'Delete all app data'} onPress={() => { void deleteData(); }} />
-          {deleteStatus === 'success' ? <Text accessibilityLiveRegion="polite" style={styles.status}>All ConvoAutopsy data was deleted from this device.</Text> : null}
+          {deleteStatus === 'success' ? <Text accessibilityLiveRegion="polite" style={styles.status}>ConvoAutopsy finished its best-effort local deletion. Backups, data already shared, provider records, short-lived service safety and accounting records, and App Store subscriptions may remain.</Text> : null}
           {typeof deleteStatus === 'object' ? (
             <View style={styles.failure}>
               <Text accessibilityRole="alert" style={styles.error}>Could not completely delete your app data. Failed: {deleteStatus.failed.failed.join(', ')}. Nothing has been reported as fully deleted; retry to attempt the remaining cleanup again.</Text>
@@ -94,7 +94,7 @@ export default function SettingsScreen({ onDeleteStatusCommit }: SettingsScreenP
 
         <View style={styles.section}>
           <Text accessibilityRole="header" style={styles.heading}>Convo Pro</Text>
-          <Text style={styles.copy}>Convo Pro unlocks unlimited saved analyses. Your reports stay local unless you choose to share them.</Text>
+          <Text style={styles.copy}>Convo Pro removes the 10-report cap and includes 75 remote AI analyses and 150 remote AI-assisted drafts per UTC calendar month. On-device analyses and drafts remain unlimited on both plans.</Text>
           <PrimaryButton label="Convo Pro" onPress={() => router.push('/upgrade?source=settings')} />
           <PrimaryButton label="Restore Purchases" onPress={() => router.push('/upgrade?source=restore')} />
           <PrimaryButton label="Privacy" onPress={() => router.push('/privacy')} />

@@ -1,6 +1,9 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { router } from 'expo-router';
+import { Linking } from 'react-native';
 import SettingsScreen from '../app/(tabs)/settings';
+import PrivacyScreen from '../app/privacy';
+import { deleteAllAppData } from '../src/services/deleteAllAppData';
 import { ReportRepositoryProvider } from '../src/services/reportRepositoryContext';
 import type { PreferenceStore, ReportRepository } from '../src/services/reportRepository';
 
@@ -8,7 +11,6 @@ jest.mock('../src/services/deleteAllAppData', () => ({
   ...jest.requireActual('../src/services/deleteAllAppData'),
   deleteAllAppData: jest.fn(),
 }));
-import { deleteAllAppData } from '../src/services/deleteAllAppData';
 
 jest.mock('expo-router', () => ({ router: { push: jest.fn() } }));
 jest.mock('../src/state/AnalysisSession', () => ({
@@ -70,8 +72,20 @@ it('keeps a failed deletion visible and offers an accessible retry instead of cl
 
 it('opens retention and privacy details from settings', async () => {
   renderSettings();
-  fireEvent.press(await screen.findByRole('button', { name: 'Privacy and retention' }));
+  fireEvent.press(await screen.findByRole('button', { name: 'Privacy, terms, and support' }));
   await waitFor(() => expect(router.push).toHaveBeenCalledWith('/privacy'));
+});
+
+it('opens first-party privacy, terms, and support pages from the legal screen', async () => {
+  const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+  render(<PrivacyScreen />);
+  fireEvent.press(screen.getByRole('link', { name: 'Open full privacy policy' }));
+  fireEvent.press(screen.getByRole('link', { name: 'Open Terms of Use' }));
+  fireEvent.press(screen.getByRole('link', { name: 'Open support page' }));
+  expect(openURL).toHaveBeenNthCalledWith(1, 'https://avinashamanchi.github.io/convoautopsy/privacy.html');
+  expect(openURL).toHaveBeenNthCalledWith(2, 'https://avinashamanchi.github.io/convoautopsy/terms.html');
+  expect(openURL).toHaveBeenNthCalledWith(3, 'https://avinashamanchi.github.io/convoautopsy/support.html');
+  openURL.mockRestore();
 });
 
 it('starts exactly one destructive run when activated rapidly', async () => {
@@ -84,7 +98,7 @@ it('starts exactly one destructive run when activated rapidly', async () => {
   fireEvent.press(button);
   expect(mockedDeleteAllAppData).toHaveBeenCalledTimes(1);
   pending.resolve({ ok: true });
-  await waitFor(() => expect(screen.getByText('All ConvoAutopsy data was deleted from this device.')).toBeOnTheScreen());
+  await waitFor(() => expect(screen.getByText(/finished its best-effort local deletion/)).toBeOnTheScreen());
 });
 
 it('allows a retry after a failed outcome and reaches success on the next attempt', async () => {
@@ -94,8 +108,16 @@ it('allows a retry after a failed outcome and reaches success on the next attemp
   fireEvent.press(screen.getByRole('button', { name: 'Delete all app data' }));
   await screen.findByRole('button', { name: 'Retry deleting app data' });
   fireEvent.press(screen.getByRole('button', { name: 'Retry deleting app data' }));
-  await waitFor(() => expect(screen.getByText('All ConvoAutopsy data was deleted from this device.')).toBeOnTheScreen());
+  await waitFor(() => expect(screen.getByText(/finished its best-effort local deletion/)).toBeOnTheScreen());
   expect(mockedDeleteAllAppData).toHaveBeenCalledTimes(2);
+});
+
+it('explains that local deletion cannot cancel subscriptions or immediately remove external records', async () => {
+  renderSettings();
+
+  expect(await screen.findByText(/does not cancel an App Store subscription/)).toBeTruthy();
+  expect(screen.getByText(/cannot recall shared or backed-up data/)).toBeTruthy();
+  expect(screen.getByText(/short-lived service safety and accounting records/)).toBeTruthy();
 });
 
 it('finishes pending cleanup after unmount without a late state update', async () => {
