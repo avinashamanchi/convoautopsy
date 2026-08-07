@@ -80,6 +80,21 @@ it('preserves the previous entitlement when a foreground refresh fails', async (
   expect(billing?.entitlementActive).toBe(true);
 });
 
+it('stops the initial reload when unmounted before billing finishes loading', async () => {
+  let resolveLoad: ((snapshot: BillingSnapshot) => void) | undefined;
+  const load = jest.fn(() => new Promise<BillingSnapshot>((resolve) => { resolveLoad = resolve; }));
+  const service = createBillingService({ load });
+  const rendered = render(<BillingProvider service={service}><BillingProbe onValue={() => undefined} /></BillingProvider>);
+  await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+
+  rendered.unmount();
+  await act(async () => { resolveLoad?.(readySnapshot); });
+
+  expect(service.getAppUserId).not.toHaveBeenCalled();
+  expect(service.subscribe).not.toHaveBeenCalled();
+  expect(appStateSubscription.remove).toHaveBeenCalledTimes(1);
+});
+
 it('waits for a purchase to finish before starting a restore', async () => {
   let billing: BillingContextValue | undefined;
   let resolvePurchase: ((snapshot: BillingSnapshot) => void) | undefined;

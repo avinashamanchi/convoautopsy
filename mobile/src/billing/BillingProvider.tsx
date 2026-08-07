@@ -37,22 +37,47 @@ export function BillingProvider({ children, service = appBillingService }: Props
   const [message, setMessage] = useState<string | null>(null);
   const [appUserId, setAppUserId] = useState<string | null>(null);
   const operation = useRef(Promise.resolve());
+  const mountedRef = useRef(true);
+  const reloadGeneration = useRef(0);
 
   const applySnapshot = useCallback((next: BillingSnapshot) => {
     setSnapshot(next);
   }, []);
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      reloadGeneration.current += 1;
+    };
+  }, []);
+
   const reload = useCallback(async () => {
+    const generation = reloadGeneration.current + 1;
+    reloadGeneration.current = generation;
+    if (!mountedRef.current) {
+      return;
+    }
     setBusy(true);
     setMessage(null);
     try {
       const next = await service.load();
+      if (!mountedRef.current || generation !== reloadGeneration.current) {
+        return;
+      }
       applySnapshot(next);
-      setAppUserId(await service.getAppUserId());
+      const nextAppUserId = await service.getAppUserId();
+      if (mountedRef.current && generation === reloadGeneration.current) {
+        setAppUserId(nextAppUserId);
+      }
     } catch {
-      setMessage('Could not refresh billing.');
+      if (mountedRef.current && generation === reloadGeneration.current) {
+        setMessage('Could not refresh billing.');
+      }
     } finally {
-      setBusy(false);
+      if (mountedRef.current && generation === reloadGeneration.current) {
+        setBusy(false);
+      }
     }
   }, [applySnapshot, service]);
 

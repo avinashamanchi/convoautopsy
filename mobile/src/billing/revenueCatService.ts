@@ -9,6 +9,11 @@ type RevenueCatPackage = {
   product: { identifier: string; title: string; priceString: string };
 };
 
+type RevenueCatSubscription = {
+  nativeListener: (customerInfo: RevenueCatCustomerInfo) => void;
+  module: RevenueCatModule | null;
+};
+
 export type RevenueCatModule = {
   configure(configuration: { apiKey: string }): void;
   getOfferings(): Promise<{ current: { availablePackages: readonly RevenueCatPackage[] } | null }>;
@@ -54,6 +59,7 @@ export class RevenueCatBillingService implements BillingService {
   private readonly packagesByProductId = new Map<string, RevenueCatPackage>();
   private readonly configuredProductIds: ReadonlySet<string>;
   private readonly moduleLoader: () => Promise<RevenueCatModule>;
+  private readonly subscriptions = new Set<RevenueCatSubscription>();
 
   constructor(private readonly options: RevenueCatBillingServiceOptions) {
     this.configuredProductIds = new Set(options.productIds);
@@ -119,14 +125,25 @@ export class RevenueCatBillingService implements BillingService {
   }
 
   subscribe(listener: (snapshot: BillingSnapshot) => void): () => void {
-    if (!this.module) {
-      return () => undefined;
-    }
-    const nativeListener = (customerInfo: RevenueCatCustomerInfo) => {
-      listener(this.applyCustomerInfo(customerInfo));
+    const subscription: RevenueCatSubscription = {
+      nativeListener: (customerInfo) => {
+        listener(this.applyCustomerInfo(customerInfo));
+      },
+      module: null,
     };
-    this.module.addCustomerInfoUpdateListener(nativeListener);
-    return () => { this.module?.removeCustomerInfoUpdateListener(nativeListener); };
+    this.subscriptions.add(subscription);
+    if (this.module) {
+      this.attachSubscription(subscription, this.module);
+    } else {
+      void this.getModule()
+        .then((module) => { if (module) this.attachSubscription(subscription, module); })
+        .catch(() => undefined);
+    }
+    return () => {
+      this.subscriptions.delete(subscription);
+      subscription.module?.removeCustomerInfoUpdateListener(subscription.nativeListener);
+      subscription.module = null;
+    };
   }
 
   async getAppUserId(): Promise<string | null> {
@@ -151,6 +168,9 @@ export class RevenueCatBillingService implements BillingService {
         .then((module) => {
           module.configure({ apiKey: this.options.apiKey! });
           this.module = module;
+          this.subscriptions.forEach((subscription) => {
+            this.attachSubscription(subscription, module);
+          });
           return module;
         })
         .catch((error: unknown) => {
@@ -167,6 +187,14 @@ export class RevenueCatBillingService implements BillingService {
       entitlementActive: this.isEntitlementActive(customerInfo),
     };
     return this.snapshot;
+  }
+
+  private attachSubscription(subscription: RevenueCatSubscription, module: RevenueCatModule): void {
+    if (!this.subscriptions.has(subscription) || subscription.module) {
+      return;
+    }
+    module.addCustomerInfoUpdateListener(subscription.nativeListener);
+    subscription.module = module;
   }
 
   private isEntitlementActive(customerInfo: RevenueCatCustomerInfo): boolean {

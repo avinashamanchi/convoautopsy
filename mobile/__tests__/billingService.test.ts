@@ -111,8 +111,11 @@ it('turns a native purchase cancellation into a PurchaseCancelledError', async (
   await expect(service.purchase(monthlyId)).rejects.toBeInstanceOf(PurchaseCancelledError);
 });
 
-it('removes the native customer-info listener when unsubscribed', async () => {
-  const fakeRevenueCat = createRevenueCatFake();
+it('keeps a pre-initialization subscription active until it is unsubscribed', async () => {
+  let nativeListener: Parameters<RevenueCatModule['addCustomerInfoUpdateListener']>[0] | undefined;
+  const fakeRevenueCat = createRevenueCatFake({
+    addCustomerInfoUpdateListener: jest.fn((listener) => { nativeListener = listener; }),
+  });
   const service = new RevenueCatBillingService({
     apiKey: 'appl_public',
     entitlementId: 'convo_pro',
@@ -120,13 +123,20 @@ it('removes the native customer-info listener when unsubscribed', async () => {
     executionEnvironment: 'standalone',
     moduleLoader: async () => fakeRevenueCat,
   });
+  const listener = jest.fn();
+
+  const unsubscribe = service.subscribe(listener);
   await service.load();
 
-  const unsubscribe = service.subscribe(jest.fn());
+  nativeListener?.({ entitlements: { active: {} } });
+
+  expect(listener).toHaveBeenCalledWith({
+    availability: 'ready',
+    entitlementActive: false,
+    products: [{ id: monthlyId, title: 'Convo Pro Monthly', localizedPrice: '$7.99' }],
+  });
+
   unsubscribe();
 
-  expect(fakeRevenueCat.addCustomerInfoUpdateListener).toHaveBeenCalledTimes(1);
-  expect(fakeRevenueCat.removeCustomerInfoUpdateListener).toHaveBeenCalledWith(
-    expect.any(Function),
-  );
+  expect(fakeRevenueCat.removeCustomerInfoUpdateListener).toHaveBeenCalledWith(nativeListener);
 });
