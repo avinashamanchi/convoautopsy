@@ -32,7 +32,9 @@ it('shows every anonymous message in an editable labeled input and selects safe 
     name: 'Redact email sam@example.com in Person A message 1',
     selected: true,
   })).toBeOnTheScreen();
-  expect(screen.getByLabelText('Text sent for Person A message 1')).toHaveTextContent('Email [EMAIL]');
+  expect(screen.getByLabelText(
+    'Text sent for Person A message 1: Email [EMAIL]',
+  )).toBeOnTheScreen();
 });
 
 it('lets the person toggle a candidate and confirms exactly the visible outgoing texts', () => {
@@ -44,6 +46,9 @@ it('lets the person toggle a candidate and confirms exactly the visible outgoing
     name: 'Redact email sam@example.com in Person A message 1',
     selected: false,
   })).toBeOnTheScreen();
+  expect(screen.getByLabelText(
+    'Text sent for Person A message 1: Email sam@example.com',
+  )).toBeOnTheScreen();
   fireEvent.press(screen.getByRole('button', { name: 'Confirm exact text' }));
 
   expect(onConfirm).toHaveBeenCalledWith([
@@ -66,6 +71,9 @@ it('re-detects candidates after an edit instead of applying stale offsets', () =
     name: 'Redact email new@example.com in Person A message 1',
     selected: true,
   })).toBeOnTheScreen();
+  expect(screen.getByLabelText(
+    'Text sent for Person A message 1: New address [EMAIL]',
+  )).toBeOnTheScreen();
   fireEvent.press(screen.getByRole('button', { name: 'Confirm exact text' }));
   expect(onConfirm.mock.calls[0][0][0].text).toBe('New address [EMAIL]');
 });

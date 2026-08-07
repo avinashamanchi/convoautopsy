@@ -80,7 +80,9 @@ it('always opens the exact outgoing-data review before checking even existing co
 
   await openOutgoingReview();
 
-  expect(screen.getByLabelText('Text sent for Person A message 1')).toHaveTextContent('Email me at [EMAIL]');
+  expect(screen.getByLabelText(
+    'Text sent for Person A message 1: Email me at [EMAIL]',
+  )).toBeOnTheScreen();
   expect(getConsent).not.toHaveBeenCalled();
   expect(remoteAnalysis).not.toHaveBeenCalled();
 });

@@ -98,7 +98,7 @@ export function RemoteDataReview({ messages, isConfirming, onConfirm, onCancel }
                 </Pressable>
               );
             })}
-            <Text accessibilityLabel={`Text sent for ${context}`} style={styles.outgoing}>
+            <Text accessibilityLabel={`Text sent for ${context}: ${outgoingText}`} style={styles.outgoing}>
               {outgoingText}
             </Text>
             {!item.text.trim() ? <Text accessibilityRole="alert" style={styles.error}>Message text cannot be empty.</Text> : null}
