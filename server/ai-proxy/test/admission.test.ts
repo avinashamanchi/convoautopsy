@@ -5,6 +5,7 @@ import { reset, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:tes
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  AdmissionDurableObject,
   deriveAdmissionSubjectDigest,
   releaseAdmission,
   reserveAdmission,
@@ -71,10 +72,57 @@ async function reserveAllowed(overrides: Partial<AdmissionRequest>): Promise<str
 }
 
 afterEach(async () => {
+  vi.useRealTimers();
   await reset();
 });
 
 describe('atomic AI admission', () => {
+  it('returns the post-reservation global in-flight count for safe bucketing', async () => {
+    const first = await reserve({ subjectDigest: 'metric-inflight-first' });
+    const second = await reserve({ subjectDigest: 'metric-inflight-second' });
+
+    expect(first).toMatchObject({ allowed: true, inFlight: 1 });
+    expect(second).toMatchObject({ allowed: true, inFlight: 2 });
+    if (first.allowed) await release(first.leaseId);
+    if (second.allowed) await release(second.leaseId);
+  });
+
+  it('reports only active reservations and removes expired leases before counting', async () => {
+    const activeLease = await reserveAllowed({ subjectDigest: 'diagnostic-active' });
+    const expiredLease = await reserveAllowed({ subjectDigest: 'diagnostic-expired' });
+    const now = Date.parse('2026-08-07T12:01:00Z');
+    await runInDurableObject(stub(), (_instance, state) => {
+      state.storage.sql.exec('UPDATE inflight SET expires_at = ? WHERE lease_id = ?', now - 1, expiredLease);
+      state.storage.sql.exec('UPDATE inflight SET expires_at = ? WHERE lease_id = ?', now + 60_000, activeLease);
+    });
+
+    const activeReservations = await runInDurableObject(stub(), (instance) => (
+      (instance as AdmissionDurableObject).activeReservationCount(now)
+    ));
+    expect(activeReservations).toBe(1);
+    await release(activeLease);
+  });
+
+  it('bounds a stalled Durable Object release so alarms can recover the lease', async () => {
+    vi.useFakeTimers();
+    const pending = new Promise<Response>(() => undefined);
+    const hangingNamespace = {
+      idFromName: () => ({ toString: () => 'global' }),
+      get: () => ({ fetch: () => pending }),
+    } as unknown as DurableObjectNamespace;
+    let settled = false;
+    const result = releaseAdmission(hangingNamespace, 'stalled-lease').then(
+      () => { settled = true; },
+      () => { settled = true; },
+    );
+
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(settled).toBe(true);
+    await result;
+    vi.useRealTimers();
+  });
+
   it('admits exactly 100 of 160 concurrent reservations and releases every lease', async () => {
     const subjectDigest = 'digest-concurrency';
     const results = await Promise.all(Array.from({ length: 160 }, () => reserve({ subjectDigest })));

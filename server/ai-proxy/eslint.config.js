@@ -12,6 +12,12 @@ export default tseslint.config(
     },
   },
   {
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
+  {
     files: ['test/env.d.ts'],
     rules: {
       '@typescript-eslint/no-empty-object-type': 'off',

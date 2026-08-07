@@ -8,10 +8,17 @@ import {
   type CraftResponseRequest,
 } from './contract';
 import { asPublicError, ProviderInvalidResponseError, ProviderUnavailableError, PublicError, type PublicErrorCode } from './errors';
-import { resolvePlan } from './entitlements';
+import { resolveEntitlement } from './entitlements';
 import { createGroqProvider, type AiProvider, type ProviderCraftInput } from './provider';
 import { checkRateLimits, deriveRateLimitKeys } from './rateLimit';
 import { deriveAdmissionSubjectDigest, releaseAdmission, reserveAdmission } from './admission';
+import {
+  createSafeMetric,
+  type EntitlementCacheMetric,
+  type MetricPlan,
+  type MetricRoute,
+  type SafeMetric,
+} from './metrics';
 
 export type { AiProvider } from './provider';
 export { RateLimitDurableObject } from './rateLimit';
@@ -28,15 +35,15 @@ export interface Env {
   ENTITLEMENT_CACHE?: KVNamespace;
 }
 
-type SafeLog = {
-  requestId: string;
-  route: '/v1/analyses' | '/v1/responses' | 'unknown';
-  status: number;
-  latencyBucket: '<100ms' | '<1s' | '<5s' | '>=5s';
-  code?: PublicErrorCode;
+type OperationalContext = {
+  plan: MetricPlan;
+  bodyBytes: number | undefined;
+  providerUnits: number | undefined;
+  inFlight: number | undefined;
+  entitlementCache: EntitlementCacheMetric;
 };
 
-type Logger = { info(record: SafeLog): void };
+type Logger = { info(metric: SafeMetric, requestId: string): void };
 type AppOptions = { provider?: AiProvider; logger?: Logger; rateLimitSecret?: string };
 const MAX_BODY_BYTES = 128 * 1024;
 
@@ -46,10 +53,17 @@ export function createApp(options: AppOptions = {}) {
       const started = Date.now();
       const requestId = crypto.randomUUID();
       const route = toRoute(request.url);
+      const operational: OperationalContext = {
+        plan: 'unknown',
+        bodyBytes: undefined,
+        providerUnits: undefined,
+        inFlight: undefined,
+        entitlementCache: 'unknown',
+      };
       let status = 500;
       let code: PublicErrorCode | undefined;
       try {
-        const response = await handle(request, env, route, requestId, options);
+        const response = await handle(request, env, route, requestId, options, operational);
         status = response.status;
         code = response.headers.get('x-public-error-code') as PublicErrorCode | null ?? undefined;
         response.headers.delete('x-public-error-code');
@@ -60,21 +74,43 @@ export function createApp(options: AppOptions = {}) {
         code = publicError.code;
         return errorResponse(publicError, requestId, route === 'unknown' ? null : request.headers.get('origin'));
       } finally {
-        const record: SafeLog = { requestId, route, status, latencyBucket: bucket(Date.now() - started) };
-        if (code) record.code = code;
-        (options.logger ?? consoleLogger).info(record);
+        const metric = createSafeMetric({
+          route,
+          plan: operational.plan,
+          status,
+          latencyMs: Date.now() - started,
+          bodyBytes: operational.bodyBytes,
+          providerUnits: operational.providerUnits,
+          inFlight: operational.inFlight,
+          entitlementCache: operational.entitlementCache,
+          outcome: code ?? 'allowed',
+        });
+        try {
+          (options.logger ?? consoleLogger).info(metric, requestId);
+        } catch {
+          // Operational telemetry must never replace or delay the request result.
+        }
       }
     },
   };
 }
 
-async function handle(request: Request, env: Env, route: SafeLog['route'], requestId: string, options: AppOptions): Promise<Response> {
+async function handle(
+  request: Request,
+  env: Env,
+  route: MetricRoute,
+  requestId: string,
+  options: AppOptions,
+  operational: OperationalContext,
+): Promise<Response> {
   const origin = request.headers.get('origin');
   if (route === 'unknown') throw new PublicError('INVALID_REQUEST', 404);
   if (request.method === 'OPTIONS') return corsResponse(origin);
   if (request.method !== 'POST') throw new PublicError('INVALID_REQUEST', 405);
 
-  const body = await readBoundedJson(request);
+  const boundedBody = await readBoundedJson(request);
+  const body = boundedBody.value;
+  operational.bodyBytes = boundedBody.bodyBytes;
   if (hasConsentMismatch(body)) throw new PublicError('CONSENT_REQUIRED', 403);
   const schema = route === '/v1/analyses' ? AnalyzeRequestSchema : CraftResponseRequestSchema;
   const parsed = schema.safeParse(body);
@@ -92,7 +128,10 @@ async function handle(request: Request, env: Env, route: SafeLog['route'], reque
   if (!rate.allowed) throw new PublicError('RATE_LIMITED', 429, rate.retryAfterSeconds);
 
   const now = Date.now();
-  const verifiedPlan = await resolvePlan(parsed.data.revenueCatAppUserId, env, now);
+  const entitlement = await resolveEntitlement(parsed.data.revenueCatAppUserId, env, now);
+  const verifiedPlan = entitlement.plan;
+  operational.plan = verifiedPlan;
+  operational.entitlementCache = entitlement.cache;
   const verifiedCustomerId = verifiedPlan === 'pro' ? parsed.data.revenueCatAppUserId : undefined;
   const subjectDigest = await deriveAdmissionSubjectDigest(
     verifiedCustomerId ?? parsed.data.installationToken,
@@ -112,6 +151,8 @@ async function handle(request: Request, env: Env, route: SafeLog['route'], reque
     const status = reservation.code === 'PLAN_LIMIT_REACHED' ? 429 : 503;
     throw new PublicError(reservation.code, status, reservation.retryAfterSeconds);
   }
+  operational.inFlight = reservation.inFlight;
+  operational.providerUnits = route === '/v1/analyses' ? 3 : 1;
 
   const provider = options.provider ?? createGroqProvider(env.GROQ_API_KEY);
   try {
@@ -158,7 +199,7 @@ async function handle(request: Request, env: Env, route: SafeLog['route'], reque
   }
 }
 
-async function readBoundedJson(request: Request): Promise<unknown> {
+async function readBoundedJson(request: Request): Promise<{ value: unknown; bodyBytes: number }> {
   const declaredLength = Number(request.headers.get('content-length'));
   if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) throw new PublicError('PAYLOAD_TOO_LARGE', 413);
   if (!request.body) throw new PublicError('INVALID_REQUEST', 400);
@@ -182,7 +223,7 @@ async function readBoundedJson(request: Request): Promise<unknown> {
     offset += chunk.byteLength;
   }
   try {
-    return JSON.parse(new TextDecoder().decode(bytes));
+    return { value: JSON.parse(new TextDecoder().decode(bytes)), bodyBytes: total };
   } catch {
     throw new PublicError('INVALID_REQUEST', 400);
   }
@@ -193,7 +234,7 @@ function hasConsentMismatch(body: unknown): boolean {
     && 'consentVersion' in body && (body as { consentVersion?: unknown }).consentVersion !== CONSENT_VERSION;
 }
 
-function toRoute(url: string): SafeLog['route'] {
+function toRoute(url: string): MetricRoute {
   const pathname = new URL(url).pathname;
   return pathname === '/v1/analyses' || pathname === '/v1/responses' ? pathname : 'unknown';
 }
@@ -233,13 +274,8 @@ function isAllowedOrigin(origin: string | null): boolean {
     || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
 }
 
-function bucket(elapsed: number): SafeLog['latencyBucket'] {
-  if (elapsed < 100) return '<100ms';
-  if (elapsed < 1_000) return '<1s';
-  if (elapsed < 5_000) return '<5s';
-  return '>=5s';
-}
-
-const consoleLogger: Logger = { info: (record) => console.log(JSON.stringify(record)) };
+const consoleLogger: Logger = {
+  info: (metric, requestId) => console.log(JSON.stringify({ requestId, metric })),
+};
 
 export default createApp();

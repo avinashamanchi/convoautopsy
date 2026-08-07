@@ -9,7 +9,7 @@ export type AdmissionRequest = {
   now: number;
 };
 export type AdmissionResult =
-  | { allowed: true; leaseId: string }
+  | { allowed: true; leaseId: string; inFlight: number }
   | { allowed: false; code: AdmissionRejectionCode; retryAfterSeconds: number };
 
 type AdmissionRejectionCode = Extract<PublicErrorCode, 'PLAN_LIMIT_REACHED' | 'SERVICE_BUSY' | 'DAILY_BUDGET_REACHED'>;
@@ -22,6 +22,7 @@ type InternalReservation = AdmissionRequest & {
 type ReservedLease = {
   allowed: true;
   leaseId: string;
+  inFlight: number;
   expiresAt: number;
   day: string;
   period: string;
@@ -30,6 +31,7 @@ type ReservedLease = {
 
 const DEFAULT_MAX_GLOBAL_IN_FLIGHT = 100;
 const LEASE_TTL_MS = 2 * 60_000;
+const RELEASE_DEADLINE_MS = 2_000;
 const FREE_WINDOW_DAYS = 30;
 const DAY_MS = 24 * 60 * 60_000;
 const SUBJECT_DOMAIN = 'convoautopsy:ai-admission-subject:v1\0';
@@ -86,20 +88,32 @@ export async function reserveAdmission(
 
 export async function releaseAdmission(namespace: DurableObjectNamespace, leaseId: string): Promise<void> {
   if (!leaseId) throw new PublicError('INTERNAL_ERROR', 500);
+  const controller = new AbortController();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(() => {
+      controller.abort();
+      reject(new DOMException('Admission release deadline exceeded', 'TimeoutError'));
+    }, RELEASE_DEADLINE_MS);
+  });
   try {
-    const response = await globalStub(namespace).fetch('https://admission.internal/release', {
+    const operation = globalStub(namespace).fetch('https://admission.internal/release', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ leaseId }),
+      signal: controller.signal,
     });
+    const response = await Promise.race([operation, deadline]);
     if (!response.ok) throw new Error('Admission coordinator unavailable');
   } catch {
     throw new PublicError('INTERNAL_ERROR', 500);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
   }
 }
 
 export class AdmissionDurableObject {
-  constructor(private readonly state: DurableObjectState) {
+  constructor(protected readonly state: DurableObjectState) {
     this.state.storage.sql.exec('CREATE TABLE IF NOT EXISTS daily_budget(day TEXT PRIMARY KEY, provider_units INTEGER NOT NULL)');
     this.state.storage.sql.exec('CREATE TABLE IF NOT EXISTS inflight(lease_id TEXT PRIMARY KEY, expires_at INTEGER NOT NULL)');
     this.state.storage.sql.exec('CREATE TABLE IF NOT EXISTS plan_usage(subject_digest TEXT NOT NULL, period TEXT NOT NULL, route TEXT NOT NULL, count INTEGER NOT NULL, PRIMARY KEY(subject_digest, period, route))');
@@ -121,6 +135,20 @@ export class AdmissionDurableObject {
       return this.earliestLeaseExpiry();
     });
     await this.scheduleAlarm(nextAlarm);
+  }
+
+  async activeReservationCount(now: number): Promise<number> {
+    if (!Number.isSafeInteger(now) || now < 0) throw new Error('Invalid diagnostics timestamp');
+    const state = this.state.storage.transactionSync(() => {
+      this.deleteExpiredLeases(now);
+      return { count: this.inflightCount(), nextAlarm: this.earliestLeaseExpiry() };
+    });
+    try {
+      await this.scheduleAlarm(state.nextAlarm);
+    } catch {
+      // Counting is diagnostic-only; the existing lease alarm remains the recovery boundary.
+    }
+    return state.count;
   }
 
   private async reserve(request: Request): Promise<Response> {
@@ -205,7 +233,7 @@ export class AdmissionDurableObject {
       quota.period,
       input.route,
     );
-    return { allowed: true, leaseId, expiresAt, day, period: quota.period, providerUnits };
+    return { allowed: true, leaseId, inFlight: inflight + 1, expiresAt, day, period: quota.period, providerUnits };
   }
 
   private quotaState(input: InternalReservation): { count: number; limit: number; period: string; retryAfterSeconds: number } {
@@ -358,14 +386,17 @@ function isInternalReservation(value: unknown): value is InternalReservation {
 
 function isAdmissionResult(value: unknown): value is AdmissionResult {
   if (!isRecord(value) || typeof value.allowed !== 'boolean') return false;
-  if (value.allowed) return typeof value.leaseId === 'string' && value.leaseId.length > 0;
+  if (value.allowed) {
+    return typeof value.leaseId === 'string' && value.leaseId.length > 0
+      && Number.isSafeInteger(value.inFlight) && (value.inFlight as number) > 0;
+  }
   return (value.code === 'PLAN_LIMIT_REACHED' || value.code === 'SERVICE_BUSY' || value.code === 'DAILY_BUDGET_REACHED')
     && Number.isSafeInteger(value.retryAfterSeconds)
     && (value.retryAfterSeconds as number) > 0;
 }
 
 function publicResult(result: AdmissionRejection | ReservedLease): AdmissionResult {
-  return result.allowed ? { allowed: true, leaseId: result.leaseId } : result;
+  return result.allowed ? { allowed: true, leaseId: result.leaseId, inFlight: result.inFlight } : result;
 }
 
 function reject(code: AdmissionRejectionCode, retryAfterSeconds: number): AdmissionRejection {

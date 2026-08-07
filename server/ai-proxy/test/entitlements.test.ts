@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { resolvePlan, type EntitlementEnv } from '../src/entitlements';
+import { resolveEntitlement, resolvePlan, type EntitlementEnv } from '../src/entitlements';
 
 const NOW = Date.parse('2026-08-07T00:00:00Z');
 const APP_USER_ID = '$RCAnonymousID:MARKER_RAW_REVENUECAT_ID';
@@ -98,6 +98,36 @@ afterEach(() => {
 });
 
 describe('RevenueCat entitlement resolution', () => {
+  it('reports bypass when configuration or the identifier is absent', async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+
+    await expect(resolveEntitlement(null, env(fetchImpl), NOW)).resolves.toEqual({ plan: 'free', cache: 'bypass' });
+    await expect(resolveEntitlement(APP_USER_ID, env(fetchImpl, new MemoryCache(), ''), NOW)).resolves.toEqual({ plan: 'free', cache: 'bypass' });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('distinguishes a successful refresh from a valid cache hit', async () => {
+    const cache = new MemoryCache();
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(customer('2026-09-01T00:00:00Z')));
+    const testEnv = env(fetchImpl, cache);
+
+    await expect(resolveEntitlement(APP_USER_ID, testEnv, NOW)).resolves.toEqual({ plan: 'pro', cache: 'miss' });
+    await expect(resolveEntitlement(APP_USER_ID, testEnv, NOW + 1)).resolves.toEqual({ plan: 'pro', cache: 'hit' });
+  });
+
+  it('reports error while failing closed when cache or upstream work fails', async () => {
+    const cache = {
+      get: vi.fn().mockRejectedValue(new Error('cache unavailable')),
+      put: vi.fn(),
+    } as unknown as KVNamespace;
+    const fetchImpl = vi.fn<typeof fetch>();
+
+    await expect(resolveEntitlement(APP_USER_ID, { ...env(fetchImpl), ENTITLEMENT_CACHE: cache }, NOW)).resolves.toEqual({
+      plan: 'free',
+      cache: 'error',
+    });
+  });
+
   it('returns pro only for a currently active exact convo_pro entitlement', async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(customer('2026-09-01T00:00:00Z')));
 
