@@ -10,12 +10,15 @@ import { useReportRepository } from '../src/services/reportRepositoryContext';
 import { useAnalysisSession } from '../src/state/AnalysisSession';
 import { tokens } from '../src/theme/tokens';
 import { createNativeUuid, type UuidProvider } from '../src/services/uuid';
+import { useBilling } from '../src/billing/BillingProvider';
+import { canSaveReport } from '../src/billing/saveGate';
 
 type ResultScreenProps = { createReportId?: UuidProvider };
 
 export default function ResultScreen({ createReportId = createNativeUuid }: ResultScreenProps) {
   const { activeResult, draft, reset } = useAnalysisSession();
   const { repository } = useReportRepository();
+  const { entitlementActive } = useBilling();
   const [saveOptionsVisible, setSaveOptionsVisible] = useState(false);
   const [retainSourceText, setRetainSourceText] = useState(false);
   const [title, setTitle] = useState('Saved analysis');
@@ -37,6 +40,12 @@ export default function ResultScreen({ createReportId = createNativeUuid }: Resu
   const save = async () => {
     setSaveStatus('saving');
     try {
+      const gate = canSaveReport((await repository.list()).length, entitlementActive);
+      if (!gate.allowed) {
+        setSaveStatus('idle');
+        router.push('/upgrade?source=history-limit');
+        return;
+      }
       const timestamp = new Date().toISOString();
       await repository.save({
         id: createReportId(),

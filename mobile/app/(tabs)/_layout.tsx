@@ -36,7 +36,7 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="settings"
-        options={{ title: 'Settings', tabBarIcon: TabIcon }}
+        options={{ title: 'Settings', tabBarButtonTestID: 'tab-settings', tabBarIcon: TabIcon }}
       />
     </Tabs>
   );

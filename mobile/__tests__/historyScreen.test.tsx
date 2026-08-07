@@ -21,6 +21,10 @@ jest.mock('../src/state/AnalysisSession', () => ({
   useAnalysisSession: jest.fn(),
 }));
 
+jest.mock('../src/billing/BillingProvider', () => ({
+  useBilling: () => ({ entitlementActive: false }),
+}));
+
 const { useAnalysisSession } = jest.requireMock('../src/state/AnalysisSession') as {
   useAnalysisSession: jest.Mock;
 };

@@ -62,6 +62,7 @@ export default function ReportScreen() {
         <Text style={styles.message}>Saved {new Date(report.updatedAt).toLocaleString()}</Text>
         <ResultSummary result={report.result} />
         <PrimaryButton label={shareStatus === 'sharing' ? 'Preparing report…' : 'Share report image'} disabled={shareStatus === 'sharing'} onPress={() => { void shareReport(); }} />
+        <PrimaryButton label="Convo Pro" onPress={() => router.push('/upgrade?source=report')} />
         <PrimaryButton label="Open Responses" onPress={() => router.replace('/(tabs)/responses')} testID="open-responses" />
         {shareOutcome?.ok ? <Text accessibilityLiveRegion="polite" style={styles.message}>Share sheet opened. This does not confirm completion.</Text> : null}
         {shareOutcome && !shareOutcome.ok ? <Text accessibilityRole="alert" style={styles.error}>{reportExportFailureMessage(shareOutcome)}</Text> : null}

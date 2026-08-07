@@ -91,6 +91,15 @@ export default function SettingsScreen({ onDeleteStatusCommit }: SettingsScreenP
             </View>
           ) : null}
         </View>
+
+        <View style={styles.section}>
+          <Text accessibilityRole="header" style={styles.heading}>Convo Pro</Text>
+          <Text style={styles.copy}>Convo Pro unlocks unlimited saved analyses. Your reports stay local unless you choose to share them.</Text>
+          <PrimaryButton label="Convo Pro" onPress={() => router.push('/upgrade?source=settings')} />
+          <PrimaryButton label="Restore Purchases" onPress={() => router.push('/upgrade?source=restore')} />
+          <PrimaryButton label="Privacy" onPress={() => router.push('/privacy')} />
+          <PrimaryButton label="Terms of Use" onPress={() => router.push('/terms')} />
+        </View>
       </ScrollView>
     </Screen>
   );

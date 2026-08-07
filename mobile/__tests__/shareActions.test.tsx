@@ -31,6 +31,10 @@ jest.mock('../src/state/AnalysisSession', () => ({
   }),
 }));
 
+jest.mock('../src/billing/BillingProvider', () => ({
+  useBilling: () => ({ entitlementActive: false }),
+}));
+
 jest.mock('../src/services/exportReport', () => ({
   captureAndShareReport: jest.fn(),
   reportExportFailureMessage: (outcome: { code: string }) => {
