@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { router } from 'expo-router';
 import { ActivityIndicator, FlatList, StyleSheet, Text, TextInput, View } from 'react-native';
 import { ConfirmDeleteSheet } from '../../src/components/ConfirmDeleteSheet';
@@ -20,6 +20,14 @@ export default function HistoryScreen() {
   const deletingAllRef = useRef(deletingAll);
   deletingAllRef.current = deletingAll;
   const pagination = useReportPagination({ repository, query, revision, deletingAll });
+
+  useEffect(() => {
+    if (!deletingAll) return;
+    deleteGeneration.current += 1;
+    setPendingDelete(null);
+    setFailedDelete(null);
+    setLoadErrorContext('read');
+  }, [deletingAll]);
 
   const deleteReport = async (report: SavedReportListItem) => {
     const generation = ++deleteGeneration.current;
@@ -60,7 +68,7 @@ export default function HistoryScreen() {
           <PrimaryButton label="Retry loading saved analyses" onPress={pagination.retry} />
         </>
       ) : null}
-      {failedDelete ? (
+      {failedDelete && !deletingAll ? (
         <>
           <Text accessibilityRole="alert" style={styles.error}>Could not delete “{failedDelete.title}”. Please try again.</Text>
           <PrimaryButton label={`Retry deleting ${failedDelete.title}`} onPress={() => { void deleteReport(failedDelete); }} />
@@ -107,8 +115,8 @@ export default function HistoryScreen() {
       <ConfirmDeleteSheet
         onCancel={() => setPendingDelete(null)}
         onConfirm={() => { if (pendingDelete) void deleteReport(pendingDelete); }}
-        title={pendingDelete?.title ?? ''}
-        visible={pendingDelete !== null}
+        title={deletingAll ? '' : (pendingDelete?.title ?? '')}
+        visible={!deletingAll && pendingDelete !== null}
       />
     </Screen>
   );

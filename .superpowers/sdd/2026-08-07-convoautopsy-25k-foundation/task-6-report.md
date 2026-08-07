@@ -84,3 +84,31 @@ All test and build commands used Node `22.22.0`.
 - The trend path is local-only and content never enters remote AI or operational logs.
 - Leading-wildcard contains search cannot promise an index seek; page projection and result materialization are bounded, and this limitation is documented above and beside the query.
 - The one remaining non-repository proof is a physical development-build/device run using Expo SQLite. Expo Go/export cannot certify the native billing or final App Store binary, so no such claim is made.
+
+## Review fix: clear title-bearing history metadata during Delete All
+
+### Commit
+
+- Base: `e906bc0dfe8d4a9cf9247b56e18b6328381239b7`
+- Fix commit subject: `fix: clear history metadata during deletion`
+- Exact fix paths: `mobile/app/(tabs)/history.tsx`, `mobile/__tests__/historyScreen.test.tsx`, and this report
+
+The review found that History cleared paginated rows when `deletingAll` changed, but retained `pendingDelete` and `failedDelete`. An open confirmation sheet or failed-delete banner could therefore keep a saved report title in rendered state after the privacy deletion boundary began.
+
+### RED
+
+- Added a real-screen regression that opens `Delete “Friday conversation”?`, starts a deferred Delete All through the repository coordinator, and requires the confirmation and title to disappear while deletion remains in progress.
+- Added a second regression that first produces `Could not delete “Friday conversation”. Please try again.`, starts deferred Delete All, and requires the banner and title to disappear.
+- Focused run before the fix: 2/2 failed because both title-bearing elements remained rendered after `deleteAllStarted` became true.
+
+### GREEN
+
+- The History render now gates both the failure banner and confirmation sheet on `!deletingAll`, so the transition that observes the deletion boundary hides title-bearing metadata immediately.
+- A `deletingAll`-keyed effect increments `deleteGeneration` and clears both `pendingDelete` and `failedDelete`. Existing generation and `deletingAllRef` checks continue to prevent a late delete rejection from restoring the title.
+- Focused privacy boundary run: 3/3 passed, including the pre-existing late-completion invalidation test.
+- History pagination + History screen + repository coordinator: 3 suites, 25/25 passed.
+- Full mobile Jest: 37 suites, 276/276 passed with no console warnings.
+- Mobile TypeScript: passed.
+- Mobile ESLint: passed with zero warnings.
+- iOS Expo export: passed; 1,484 modules bundled to a 5.92 MB Hermes bundle. The exporter printed only the environment-level `NO_COLOR`/`FORCE_COLOR` warning.
+- `git diff --check` passed before staging.

@@ -281,6 +281,50 @@ it('removes the deleted row and offers a retry when refreshing history fails', a
   expect(await screen.findByText('No saved analyses yet.')).toBeOnTheScreen();
 });
 
+it('clears an open title-specific confirmation as soon as delete-all starts', async () => {
+  const repository = new DeferredDeleteRepository([savedReport()]);
+  render(
+    <ReportRepositoryProvider preferenceStore={preferences} repository={repository}>
+      <HistoryScreen />
+      <DeleteAllButton />
+    </ReportRepositoryProvider>,
+  );
+  await screen.findByText('Friday conversation');
+  fireEvent.press(screen.getByRole('button', { name: 'Delete Friday conversation' }));
+  expect(screen.getByText('Delete “Friday conversation”?')).toBeOnTheScreen();
+
+  fireEvent.press(screen.getByRole('button', { name: 'Test delete all' }));
+
+  await waitFor(() => expect(repository.deleteAllStarted).toBe(true));
+  expect(screen.queryByText('Delete “Friday conversation”?')).toBeNull();
+  expect(screen.queryByText('Friday conversation')).toBeNull();
+  await act(async () => repository.releaseDeleteAll());
+});
+
+it('clears a failed-delete title banner as soon as delete-all starts', async () => {
+  const repository = new DeferredDeleteRepository([savedReport()]);
+  repository.deleteError = new Error('database locked');
+  render(
+    <ReportRepositoryProvider preferenceStore={preferences} repository={repository}>
+      <HistoryScreen />
+      <DeleteAllButton />
+    </ReportRepositoryProvider>,
+  );
+  await screen.findByText('Friday conversation');
+  fireEvent.press(screen.getByRole('button', { name: 'Delete Friday conversation' }));
+  fireEvent.press(screen.getByRole('button', { name: 'Confirm delete Friday conversation' }));
+  await waitFor(() => expect(repository.deleteStarted).toBe(true));
+  await act(async () => repository.releaseDelete());
+  expect(await screen.findByText('Could not delete “Friday conversation”. Please try again.')).toBeOnTheScreen();
+
+  fireEvent.press(screen.getByRole('button', { name: 'Test delete all' }));
+
+  await waitFor(() => expect(repository.deleteAllStarted).toBe(true));
+  expect(screen.queryByText('Could not delete “Friday conversation”. Please try again.')).toBeNull();
+  expect(screen.queryByText('Friday conversation')).toBeNull();
+  await act(async () => repository.releaseDeleteAll());
+});
+
 it('does not re-retain a failed delete payload after delete-all invalidates it', async () => {
   const repository = new DeferredDeleteRepository([
     savedReport({ sourceText: 'Private conversation that must leave memory' }),
