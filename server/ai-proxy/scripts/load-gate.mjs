@@ -11,6 +11,7 @@ import {
   createFatalSummary,
   createRequestIdentity,
   createWranglerArguments,
+  fetchBoundedJsonWithDeadline,
   parseLoadOptions,
   scheduledOffsets,
 } from './load-gate-core.mjs';
@@ -242,14 +243,15 @@ async function pollDiagnostics(target, predicate, timeoutMs) {
 }
 
 async function fixtureDiagnostics(target) {
-  const response = await fetchWithDeadline(`${target}/__fixture/diagnostics`, {
+  const result = await fetchBoundedJsonWithDeadline(`${target}/__fixture/diagnostics`, {
     headers: { authorization: `Bearer ${fixtureSecret}` },
-  }, options.diagnosticsMs);
-  if (!response.ok) {
-    await cancelBody(response.body);
-    throw new Error('diagnostics failed');
-  }
-  const value = await readBoundedJson(response, 1_024);
+  }, {
+    timeoutMs: options.diagnosticsMs,
+    maxBytes: 1_024,
+    parentSignal: outstanding.signal,
+  });
+  if (!result.ok) throw new Error('diagnostics failed');
+  const value = result.value;
   if (!isDiagnostic(value)) throw new Error('invalid diagnostics');
   lastObservedReservations = value.activeReservations;
   return value.activeReservations;

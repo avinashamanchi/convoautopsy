@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import {
+import * as loadGateCore from '../scripts/load-gate-core.mjs';
+
+const {
   aggregateResults,
   createFatalSummary,
   createWranglerArguments,
@@ -8,7 +10,22 @@ import {
   nearestRank,
   parseLoadOptions,
   scheduledOffsets,
-} from '../scripts/load-gate-core.mjs';
+} = loadGateCore;
+
+type FetchBoundedJsonWithDeadline = (
+  input: string,
+  init: RequestInit,
+  options: Readonly<{
+    timeoutMs: number;
+    maxBytes: number;
+    parentSignal: AbortSignal;
+    fetchImplementation?: typeof fetch;
+  }>,
+) => Promise<Readonly<{ ok: boolean; status: number; value: unknown }>>;
+
+const fetchBoundedJsonWithDeadline = (loadGateCore as unknown as {
+  fetchBoundedJsonWithDeadline?: FetchBoundedJsonWithDeadline;
+}).fetchBoundedJsonWithDeadline!;
 
 describe('load gate runner contract', () => {
   it('uses the exact full and CI phase durations and bounded deadlines', () => {
@@ -145,5 +162,75 @@ describe('load gate runner contract', () => {
       requests: 0,
       activeReservations: expected,
     });
+  });
+
+  it('bounds a diagnostics body that never completes so fatal output and cleanup remain reachable', async () => {
+    let bodyCancelled = false;
+    let requestSignal: AbortSignal | undefined;
+    const stalledBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"activeReservations":'));
+      },
+      cancel() {
+        bodyCancelled = true;
+      },
+    });
+    const fetchImplementation = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requestSignal = init?.signal as AbortSignal | undefined;
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      return new Response(stalledBody, { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+    let failure: unknown;
+    let fatalSummary: ReturnType<typeof createFatalSummary> | undefined;
+    let cleanupReached = false;
+    const started = performance.now();
+
+    try {
+      await fetchBoundedJsonWithDeadline('http://127.0.0.1:8787/__fixture/diagnostics', {
+        headers: { authorization: `Bearer ${'a'.repeat(64)}` },
+      }, {
+        timeoutMs: 80,
+        maxBytes: 1_024,
+        parentSignal: new AbortController().signal,
+        fetchImplementation,
+      });
+    } catch (error) {
+      failure = error;
+      fatalSummary = createFatalSummary({ stage: 'CAPACITY', samples: [], activeReservations: undefined });
+    } finally {
+      cleanupReached = true;
+    }
+
+    expect(performance.now() - started).toBeLessThan(500);
+    expect(failure).toMatchObject({ name: 'TimeoutError' });
+    expect(requestSignal?.aborted).toBe(true);
+    expect(bodyCancelled).toBe(true);
+    expect(fatalSummary).toMatchObject({
+      gate: 'fail',
+      failureCodes: ['LOAD_GATE_CAPACITY'],
+      activeReservations: 'not-measured',
+    });
+    expect(cleanupReached).toBe(true);
+  }, 1_000);
+
+  it('clears the diagnostics timer and parent abort listener after a complete body', async () => {
+    const parent = new AbortController();
+    let requestSignal: AbortSignal | undefined;
+    const fetchImplementation = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requestSignal = init?.signal as AbortSignal | undefined;
+      return Response.json({ activeReservations: 0 });
+    }) as typeof fetch;
+
+    const result = await fetchBoundedJsonWithDeadline('http://127.0.0.1:8787/__fixture/diagnostics', {}, {
+      timeoutMs: 30,
+      maxBytes: 1_024,
+      parentSignal: parent.signal,
+      fetchImplementation,
+    });
+    parent.abort();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    expect(result).toEqual({ ok: true, status: 200, value: { activeReservations: 0 } });
+    expect(requestSignal?.aborted).toBe(false);
   });
 });

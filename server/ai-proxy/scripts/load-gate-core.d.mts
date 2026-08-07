@@ -53,3 +53,13 @@ export function createFatalSummary(options: Readonly<{
   samples: readonly LoadSample[];
   activeReservations?: number;
 }>): FatalLoadSummary;
+export function fetchBoundedJsonWithDeadline(
+  input: string,
+  init: RequestInit,
+  options: Readonly<{
+    timeoutMs: number;
+    maxBytes: number;
+    parentSignal: AbortSignal;
+    fetchImplementation?: typeof fetch;
+  }>,
+): Promise<Readonly<{ ok: boolean; status: number; value: unknown }>>;

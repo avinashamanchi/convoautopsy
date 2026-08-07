@@ -140,6 +140,66 @@ export function createFatalSummary({ stage, samples, activeReservations }) {
   });
 }
 
+export async function fetchBoundedJsonWithDeadline(input, init, {
+  timeoutMs,
+  maxBytes,
+  parentSignal,
+  fetchImplementation = globalThis.fetch,
+}) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error('Invalid diagnostics deadline');
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new Error('Invalid diagnostics body bound');
+  if (parentSignal.aborted) throw abortReason(parentSignal);
+
+  const deadline = performance.now() + timeoutMs;
+  const controller = new AbortController();
+  const stop = () => controller.abort(abortReason(parentSignal));
+  parentSignal.addEventListener('abort', stop, { once: true });
+  const timer = setTimeout(() => {
+    controller.abort(new DOMException('Diagnostics deadline exceeded', 'TimeoutError'));
+  }, Math.max(0, deadline - performance.now()));
+  let reader;
+
+  try {
+    const response = await settleBeforeAbort(
+      fetchImplementation(input, { ...init, signal: controller.signal }),
+      controller.signal,
+    );
+    if (!response.body) throw new Error('missing diagnostics body');
+    reader = response.body.getReader();
+    const chunks = [];
+    let total = 0;
+    while (true) {
+      const { done, value } = await settleBeforeAbort(reader.read(), controller.signal);
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) throw new Error('diagnostics body bound');
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return Object.freeze({
+      ok: response.ok,
+      status: response.status,
+      value: JSON.parse(new TextDecoder().decode(bytes)),
+    });
+  } catch (error) {
+    if (reader) void reader.cancel().catch(() => undefined);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    parentSignal.removeEventListener('abort', stop);
+    try {
+      reader?.releaseLock();
+    } catch {
+      // Cancellation may still own a pending read; it will release when settled.
+    }
+  }
+}
+
 function countBy(values, keyFor, order) {
   const entries = new Map();
   for (const value of values) {
@@ -159,6 +219,30 @@ function lexicalKeyOrder(left, right) {
 
 function safeStage(stage) {
   return ['STARTUP', 'SUSTAINED', 'BURST', 'CAPACITY', 'EVALUATION'].includes(stage) ? stage : 'INTERNAL';
+}
+
+function settleBeforeAbort(operation, signal) {
+  if (signal.aborted) return Promise.reject(abortReason(signal));
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (complete, value) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', stop);
+      complete(value);
+    };
+    const stop = () => finish(reject, abortReason(signal));
+    signal.addEventListener('abort', stop, { once: true });
+    Promise.resolve(operation).then(
+      (value) => finish(resolve, value),
+      (error) => finish(reject, error),
+    );
+    if (signal.aborted) stop();
+  });
+}
+
+function abortReason(signal) {
+  return signal.reason ?? new DOMException('Load gate stopped', 'AbortError');
 }
 
 function requiredValue(values, index, flag) {

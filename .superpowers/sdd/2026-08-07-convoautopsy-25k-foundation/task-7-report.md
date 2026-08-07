@@ -70,3 +70,20 @@ The Task 7 review findings were fixed in the separate commit with subject `fix: 
 - TypeScript, ESLint with zero warnings, Node syntax checks, both Wrangler dry builds, and `git diff --check` passed.
 - Exact CI load gate passed: **165 ordinary successes**, one expected injected `503 SERVICE_BUSY`, peak reservations **100**, p95 **1742.36ms**, p99 **1988.02ms**, and final observed reservations **0**.
 - Exact full load gate passed: **1,000 ordinary successes**, one expected injected `503 SERVICE_BUSY`, no ordinary failures or 429s, peak reservations **100**, p95 **1913.73ms**, p99 **1919.65ms**, and final observed reservations **0**.
+
+## Diagnostic-read deadline follow-up
+
+The remaining Task 7 review finding was fixed in the separate commit with subject `fix: bound ConvoAutopsy diagnostic reads`:
+
+- Fixture diagnostics now use one monotonic deadline that begins before the fetch and remains active through response headers, every streamed body read, the 1 KiB byte bound, and JSON decoding.
+- A deadline abort interrupts a pending fetch or body read, cancels the body reader, and rejects with `TimeoutError`, allowing the fatal aggregate summary and outer `finally` cleanup to run.
+- Success and failure both clear the deadline timer and detach parent and per-operation abort listeners. A completed diagnostic is not later aborted by a stale timer or parent listener.
+
+### Diagnostic-read TDD and verification evidence
+
+- RED: the focused load-gate file produced **2 expected failures and 9 passes** because the wished-for end-to-end bounded diagnostics reader did not exist. The stalled body could not reach the expected timeout/cancellation path, and success could not prove timer/listener cleanup.
+- GREEN: the focused file passed **11 tests**; the stalled body test included delayed response headers, then verified bounded `TimeoutError`, request abort, body cancellation, fatal summary creation, and `finally` reachability.
+- Full Worker Vitest passed **10 files, 125 tests**.
+- TypeScript, ESLint with zero warnings, Node syntax checks, both production and fixture Wrangler dry builds, and `git diff --check` passed.
+- Exact CI load gate passed: **165 ordinary successes**, one expected injected `503 SERVICE_BUSY`, peak reservations **100**, p95 **1558.87ms**, p99 **1825.66ms**, and final observed reservations **0**.
+- Exact full load gate passed: **1,000 ordinary successes**, one expected injected `503 SERVICE_BUSY`, no ordinary failures or 429s, peak reservations **100**, p95 **1908.81ms**, p99 **1916.96ms**, and final observed reservations **0**.
