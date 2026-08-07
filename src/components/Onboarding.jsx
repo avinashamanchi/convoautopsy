@@ -38,13 +38,13 @@ const STEPS = [
   },
 ]
 
-export default function Onboarding({ username, onDone }) {
+export default function Onboarding({ onDone }) {
   const [step, setStep] = useState(0)
   const current = STEPS[step]
   const isLast = step === STEPS.length - 1
 
   const handleNext = () => {
-    if (isLast) { markOnboarded(username); onDone() }
+    if (isLast) { markOnboarded(); onDone() }
     else setStep(s => s + 1)
   }
 

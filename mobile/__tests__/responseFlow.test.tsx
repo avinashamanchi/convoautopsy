@@ -21,6 +21,9 @@ jest.mock('expo-router', () => ({
 }));
 
 jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn() }));
+jest.mock('../src/billing/BillingProvider', () => ({
+  useBilling: () => ({ appUserId: '$RCAnonymousID:response-test', identityStatus: 'ready' }),
+}));
 jest.mock('expo-sharing', () => ({ isAvailableAsync: jest.fn(), shareAsync: jest.fn() }));
 jest.mock('../src/services/consentStore', () => {
   const actual = jest.requireActual('../src/services/consentStore');
@@ -446,6 +449,14 @@ it('reviews exact redacted text and current consent before the optional AI reque
   expect(mockGetConsent).not.toHaveBeenCalled();
   expect(mockResponseRequest).not.toHaveBeenCalled();
   expect(screen.getByLabelText('Text sent for Person A message 1: Email me at [EMAIL]')).toBeOnTheScreen();
+  expect(screen.getByLabelText('Outgoing possible interpretation for Person A message 1')).toHaveProp(
+    'value',
+    privateReport.result.messages[0].possibleInterpretation,
+  );
+  fireEvent.changeText(
+    screen.getByLabelText('Outgoing possible interpretation for Person A message 1'),
+    'Email sam@example.com may be a request for contact.',
+  );
 
   fireEvent.press(screen.getByRole('button', { name: 'Confirm exact text' }));
   expect(await screen.findByText('Before AI-assisted response drafting')).toBeOnTheScreen();
@@ -463,7 +474,11 @@ it('reviews exact redacted text and current consent before the optional AI reque
     analysis: {
       ...privateReport.result,
       messages: [
-        { ...privateReport.result.messages[0], text: 'Email me at [EMAIL]' },
+        {
+          ...privateReport.result.messages[0],
+          text: 'Email me at [EMAIL]',
+          possibleInterpretation: 'Email [EMAIL] may be a request for contact.',
+        },
         privateReport.result.messages[1],
       ],
     },
@@ -562,7 +577,7 @@ it('does not start reviewed AI flow while a failed on-device save has an unresol
 
 it.each([
   [new AiClientError('RATE_LIMITED', 31), 'AI draft rate limit reached. Try again in 31 seconds.'],
-  [new AiClientError('PLAN_LIMIT_REACHED', 60), 'AI draft allowance has been used for this period.'],
+  [new AiClientError('PLAN_LIMIT_REACHED', 2_678_400), 'AI draft allowance reached. It resets in 31 days.'],
   [new AiClientError('SERVICE_BUSY', 10), 'AI drafting is busy right now.'],
   [new AiClientError('DAILY_BUDGET_REACHED', 60), "AI drafting is paused for today's service budget."],
   [new AiClientError('SERVICE_UNAVAILABLE'), 'AI drafting is temporarily unavailable.'],

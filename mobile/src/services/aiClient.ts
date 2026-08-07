@@ -5,6 +5,7 @@ import {
   type ParsedMessage,
   type ResponseDraft,
 } from '../domain/analysis';
+import { fetch as expoFetch } from 'expo/fetch';
 import type { ResponseGoal, ResponseTone } from '../domain/responseCrafter';
 import { CONSENT_VERSION, SecureStorageUnavailableError, type ConsentRecord } from './consentStore';
 
@@ -35,9 +36,8 @@ export class AiClientError extends Error {
 type FetchPort = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 const expoResponseFetch: FetchPort = async (input, init) => {
-  const { fetch } = await import('expo/fetch');
   const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-  return fetch(url, init as never) as unknown as Promise<Response>;
+  return expoFetch(url, init as never) as unknown as Promise<Response>;
 };
 
 type AiClientDependencies = {
@@ -63,7 +63,7 @@ export type AiResponseRequest = Readonly<{
 
 export function createAiClient({
   endpoint = process.env.EXPO_PUBLIC_AI_PROXY_URL,
-  fetch: fetchPort = globalThis.fetch,
+  fetch: fetchPort = expoResponseFetch,
   getConsent,
   getInstallationToken,
   getRevenueCatAppUserId,
@@ -109,7 +109,7 @@ export function createAiClient({
       ensureActive();
       const url = analysisUrl(endpoint, isProduction);
       if (!url || !fetchPort) throw new AiClientError('NOT_CONFIGURED');
-      const revenueCatAppUserId = await getRevenueCatAppUserId().catch(() => null);
+      const revenueCatAppUserId = await requireBillingIdentity(getRevenueCatAppUserId);
       ensureActive();
       const response = await fetchPort(url, {
         method: 'POST',
@@ -118,13 +118,13 @@ export function createAiClient({
           schemaVersion: 1,
           consentVersion: consent.version,
           installationToken,
-          ...(revenueCatAppUserId === null ? {} : { revenueCatAppUserId }),
+          revenueCatAppUserId,
           messages: anonymousMessages,
         }),
         signal: requestController.signal,
       });
       ensureActive();
-      const body = await readJson(response);
+      const body = await readBoundedJson(response, requestController.signal);
       ensureActive();
       if (!response.ok) throw publicError(response, body);
       return validAnalysis(response, body);
@@ -192,7 +192,7 @@ export function createResponseClient({
       ensureActive();
       const url = routeUrl(endpoint, '/v1/responses', isProduction);
       if (!url || !fetchPort) throw new AiClientError('NOT_CONFIGURED');
-      const revenueCatAppUserId = await getRevenueCatAppUserId().catch(() => null);
+      const revenueCatAppUserId = await requireBillingIdentity(getRevenueCatAppUserId);
       ensureActive();
       const response = await fetchPort(url, {
         method: 'POST',
@@ -201,7 +201,7 @@ export function createResponseClient({
           schemaVersion: 1,
           consentVersion: consent.version,
           installationToken,
-          ...(revenueCatAppUserId === null ? {} : { revenueCatAppUserId }),
+          revenueCatAppUserId,
           ...reviewedInput,
         }),
         signal: requestController.signal,
@@ -276,11 +276,16 @@ function toAnonymousMessages(messages: readonly Readonly<ParsedMessage>[]) {
   return messages.map(({ sender, text }) => ({ sender, text }));
 }
 
-async function readJson(response: Response): Promise<unknown> {
+async function requireBillingIdentity(getAppUserId: () => Promise<string | null>): Promise<string> {
   try {
-    return await response.json();
-  } catch {
-    throw new AiClientError('INVALID_RESPONSE');
+    const appUserId = await getAppUserId();
+    if (typeof appUserId !== 'string' || !appUserId.trim() || Array.from(appUserId).length > 100) {
+      throw new AiClientError('NOT_CONFIGURED');
+    }
+    return appUserId;
+  } catch (error) {
+    if (error instanceof AiClientError) throw error;
+    throw new AiClientError('NOT_CONFIGURED');
   }
 }
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { craftResponse, GOAL_OPTIONS, TONE_OPTIONS, getPersonSenders } from '../utils/craftResponse'
+import { craftResponse, GOAL_OPTIONS, TONE_OPTIONS, getPersonSenders, prepareResponseReview } from '../utils/craftResponse'
 import { getAiConsent } from '../utils/aiConsent'
+import RemoteDataReview from './RemoteDataReview'
 
 export default function ResponseCrafter({ result, conversationText }) {
   const [step, setStep] = useState(1)
@@ -12,6 +13,8 @@ export default function ResponseCrafter({ result, conversationText }) {
   const [copied, setCopied] = useState(null)
   const [error, setError] = useState('')
   const [responseSource, setResponseSource] = useState(null)
+  const [reviewSnapshot, setReviewSnapshot] = useState(null)
+  const [pendingConsent, setPendingConsent] = useState(null)
   const requestRef = useRef(null)
   const requestGeneration = useRef(0)
   const copyGeneration = useRef(0)
@@ -32,6 +35,8 @@ export default function ResponseCrafter({ result, conversationText }) {
       setTone('')
       setResponses(null)
       setResponseSource(null)
+      setReviewSnapshot(null)
+      setPendingConsent(null)
       setCopied(null)
       setError('')
       setLoading(false)
@@ -46,7 +51,7 @@ export default function ResponseCrafter({ result, conversationText }) {
 
   const senders = getPersonSenders(result)
 
-  const generate = async (selectedTone) => {
+  const generate = async (selectedTone, consent, reviewedSnapshot = null) => {
     requestGeneration.current += 1
     requestRef.current?.abort()
     const controller = new AbortController()
@@ -56,11 +61,10 @@ export default function ResponseCrafter({ result, conversationText }) {
     setError('')
     setStep(4)
     try {
-      const consent = getAiConsent()
       const r = await craftResponse(
         { sender, goal, tone: selectedTone, result, conversationText },
         consent
-          ? { allowRemote: true, consentVersion: consent.version, installationToken: consent.installationToken, signal: controller.signal }
+          ? { allowRemote: true, consentVersion: consent.version, installationToken: consent.installationToken, reviewedSnapshot, signal: controller.signal }
           : { allowRemote: false, signal: controller.signal },
       )
       if (generation !== requestGeneration.current || controller.signal.aborted) return
@@ -74,6 +78,42 @@ export default function ResponseCrafter({ result, conversationText }) {
       requestRef.current = null
       setLoading(false)
     }
+  }
+
+  const chooseTone = async (selectedTone) => {
+    setTone(selectedTone)
+    const consent = getAiConsent()
+    if (!consent) {
+      await generate(selectedTone, null)
+      return
+    }
+    const snapshot = prepareResponseReview({ sender, goal, tone: selectedTone, result, conversationText })
+    setStep(4)
+    if (!snapshot) {
+      setError('Could not prepare an exact-data review. No remote request was sent.')
+      return
+    }
+    setPendingConsent(consent)
+    setReviewSnapshot(snapshot)
+  }
+
+  const confirmReview = async (reviewedSnapshot) => {
+    if (!pendingConsent) return
+    const consent = pendingConsent
+    setReviewSnapshot(null)
+    setPendingConsent(null)
+    await generate(tone, consent, reviewedSnapshot)
+  }
+
+  const cancelReview = () => {
+    requestGeneration.current += 1
+    requestRef.current?.abort()
+    requestRef.current = null
+    setReviewSnapshot(null)
+    setPendingConsent(null)
+    setLoading(false)
+    setError('Remote request canceled. No conversation text was sent.')
+    setStep(3)
   }
 
   const handleCopy = async (id, text) => {
@@ -107,6 +147,8 @@ export default function ResponseCrafter({ result, conversationText }) {
     setTone('')
     setResponses(null)
     setResponseSource(null)
+    setReviewSnapshot(null)
+    setPendingConsent(null)
     setError('')
   }
 
@@ -114,6 +156,14 @@ export default function ResponseCrafter({ result, conversationText }) {
 
   return (
     <div className="rc-root">
+      {reviewSnapshot && (
+        <RemoteDataReview
+          snapshot={reviewSnapshot}
+          isConfirming={loading}
+          onConfirm={confirmReview}
+          onCancel={cancelReview}
+        />
+      )}
       <div className="rc-header">
         <div className="rc-title-row">
           <span className="rc-title">Craft Your Response</span>
@@ -169,7 +219,7 @@ export default function ResponseCrafter({ result, conversationText }) {
             <div className="rc-grid-5">
               {TONE_OPTIONS.map(t => (
                 <button key={t.id} className={`rc-option-tile ${tone === t.id ? 'selected' : ''}`}
-                  onClick={() => { setTone(t.id); generate(t.id) }}>
+                  onClick={() => { void chooseTone(t.id) }}>
                   <span className="rc-tile-icon">{t.icon}</span>
                   <span className="rc-tile-label">{t.label}</span>
                 </button>

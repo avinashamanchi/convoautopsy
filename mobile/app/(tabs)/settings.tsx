@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState, useEffect } from 'react';
 import { router } from 'expo-router';
+import * as Clipboard from 'expo-clipboard';
 import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { PrimaryButton } from '../../src/components/PrimaryButton';
 import { Screen } from '../../src/components/Screen';
@@ -8,6 +9,7 @@ import { deleteAllAppData, nativeCacheArtifactStore, type DeleteAllOutcome } fro
 import { useReportRepository } from '../../src/services/reportRepositoryContext';
 import { useAnalysisSession } from '../../src/state/AnalysisSession';
 import { tokens } from '../../src/theme/tokens';
+import { useBilling } from '../../src/billing/BillingProvider';
 
 type DeleteStatus = 'idle' | 'deleting' | 'success' | { failed: DeleteAllOutcome & { ok: false } };
 type SettingsScreenProps = { onDeleteStatusCommit?: (status: 'deleting' | 'success' | 'failed') => void };
@@ -15,6 +17,7 @@ type SettingsScreenProps = { onDeleteStatusCommit?: (status: 'deleting' | 'succe
 export default function SettingsScreen({ onDeleteStatusCommit }: SettingsScreenProps) {
   const { repository, preferences } = useReportRepository();
   const session = useAnalysisSession();
+  const { appUserId, identityStatus } = useBilling();
   const consent = useMemo(() => createConsentStore({ preferences }), [preferences]);
   const [phrase, setPhrase] = useState('');
   const [deleteStatus, setDeleteStatus] = useState<DeleteStatus>('idle');
@@ -95,6 +98,15 @@ export default function SettingsScreen({ onDeleteStatusCommit }: SettingsScreenP
         <View style={styles.section}>
           <Text accessibilityRole="header" style={styles.heading}>Convo Pro</Text>
           <Text style={styles.copy}>Convo Pro removes the 10-report cap and includes 75 remote AI analyses and 150 remote AI-assisted drafts per UTC calendar month. On-device analyses and drafts remain unlimited on both plans.</Text>
+          <Text style={styles.label}>Pseudonymous support ID</Text>
+          {identityStatus === 'ready' && appUserId ? (
+            <>
+              <Text selectable style={styles.copy}>{appUserId}</Text>
+              <PrimaryButton label="Copy support ID" onPress={() => { void Clipboard.setStringAsync(appUserId); }} />
+            </>
+          ) : (
+            <Text accessibilityRole="alert" style={styles.copy}>Support ID is unavailable until billing finishes loading.</Text>
+          )}
           <PrimaryButton label="Convo Pro" onPress={() => router.push('/upgrade?source=settings')} />
           <PrimaryButton label="Restore Purchases" onPress={() => router.push('/upgrade?source=restore')} />
           <PrimaryButton label="Privacy" onPress={() => router.push('/privacy')} />

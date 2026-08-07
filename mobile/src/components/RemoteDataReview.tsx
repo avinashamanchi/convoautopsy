@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { ParsedMessage } from '../domain/analysis';
 import { applyRedactions, detectRedactions, type RedactionCandidate } from '../domain/redaction';
@@ -6,54 +6,71 @@ import { codePointCount, MAX_INPUT_CODE_POINTS, MAX_MESSAGE_CODE_POINTS } from '
 import { tokens } from '../theme/tokens';
 import { PrimaryButton } from './PrimaryButton';
 
+export type ReviewableMessage = ParsedMessage & { possibleInterpretation?: string };
+
 type RemoteDataReviewProps = {
-  messages: ParsedMessage[];
+  messages: ReviewableMessage[];
   isConfirming: boolean;
-  onConfirm(messages: ParsedMessage[]): void;
+  onConfirm(messages: ReviewableMessage[]): void;
   onCancel(): void;
 };
 
-type ReviewItem = {
-  message: ParsedMessage;
+type ReviewField = {
   text: string;
   candidates: RedactionCandidate[];
   selectedIds: Set<string>;
 };
 
+type ReviewItem = {
+  message: ReviewableMessage;
+  messageField: ReviewField;
+  interpretationField?: ReviewField;
+};
+
 export function RemoteDataReview({ messages, isConfirming, onConfirm, onCancel }: RemoteDataReviewProps) {
   const [items, setItems] = useState(() => createReviewItems(messages));
+  const confirmedRef = useRef(false);
 
   useEffect(() => {
     setItems(createReviewItems(messages));
+    confirmedRef.current = false;
   }, [messages]);
 
-  const hasInvalidText = items.some(({ text }) => !text.trim() || codePointCount(text) > MAX_MESSAGE_CODE_POINTS);
+  const hasInvalidText = items.some(({ messageField, interpretationField }) => (
+    !isValidField(messageField, MAX_MESSAGE_CODE_POINTS)
+    || (interpretationField !== undefined && !isValidField(interpretationField, 300))
+  ));
 
-  function editMessage(index: number, text: string) {
-    const candidates = codePointCount(text) <= MAX_INPUT_CODE_POINTS ? detectRedactions(text) : [];
+  function editField(index: number, field: 'messageField' | 'interpretationField', text: string) {
+    const nextField = createReviewField(text);
     setItems((current) => current.map((item, itemIndex) => (
       itemIndex === index
-        ? { ...item, text, candidates, selectedIds: new Set(candidates.map(({ id }) => id)) }
+        ? { ...item, [field]: nextField }
         : item
     )));
   }
 
-  function toggleCandidate(index: number, candidateId: string) {
+  function toggleCandidate(index: number, field: 'messageField' | 'interpretationField', candidateId: string) {
     setItems((current) => current.map((item, itemIndex) => {
       if (itemIndex !== index) return item;
-      const selectedIds = new Set(item.selectedIds);
+      const currentField = item[field];
+      if (!currentField) return item;
+      const selectedIds = new Set(currentField.selectedIds);
       if (selectedIds.has(candidateId)) selectedIds.delete(candidateId);
       else selectedIds.add(candidateId);
-      return { ...item, selectedIds };
+      return { ...item, [field]: { ...currentField, selectedIds } };
     }));
   }
 
   function confirm() {
-    if (isConfirming || hasInvalidText) return;
-    onConfirm(items.map(({ message, text, selectedIds }) => ({
+    if (confirmedRef.current || isConfirming || hasInvalidText) return;
+    confirmedRef.current = true;
+    const confirmed = items.map(({ message, messageField, interpretationField }) => Object.freeze({
       ...message,
-      text: applyRedactions(text, selectedIds),
-    })));
+      text: reviewedField(messageField),
+      ...(interpretationField ? { possibleInterpretation: reviewedField(interpretationField) } : {}),
+    }));
+    onConfirm(Object.freeze(confirmed) as ReviewableMessage[]);
   }
 
   return (
@@ -65,7 +82,8 @@ export function RemoteDataReview({ messages, isConfirming, onConfirm, onCancel }
       {items.map((item, index) => {
         const messageNumber = index + 1;
         const context = `${item.message.sender} message ${messageNumber}`;
-        const outgoingText = reviewedText(item.text, item.selectedIds);
+        const outgoingText = reviewedField(item.messageField);
+        const outgoingInterpretation = item.interpretationField ? reviewedField(item.interpretationField) : null;
         return (
           <View key={item.message.id} style={styles.message}>
             <Text style={styles.sender}>{item.message.sender}</Text>
@@ -73,13 +91,13 @@ export function RemoteDataReview({ messages, isConfirming, onConfirm, onCancel }
               accessibilityLabel={`Outgoing text for ${context}`}
               editable={!isConfirming}
               multiline
-              onChangeText={(text) => editMessage(index, text)}
+              onChangeText={(text) => editField(index, 'messageField', text)}
               style={styles.input}
               textAlignVertical="top"
-              value={item.text}
+              value={item.messageField.text}
             />
-            {item.candidates.map((candidate) => {
-              const selected = item.selectedIds.has(candidate.id);
+            {item.messageField.candidates.map((candidate) => {
+              const selected = item.messageField.selectedIds.has(candidate.id);
               return (
                 <Pressable
                   accessibilityLabel={`Redact ${candidate.kind} ${candidate.value} in ${context}`}
@@ -87,7 +105,7 @@ export function RemoteDataReview({ messages, isConfirming, onConfirm, onCancel }
                   accessibilityState={{ disabled: isConfirming, selected }}
                   disabled={isConfirming}
                   key={candidate.id}
-                  onPress={() => toggleCandidate(index, candidate.id)}
+                  onPress={() => toggleCandidate(index, 'messageField', candidate.id)}
                   style={({ pressed }) => [
                     styles.candidate,
                     selected && styles.selectedCandidate,
@@ -101,9 +119,49 @@ export function RemoteDataReview({ messages, isConfirming, onConfirm, onCancel }
             <Text accessibilityLabel={`Text sent for ${context}: ${outgoingText}`} style={styles.outgoing}>
               {outgoingText}
             </Text>
-            {!item.text.trim() ? <Text accessibilityRole="alert" style={styles.error}>Message text cannot be empty.</Text> : null}
-            {codePointCount(item.text) > MAX_MESSAGE_CODE_POINTS ? (
+            {!item.messageField.text.trim() ? <Text accessibilityRole="alert" style={styles.error}>Message text cannot be empty.</Text> : null}
+            {codePointCount(item.messageField.text) > MAX_MESSAGE_CODE_POINTS ? (
               <Text accessibilityRole="alert" style={styles.error}>Message text must be 1,000 characters or fewer.</Text>
+            ) : null}
+            {item.interpretationField ? (
+              <>
+                <TextInput
+                  accessibilityLabel={`Outgoing possible interpretation for ${context}`}
+                  editable={!isConfirming}
+                  multiline
+                  onChangeText={(text) => editField(index, 'interpretationField', text)}
+                  style={styles.input}
+                  textAlignVertical="top"
+                  value={item.interpretationField.text}
+                />
+                {item.interpretationField.candidates.map((candidate) => {
+                  const selected = item.interpretationField?.selectedIds.has(candidate.id) ?? false;
+                  return (
+                    <Pressable
+                      accessibilityLabel={`Redact ${candidate.kind} ${candidate.value} in possible interpretation for ${context}`}
+                      accessibilityRole="button"
+                      accessibilityState={{ disabled: isConfirming, selected }}
+                      disabled={isConfirming}
+                      key={`interpretation-${candidate.id}`}
+                      onPress={() => toggleCandidate(index, 'interpretationField', candidate.id)}
+                      style={({ pressed }) => [
+                        styles.candidate,
+                        selected && styles.selectedCandidate,
+                        pressed && !isConfirming && styles.pressed,
+                      ]}
+                    >
+                      <Text style={styles.candidateText}>{selected ? '✓ ' : ''}{candidate.kind}: {candidate.value}</Text>
+                    </Pressable>
+                  );
+                })}
+                <Text accessibilityLabel={`Possible interpretation sent for ${context}: ${outgoingInterpretation}`} style={styles.outgoing}>
+                  {outgoingInterpretation}
+                </Text>
+                {!item.interpretationField.text.trim() ? <Text accessibilityRole="alert" style={styles.error}>Possible interpretation cannot be empty.</Text> : null}
+                {codePointCount(item.interpretationField.text) > 300 ? (
+                  <Text accessibilityRole="alert" style={styles.error}>Possible interpretation must be 300 characters or fewer.</Text>
+                ) : null}
+              </>
             ) : null}
           </View>
         );
@@ -118,18 +176,27 @@ export function RemoteDataReview({ messages, isConfirming, onConfirm, onCancel }
   );
 }
 
-function reviewedText(text: string, selectedIds: Set<string>): string {
-  return codePointCount(text) <= MAX_INPUT_CODE_POINTS ? applyRedactions(text, selectedIds) : text;
+function reviewedField(field: ReviewField): string {
+  return codePointCount(field.text) <= MAX_INPUT_CODE_POINTS ? applyRedactions(field.text, field.selectedIds) : field.text;
 }
 
-function createReviewItems(messages: ParsedMessage[]): ReviewItem[] {
+function createReviewField(text: string): ReviewField {
+  const candidates = codePointCount(text) <= MAX_INPUT_CODE_POINTS ? detectRedactions(text) : [];
+  return { text, candidates, selectedIds: new Set(candidates.map(({ id }) => id)) };
+}
+
+function isValidField(field: ReviewField, maximumCodePoints: number): boolean {
+  return Boolean(field.text.trim()) && codePointCount(field.text) <= maximumCodePoints;
+}
+
+function createReviewItems(messages: ReviewableMessage[]): ReviewItem[] {
   return messages.map((message) => {
-    const candidates = detectRedactions(message.text);
     return {
       message: { ...message },
-      text: message.text,
-      candidates,
-      selectedIds: new Set(candidates.map(({ id }) => id)),
+      messageField: createReviewField(message.text),
+      ...(message.possibleInterpretation !== undefined
+        ? { interpretationField: createReviewField(message.possibleInterpretation) }
+        : {}),
     };
   });
 }

@@ -1,13 +1,14 @@
 import { useState, useEffect, useRef } from 'react'
 import {
   getConversations, saveConversation, deleteConversation,
-  clearSession, hasOnboarded
+  clearSession, deleteAllWebData, hasOnboarded
 } from '../utils/storage'
-import { analyzeConversation, DEMO_TEXT, DEMO_RESULT } from '../utils/analyzeConversation'
+import { analyzeConversation, DEMO_TEXT, DEMO_RESULT, prepareAnalysisReview } from '../utils/analyzeConversation'
 import AnalysisResult from '../components/AnalysisResult'
 import Onboarding from '../components/Onboarding'
 import ResponseCrafter from '../components/ResponseCrafter'
 import AiConsentModal from '../components/AiConsentModal'
+import RemoteDataReview from '../components/RemoteDataReview'
 import { getAiConsent, grantAiConsent } from '../utils/aiConsent'
 import { analysisSourceMessage } from '../utils/analysisSourceMessage'
 import { MAX_INPUT_CHARACTERS, countCodePoints } from '../utils/textLimits'
@@ -46,6 +47,12 @@ export default function Dashboard({ user, onLogout }) {
   const [dragOver, setDragOver] = useState(false)
   const [showAiConsent, setShowAiConsent] = useState(false)
   const [pendingText, setPendingText] = useState('')
+  const [reviewSnapshot, setReviewSnapshot] = useState(null)
+  const [pendingRemoteOptions, setPendingRemoteOptions] = useState(null)
+  const [showDeleteAll, setShowDeleteAll] = useState(false)
+  const [deleteAllPhrase, setDeleteAllPhrase] = useState('')
+  const [deleteAllStatus, setDeleteAllStatus] = useState('')
+  const [deletingAll, setDeletingAll] = useState(false)
   const fileInputRef = useRef(null)
   const requestRef = useRef(null)
   const requestGeneration = useRef(0)
@@ -58,9 +65,9 @@ export default function Dashboard({ user, onLogout }) {
   }, [])
 
   useEffect(() => {
-    setConversations(getConversations(user.username))
-    if (!hasOnboarded(user.username)) setShowOnboarding(true)
-  }, [user.username])
+    setConversations(getConversations())
+    if (!hasOnboarded()) setShowOnboarding(true)
+  }, [])
 
   const saveAnalysis = (txt, result, source, fallbackReason, title = generateTitle(txt)) => {
     const convo = {
@@ -73,8 +80,8 @@ export default function Dashboard({ user, onLogout }) {
       fallbackReason,
       analysis_mode: result.analysis_mode,
     }
-    saveConversation(user.username, convo)
-    setConversations(getConversations(user.username))
+    saveConversation(convo)
+    setConversations(getConversations())
     setActiveConvo(convo)
     setInputText('')
   }
@@ -90,7 +97,24 @@ export default function Dashboard({ user, onLogout }) {
     invalidateAnalysisRequest()
     setPendingText('')
     setShowAiConsent(false)
+    setReviewSnapshot(null)
+    setPendingRemoteOptions(null)
     consentBusy.current = false
+  }
+
+  const beginRemoteReview = (txt, consent) => {
+    const snapshot = prepareAnalysisReview(txt)
+    if (!snapshot) {
+      setError("Couldn't parse the conversation. Use format: Name: Message")
+      return
+    }
+    setPendingText(txt)
+    setPendingRemoteOptions({
+      allowRemote: true,
+      consentVersion: consent.version,
+      installationToken: consent.installationToken,
+    })
+    setReviewSnapshot(snapshot)
   }
 
   const runAnalysis = async (txt, options) => {
@@ -138,7 +162,7 @@ export default function Dashboard({ user, onLogout }) {
       setShowAiConsent(true)
       return
     }
-    await runAnalysis(txt, { allowRemote: true, consentVersion: consent.version, installationToken: consent.installationToken })
+    beginRemoteReview(txt, consent)
   }
 
   const handleConsent = async () => {
@@ -147,10 +171,11 @@ export default function Dashboard({ user, onLogout }) {
     const consent = grantAiConsent()
     setShowAiConsent(false)
     const txt = pendingText
-    setPendingText('')
-    await runAnalysis(txt, consent
-      ? { allowRemote: true, consentVersion: consent.version, installationToken: consent.installationToken }
-      : { allowRemote: false, localReason: 'CONSENT_STORAGE_UNAVAILABLE' })
+    if (consent) beginRemoteReview(txt, consent)
+    else {
+      setPendingText('')
+      await runAnalysis(txt, { allowRemote: false, localReason: 'CONSENT_STORAGE_UNAVAILABLE' })
+    }
     consentBusy.current = false
   }
 
@@ -164,15 +189,49 @@ export default function Dashboard({ user, onLogout }) {
     consentBusy.current = false
   }
 
+  const handleReviewConfirm = async (reviewedSnapshot) => {
+    if (!pendingText || !pendingRemoteOptions) return
+    const txt = pendingText
+    const remoteOptions = pendingRemoteOptions
+    setReviewSnapshot(null)
+    setPendingText('')
+    setPendingRemoteOptions(null)
+    await runAnalysis(txt, { ...remoteOptions, reviewedSnapshot })
+  }
+
+  const handleReviewCancel = () => {
+    resetPendingFlow()
+    setError('Remote request canceled. Your conversation remains on this device.')
+  }
+
   const handleDelete = (id) => {
     if (activeConvo?.id === id) invalidateAnalysisRequest()
-    deleteConversation(user.username, id)
-    setConversations(getConversations(user.username))
+    deleteConversation(id)
+    setConversations(getConversations())
     if (activeConvo?.id === id) setActiveConvo(null)
     setDeleteConfirm(null)
   }
 
   const handleLogout = () => { resetPendingFlow(); clearSession(); onLogout() }
+
+  const handleDeleteAll = async () => {
+    if (deleteAllPhrase !== 'DELETE' || deletingAll) return
+    setDeletingAll(true)
+    setDeleteAllStatus('')
+    const result = await deleteAllWebData()
+    setDeletingAll(false)
+    if (!result.ok) {
+      setDeleteAllStatus('Some browser data could not be deleted. Retry after closing other ConvoAutopsy tabs.')
+      return
+    }
+    invalidateAnalysisRequest()
+    setConversations([])
+    setActiveConvo(null)
+    setInputText('')
+    setShowDeleteAll(false)
+    setDeleteAllPhrase('')
+    setDeleteAllStatus('All app-owned browser data was deleted. Remote provider copies, backups, and App Store subscriptions are not affected.')
+  }
 
   const handleFile = (file) => {
     if (!file) return
@@ -214,6 +273,35 @@ export default function Dashboard({ user, onLogout }) {
       {showAiConsent && (
         <AiConsentModal onAgree={handleConsent} onDecline={handleDecline} isRunning={analyzing} returnFocusRef={aiConsentTriggerRef} />
       )}
+      {reviewSnapshot && (
+        <RemoteDataReview
+          snapshot={reviewSnapshot}
+          isConfirming={analyzing}
+          onConfirm={handleReviewConfirm}
+          onCancel={handleReviewCancel}
+        />
+      )}
+      {showDeleteAll && (
+        <div className="delete-all-backdrop" role="presentation">
+          <section className="delete-all-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-all-title">
+            <h2 id="delete-all-title">Delete all browser data?</h2>
+            <p>This removes ConvoAutopsy reports, drafts, preferences, consent, and cached browser artifacts on this browser.</p>
+            <p>It cannot recall data already shared with providers or backups, and it does not cancel an App Store subscription.</p>
+            <label>
+              Type DELETE to confirm
+              <input value={deleteAllPhrase} onChange={(event) => setDeleteAllPhrase(event.target.value)} disabled={deletingAll} />
+            </label>
+            {deleteAllStatus && <div role="alert">{deleteAllStatus}</div>}
+            <button onClick={handleDeleteAll} disabled={deleteAllPhrase !== 'DELETE' || deletingAll}>
+              {deletingAll ? 'Deleting…' : 'Delete all browser data'}
+            </button>
+            <button onClick={() => { setShowDeleteAll(false); setDeleteAllPhrase(''); setDeleteAllStatus('') }} disabled={deletingAll}>Cancel</button>
+          </section>
+        </div>
+      )}
+      {!showDeleteAll && deleteAllStatus && (
+        <div className="dash-delete-all-status" role="status">{deleteAllStatus}</div>
+      )}
 
       {/* ── Top nav ── */}
       <nav className="dash-nav">
@@ -223,10 +311,13 @@ export default function Dashboard({ user, onLogout }) {
         <div className="dash-nav-logo">Convo<span>Autopsy</span></div>
         <div className="dash-nav-right">
           <div className="dash-user-pill">
-            <span className="dash-user-avatar">{user.username[0].toUpperCase()}</span>
-            <span className="dash-username">{user.username}</span>
+            <span className="dash-user-avatar">{(user.displayName || user.username || 'L')[0].toUpperCase()}</span>
+            <span className="dash-username">{user.displayName || user.username || 'Local profile'}</span>
           </div>
-          <button className="dash-logout" onClick={handleLogout}>Log out</button>
+          <a href="privacy.html">Privacy</a>
+          <a href="terms.html">Terms</a>
+          <button className="dash-delete-all" onClick={() => { setDeleteAllStatus(''); setShowDeleteAll(true) }}>Delete All</button>
+          <button className="dash-logout" onClick={handleLogout}>Exit dashboard</button>
         </div>
       </nav>
 

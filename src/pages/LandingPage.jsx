@@ -835,6 +835,9 @@ function Footer() {
       <div className="lp-footer-inner">
         <div className="lp-footer-logo">Convo<span>Autopsy</span></div>
         <div className="lp-footer-links">
+          <a href="privacy.html">Privacy</a>
+          <a href="terms.html">Terms</a>
+          <a href="support.html">Support</a>
           <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
           <a href="https://github.com/avinashamanchi" target="_blank" rel="noopener noreferrer">Built by Avi Amanchi</a>
         </div>

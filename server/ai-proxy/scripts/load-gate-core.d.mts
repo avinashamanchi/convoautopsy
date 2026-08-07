@@ -14,6 +14,7 @@ export type LoadOptions = Readonly<{
 }>;
 
 export type LoadSample = Readonly<{
+  route: '/v1/analyses' | '/v1/responses';
   status: number;
   latencyMs: number;
   code: string;
@@ -27,6 +28,7 @@ export type LoadSummary = Readonly<{
   nonInjectedFailureRate: number;
   statusCounts: Readonly<Record<string, number>>;
   codeCounts: Readonly<Record<string, number>>;
+  routeCounts: Readonly<Record<string, number>>;
   latencyMs: Readonly<{ p50: number; p95: number; p99: number }>;
   activeReservations: number;
 }>;
@@ -46,6 +48,9 @@ export function createWranglerArguments(options: Readonly<{
 }>): readonly string[];
 export function scheduledOffsets(rps: number, seconds: number): number[];
 export function createRequestIdentity(runId: string, index: number): Readonly<{ installationToken: string; syntheticIp: string }>;
+export function routeForRequestIndex(index: number): '/v1/analyses' | '/v1/responses';
+export function exactRouteMix(routeCounts: Readonly<Record<string, number>>, total: number): boolean;
+export function abusiveRateLimitObserved(samples: readonly LoadSample[]): boolean;
 export function nearestRank(values: readonly number[], percentile: number): number;
 export function aggregateResults(samples: readonly LoadSample[], activeReservations: number): LoadSummary;
 export function createFatalSummary(options: Readonly<{

@@ -15,6 +15,8 @@ import { shareDraftText } from '../../src/services/exportReport';
 import { AiClientError, createResponseClient, type AiResponseRequest } from '../../src/services/aiClient';
 import { CONSENT_VERSION, SECURE_STORAGE_UNAVAILABLE_MESSAGE, createConsentStore } from '../../src/services/consentStore';
 import { tokens } from '../../src/theme/tokens';
+import { useBilling } from '../../src/billing/BillingProvider';
+import { formatRetryDuration } from '../../src/services/retryTiming';
 
 const goals: readonly { id: ResponseGoal; label: string }[] = [
   { id: 'resolve', label: 'Resolve the conflict' },
@@ -38,6 +40,7 @@ type PendingAiPersistence = Readonly<{ reportId: string; draft: ResponseDraft }>
 export default function ResponseScreen() {
   const { reportId } = useLocalSearchParams<{ reportId: string }>();
   const { repository, preferences, revision, deletingAll } = useReportRepository();
+  const { appUserId, identityStatus } = useBilling();
   const [report, setReport] = useState<SavedReport | null>(null);
   const [loadStatus, setLoadStatus] = useState<'loading' | 'missing' | 'error' | 'ready'>('loading');
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -70,8 +73,11 @@ export default function ResponseScreen() {
   const craftReviewedResponse = useMemo(() => createResponseClient({
     getConsent: consentStore.getConsent,
     getInstallationToken: consentStore.getInstallationToken,
-    getRevenueCatAppUserId: getRevenueCatAppUserIdHint,
-  }), [consentStore]);
+    getRevenueCatAppUserId: async () => {
+      if (identityStatus !== 'ready' || !appUserId) throw new AiClientError('NOT_CONFIGURED');
+      return appUserId;
+    },
+  }), [appUserId, consentStore, identityStatus]);
 
   const cancelRemoteWorkflow = useCallback(() => {
     remoteGeneration.current += 1;
@@ -308,6 +314,7 @@ export default function ResponseScreen() {
       sender: message.sender,
       text: message.text,
       sourceLine: index + 1,
+      possibleInterpretation: message.possibleInterpretation,
     })));
     setRemoteNotice(null);
     setRemoteStage('review');
@@ -464,28 +471,21 @@ export default function ResponseScreen() {
   );
 }
 
-async function getRevenueCatAppUserIdHint(): Promise<string | null> {
-  try {
-    const purchases = (await import('react-native-purchases')).default;
-    return await purchases.getAppUserID();
-  } catch {
-    return null;
-  }
-}
-
 function analysisWithReviewedText(analysis: AnalysisResult, reviewedMessages: ParsedMessage[]): AnalysisResult | null {
   if (analysis.messages.length !== reviewedMessages.length) return null;
   const messages = analysis.messages.map((message, index) => {
     const reviewed = reviewedMessages[index];
-    if (!reviewed || reviewed.sender !== message.sender || !reviewed.text.trim()) return null;
+    const reviewedInterpretation = (reviewed as ParsedMessage & { possibleInterpretation?: string })?.possibleInterpretation;
+    if (!reviewed || reviewed.sender !== message.sender || !reviewed.text.trim() || !reviewedInterpretation?.trim()) return null;
     const length = Array.from(reviewed.text).length;
-    if (length < 1 || length > 1_000) return null;
+    const interpretationLength = Array.from(reviewedInterpretation).length;
+    if (length < 1 || length > 1_000 || interpretationLength < 1 || interpretationLength > 300) return null;
     return {
       sender: message.sender,
       text: reviewed.text,
       pattern: message.pattern,
       egoState: message.egoState,
-      possibleInterpretation: message.possibleInterpretation,
+      possibleInterpretation: reviewedInterpretation,
     };
   });
   if (messages.some((message) => message === null)) return null;
@@ -520,7 +520,10 @@ function remoteFailureMessage(error: unknown): string {
       ? `AI draft rate limit reached. Try again in ${error.retryAfterSeconds} seconds.`
       : 'AI draft rate limit reached. Try again later.';
   }
-  if (error.code === 'PLAN_LIMIT_REACHED') return 'AI draft allowance has been used for this period.';
+  if (error.code === 'PLAN_LIMIT_REACHED') {
+    const reset = formatRetryDuration(error.retryAfterSeconds);
+    return reset ? `AI draft allowance reached. It resets in ${reset}.` : 'AI draft allowance reached for this period.';
+  }
   if (error.code === 'SERVICE_BUSY') return 'AI drafting is busy right now.';
   if (error.code === 'DAILY_BUDGET_REACHED') return "AI drafting is paused for today's service budget.";
   if (error.code === 'SERVICE_UNAVAILABLE') return 'AI drafting is temporarily unavailable.';

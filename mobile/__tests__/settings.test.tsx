@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { router } from 'expo-router';
 import { Linking } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import SettingsScreen from '../app/(tabs)/settings';
 import PrivacyScreen from '../app/privacy';
 import { deleteAllAppData } from '../src/services/deleteAllAppData';
@@ -13,6 +14,10 @@ jest.mock('../src/services/deleteAllAppData', () => ({
 }));
 
 jest.mock('expo-router', () => ({ router: { push: jest.fn() } }));
+jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn() }));
+jest.mock('../src/billing/BillingProvider', () => ({
+  useBilling: () => ({ appUserId: '$RCAnonymousID:support-test', identityStatus: 'ready' }),
+}));
 jest.mock('../src/state/AnalysisSession', () => ({
   useAnalysisSession: () => ({ reset: jest.fn() }),
 }));
@@ -74,6 +79,15 @@ it('opens retention and privacy details from settings', async () => {
   renderSettings();
   fireEvent.press(await screen.findByRole('button', { name: 'Privacy, terms, and support' }));
   await waitFor(() => expect(router.push).toHaveBeenCalledWith('/privacy'));
+});
+
+it('shows and copies the pseudonymous RevenueCat support ID from BillingProvider', async () => {
+  renderSettings();
+
+  expect(await screen.findByText('$RCAnonymousID:support-test')).toBeOnTheScreen();
+  fireEvent.press(screen.getByRole('button', { name: 'Copy support ID' }));
+
+  await waitFor(() => expect(Clipboard.setStringAsync).toHaveBeenCalledWith('$RCAnonymousID:support-test'));
 });
 
 it('opens first-party privacy, terms, and support pages from the legal screen', async () => {

@@ -73,7 +73,8 @@
   "jest": {
     "preset": "jest-expo",
     "moduleNameMapper": {
-      "^expo-sqlite$": "<rootDir>/__mocks__/expo-sqlite.ts"
+      "^expo-sqlite$": "<rootDir>/__mocks__/expo-sqlite.ts",
+      "^expo/fetch$": "<rootDir>/__mocks__/expo-fetch.ts"
     }
   },
   "private": true

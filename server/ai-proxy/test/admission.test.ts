@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   AdmissionDurableObject,
+  completeAdmission,
   deriveAdmissionSubjectDigest,
   releaseAdmission,
   reserveAdmission,
@@ -56,6 +57,10 @@ async function release(leaseId: string): Promise<void> {
   await releaseAdmission(namespace(), leaseId);
 }
 
+async function completeFailure(leaseId: string, now: number): Promise<void> {
+  await completeAdmission(namespace(), leaseId, 'provider_failure', now);
+}
+
 async function counts() {
   return runInDurableObject(stub(), (_instance, state) => ({
     inflight: state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM inflight').one().count,
@@ -77,6 +82,114 @@ afterEach(async () => {
 });
 
 describe('atomic AI admission', () => {
+  it('emits a machine-safe budget warning at 80 percent without identifiers or content', async () => {
+    await runInDurableObject(stub(), (_instance, state) => {
+      state.storage.sql.exec('INSERT INTO daily_budget (day, provider_units) VALUES (?, ?)', '2099-08-07', 799);
+    });
+
+    const result = await reserve({ plan: 'pro', route: '/v1/responses' });
+
+    expect(result).toMatchObject({ allowed: true, budgetWarning: 'at-least-80' });
+    expect(JSON.stringify(result)).not.toMatch(/subject|identifier|message|content/i);
+    if (result.allowed) await release(result.leaseId);
+  });
+
+  it('refunds failed provider work and opens a bounded global circuit after five rolling failures', async () => {
+    const now = Date.parse('2099-08-07T12:00:00Z');
+    for (let index = 0; index < 5; index += 1) {
+      const result = await reserve({ plan: 'pro', subjectDigest: `circuit-failure-${index}`, now: now + index });
+      expect(result.allowed).toBe(true);
+      if (result.allowed) await completeFailure(result.leaseId, now + index);
+    }
+
+    expect(await counts()).toEqual({ inflight: 0, budget: 0, usage: 0 });
+    await expect(reserve({ plan: 'pro', subjectDigest: 'circuit-open', now: now + 5 })).resolves.toMatchObject({
+      allowed: false,
+      code: 'PROVIDER_UNAVAILABLE',
+      retryAfterSeconds: 30,
+    });
+  });
+
+  it('refunds and records a failure when an accepted lease completes after UTC retention advances', async () => {
+    const beforeMidnight = Date.parse('2099-08-31T23:59:59.900Z');
+    const oldLease = await reserveAllowed({
+      plan: 'pro',
+      route: '/v1/analyses',
+      subjectDigest: 'cross-midnight-failure',
+      now: beforeMidnight,
+    });
+    const newLease = await reserveAllowed({
+      plan: 'pro',
+      route: '/v1/responses',
+      subjectDigest: 'next-month-retention',
+      now: Date.parse('2099-09-01T00:00:00.100Z'),
+    });
+    await release(newLease);
+
+    await expect(completeFailure(oldLease, Date.parse('2099-09-01T00:00:00.200Z'))).resolves.toBeUndefined();
+
+    expect(await counts()).toEqual({ inflight: 0, budget: 1, usage: 1 });
+    await runInDurableObject(stub(), (_instance, state) => {
+      expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM provider_failures').one().count).toBe(1);
+    });
+  });
+
+  it('allows exactly one half-open probe and closes only after its success', async () => {
+    const now = Date.parse('2099-08-07T12:00:00Z');
+    for (let index = 0; index < 5; index += 1) {
+      const failed = await reserve({ plan: 'pro', subjectDigest: `half-open-failure-${index}`, now: now + index });
+      if (!failed.allowed) throw new Error('Expected failure reservation');
+      await completeFailure(failed.leaseId, now + index);
+    }
+
+    const probeTime = now + 30_004;
+    const [probe, blocked] = await Promise.all([
+      reserve({ plan: 'pro', subjectDigest: 'half-open-probe', now: probeTime }),
+      reserve({ plan: 'pro', subjectDigest: 'half-open-blocked', now: probeTime }),
+    ]);
+    expect([probe, blocked].filter((item) => item.allowed)).toHaveLength(1);
+    expect([probe, blocked].filter((item) => !item.allowed)).toEqual([
+      expect.objectContaining({ code: 'PROVIDER_UNAVAILABLE', retryAfterSeconds: expect.any(Number) }),
+    ]);
+    const allowed = [probe, blocked].find((item) => item.allowed);
+    if (!allowed?.allowed) throw new Error('Expected half-open probe');
+    await completeAdmission(namespace(), allowed.leaseId, 'success', probeTime + 1);
+
+    const recovered = await reserve({ plan: 'pro', subjectDigest: 'after-recovery', now: probeTime + 2 });
+    expect(recovered.allowed).toBe(true);
+    if (recovered.allowed) await release(recovered.leaseId);
+  });
+
+  it('reopens a bounded circuit when the half-open probe returns invalid output', async () => {
+    const now = Date.parse('2099-08-07T12:00:00Z');
+    for (let index = 0; index < 5; index += 1) {
+      const failed = await reserve({ plan: 'pro', subjectDigest: `invalid-probe-failure-${index}`, now: now + index });
+      if (!failed.allowed) throw new Error('Expected failure reservation');
+      await completeFailure(failed.leaseId, now + index);
+    }
+
+    const firstProbeTime = now + 30_004;
+    const firstProbe = await reserve({ plan: 'pro', subjectDigest: 'invalid-probe-first', now: firstProbeTime });
+    if (!firstProbe.allowed) throw new Error('Expected half-open probe');
+    await completeAdmission(namespace(), firstProbe.leaseId, 'invalid_output', firstProbeTime + 1);
+
+    await expect(reserve({ plan: 'pro', subjectDigest: 'invalid-probe-blocked', now: firstProbeTime + 2 })).resolves.toMatchObject({
+      allowed: false,
+      code: 'PROVIDER_UNAVAILABLE',
+      retryAfterSeconds: 30,
+    });
+
+    const secondProbeTime = firstProbeTime + 30_001;
+    const secondProbe = await reserve({ plan: 'pro', subjectDigest: 'invalid-probe-second', now: secondProbeTime });
+    expect(secondProbe.allowed).toBe(true);
+    if (!secondProbe.allowed) throw new Error('Expected a new half-open probe after the bounded cooldown');
+    await completeAdmission(namespace(), secondProbe.leaseId, 'success', secondProbeTime + 1);
+
+    const recovered = await reserve({ plan: 'pro', subjectDigest: 'after-invalid-probe-recovery', now: secondProbeTime + 2 });
+    expect(recovered.allowed).toBe(true);
+    if (recovered.allowed) await release(recovered.leaseId);
+  });
+
   it('returns the post-reservation global in-flight count for safe bucketing', async () => {
     const first = await reserve({ subjectDigest: 'metric-inflight-first' });
     const second = await reserve({ subjectDigest: 'metric-inflight-second' });

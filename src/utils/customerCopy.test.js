@@ -8,7 +8,6 @@ describe('customer-facing product truth', () => {
     const marketingFiles = await Promise.all([
       fromRoot('src/pages/LandingPage.jsx'),
       fromRoot('src/components/Onboarding.jsx'),
-      fromRoot('src/pages/AuthPage.jsx'),
     ])
     const renderedEstimateFiles = await Promise.all([
       fromRoot('src/components/AnalysisResult.jsx'),
@@ -36,5 +35,21 @@ describe('customer-facing product truth', () => {
     expect(readme).toMatch(/may still (?:contain|include) emails, phone numbers, (?:third-party )?names, and context/i)
     expect(readme).toMatch(/review(?:ed)? and redact(?:ed|ion)/i)
     expect(readme).not.toMatch(/anonymized message text|automatically anonymized/i)
+  })
+
+  it('ships the public web app as a browser-local guest profile without fake account credentials', async () => {
+    const [app, storage, readme, privacy] = await Promise.all([
+      fromRoot('src/App.jsx'),
+      fromRoot('src/utils/storage.js'),
+      fromRoot('README.md'),
+      fromRoot('public/privacy.html'),
+    ])
+    const deployedSources = `${app}\n${storage}`
+
+    expect(deployedSources).not.toMatch(/AuthPage|registerUser|loginUser|password|ca_users/)
+    expect(`${readme}\n${privacy}`).toMatch(/browser-local (?:guest )?profile/i)
+    expect(`${readme}\n${privacy}`).toMatch(/no (?:backend|ConvoAutopsy) account/i)
+    expect(`${readme}\n${privacy}`).toMatch(/cannot recall.*(?:provider|backup)/is)
+    expect(`${readme}\n${privacy}`).toMatch(/does not cancel.*App Store subscription/is)
   })
 })

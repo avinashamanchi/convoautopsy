@@ -1,8 +1,11 @@
 import { act, render, waitFor } from '@testing-library/react-native';
 import { AppState } from 'react-native';
 import { useEffect } from 'react';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { BillingProvider, useBilling, type BillingContextValue } from '../src/billing/BillingProvider';
 import type { BillingService, BillingSnapshot } from '../src/billing/contracts';
+import { PurchaseCancelledError } from '../src/billing/revenueCatService';
 
 const readySnapshot: BillingSnapshot = {
   availability: 'ready',
@@ -55,7 +58,10 @@ it('loads billing, subscribes to customer updates, and refreshes when foreground
 
   render(<BillingProvider service={service}><BillingProbe onValue={(value) => { billing = value; }} /></BillingProvider>);
 
+  expect(billing?.identityStatus).toBe('loading');
   await waitFor(() => expect(billing?.entitlementActive).toBe(true));
+  expect(billing?.identityStatus).toBe('ready');
+  expect(billing?.appUserId).toBe('$RCAnonymousID:test-user');
   expect(service.subscribe).toHaveBeenCalledTimes(1);
 
   act(() => { customerUpdate?.({ ...readySnapshot, entitlementActive: false }); });
@@ -63,6 +69,32 @@ it('loads billing, subscribes to customer updates, and refreshes when foreground
 
   act(() => { appStateListener?.('active'); });
   await waitFor(() => expect(service.load).toHaveBeenCalledTimes(2));
+});
+
+it('marks billing identity unavailable when RevenueCat cannot provide a pseudonymous ID', async () => {
+  let billing: BillingContextValue | undefined;
+  const service = createBillingService({ getAppUserId: jest.fn().mockResolvedValue(null) });
+
+  render(<BillingProvider service={service}><BillingProbe onValue={(value) => { billing = value; }} /></BillingProvider>);
+
+  await waitFor(() => expect(billing?.identityStatus).toBe('unavailable'));
+  expect(billing?.appUserId).toBeNull();
+});
+
+it('keeps a verified billing identity after the user cancels a purchase', async () => {
+  let billing: BillingContextValue | undefined;
+  const service = createBillingService({
+    purchase: jest.fn().mockRejectedValue(new PurchaseCancelledError()),
+  });
+
+  render(<BillingProvider service={service}><BillingProbe onValue={(value) => { billing = value; }} /></BillingProvider>);
+  await waitFor(() => expect(billing?.identityStatus).toBe('ready'));
+
+  await act(async () => { await billing?.purchase('com.avinashamanchi.convoautopsy.pro.monthly'); });
+
+  expect(billing?.identityStatus).toBe('ready');
+  expect(billing?.appUserId).toBe('$RCAnonymousID:test-user');
+  expect(billing?.message).toBeNull();
 });
 
 it('preserves the previous entitlement when a foreground refresh fails', async () => {
@@ -118,4 +150,11 @@ it('waits for a purchase to finish before starting a restore', async () => {
   await act(async () => { resolvePurchase?.(readySnapshot); await purchasePromise; });
   await restorePromise;
   expect(restore).toHaveBeenCalledTimes(1);
+});
+
+it('keeps response billing identity behind BillingProvider with no direct purchases import', async () => {
+  const source = await readFile(join(process.cwd(), 'app/response/[reportId].tsx'), 'utf8');
+
+  expect(source).toContain("from '../../src/billing/BillingProvider'");
+  expect(source).not.toMatch(/import\(['"]react-native-purchases['"]\)|from ['"]react-native-purchases['"]/);
 });

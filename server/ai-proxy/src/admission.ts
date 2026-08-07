@@ -9,10 +9,12 @@ export type AdmissionRequest = {
   now: number;
 };
 export type AdmissionResult =
-  | { allowed: true; leaseId: string; inFlight: number }
+  | { allowed: true; leaseId: string; inFlight: number; budgetWarning: BudgetWarning }
   | { allowed: false; code: AdmissionRejectionCode; retryAfterSeconds: number };
 
-type AdmissionRejectionCode = Extract<PublicErrorCode, 'PLAN_LIMIT_REACHED' | 'SERVICE_BUSY' | 'DAILY_BUDGET_REACHED'>;
+export type BudgetWarning = 'under-80' | 'at-least-80';
+export type AdmissionCompletionOutcome = 'success' | 'provider_failure' | 'invalid_output';
+type AdmissionRejectionCode = Extract<PublicErrorCode, 'PLAN_LIMIT_REACHED' | 'SERVICE_BUSY' | 'DAILY_BUDGET_REACHED' | 'PROVIDER_UNAVAILABLE'>;
 type AdmissionRejection = Extract<AdmissionResult, { allowed: false }>;
 type AdmissionConfig = { maxGlobalInFlight?: unknown; maxDailyProviderUnits?: unknown };
 type InternalReservation = AdmissionRequest & {
@@ -27,11 +29,28 @@ type ReservedLease = {
   day: string;
   period: string;
   providerUnits: number;
+  budgetWarning: BudgetWarning;
+  isProbe: boolean;
 };
+
+type LeaseAccounting = {
+  lease_id: string;
+  subject_digest: string;
+  period: string;
+  route: AdmissionRoute;
+  day: string;
+  provider_units: number;
+  is_probe: number;
+};
+
+type CircuitRow = { state: string; opened_at: number; probe_lease_id: string | null };
 
 const DEFAULT_MAX_GLOBAL_IN_FLIGHT = 100;
 const LEASE_TTL_MS = 2 * 60_000;
 const RELEASE_DEADLINE_MS = 2_000;
+const PROVIDER_FAILURE_WINDOW_MS = 60_000;
+const PROVIDER_FAILURE_THRESHOLD = 5;
+const PROVIDER_CIRCUIT_COOLDOWN_MS = 30_000;
 const FREE_WINDOW_DAYS = 30;
 const DAY_MS = 24 * 60 * 60_000;
 const SUBJECT_DOMAIN = 'convoautopsy:ai-admission-subject:v1\0';
@@ -112,6 +131,39 @@ export async function releaseAdmission(namespace: DurableObjectNamespace, leaseI
   }
 }
 
+export async function completeAdmission(
+  namespace: DurableObjectNamespace,
+  leaseId: string,
+  outcome: AdmissionCompletionOutcome,
+  now: number,
+): Promise<void> {
+  if (!leaseId || !isCompletionOutcome(outcome) || !validTimestamp(now)) {
+    throw new PublicError('INTERNAL_ERROR', 500);
+  }
+  const controller = new AbortController();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(() => {
+      controller.abort();
+      reject(new DOMException('Admission completion deadline exceeded', 'TimeoutError'));
+    }, RELEASE_DEADLINE_MS);
+  });
+  try {
+    const operation = globalStub(namespace).fetch('https://admission.internal/complete', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ leaseId, outcome, now }),
+      signal: controller.signal,
+    });
+    const response = await Promise.race([operation, deadline]);
+    if (!response.ok) throw new Error('Admission coordinator unavailable');
+  } catch {
+    throw new PublicError('INTERNAL_ERROR', 500);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+}
+
 export class AdmissionDurableObject {
   constructor(protected readonly state: DurableObjectState) {
     this.state.storage.sql.exec('CREATE TABLE IF NOT EXISTS daily_budget(day TEXT PRIMARY KEY, provider_units INTEGER NOT NULL)');
@@ -119,6 +171,11 @@ export class AdmissionDurableObject {
     this.state.storage.sql.exec('CREATE TABLE IF NOT EXISTS plan_usage(subject_digest TEXT NOT NULL, period TEXT NOT NULL, route TEXT NOT NULL, count INTEGER NOT NULL, PRIMARY KEY(subject_digest, period, route))');
     this.state.storage.sql.exec('CREATE INDEX IF NOT EXISTS plan_usage_period_idx ON plan_usage(period)');
     this.state.storage.sql.exec('CREATE TABLE IF NOT EXISTS maintenance_state(id INTEGER PRIMARY KEY CHECK(id = 1), last_retention_day TEXT NOT NULL)');
+    this.state.storage.sql.exec('CREATE TABLE IF NOT EXISTS lease_accounting(lease_id TEXT PRIMARY KEY, subject_digest TEXT NOT NULL, period TEXT NOT NULL, route TEXT NOT NULL, day TEXT NOT NULL, provider_units INTEGER NOT NULL, is_probe INTEGER NOT NULL CHECK(is_probe IN (0, 1)))');
+    this.state.storage.sql.exec('CREATE TABLE IF NOT EXISTS provider_failures(failure_id TEXT PRIMARY KEY, observed_at INTEGER NOT NULL)');
+    this.state.storage.sql.exec('CREATE INDEX IF NOT EXISTS provider_failures_observed_idx ON provider_failures(observed_at)');
+    this.state.storage.sql.exec("CREATE TABLE IF NOT EXISTS provider_circuit(id INTEGER PRIMARY KEY CHECK(id = 1), state TEXT NOT NULL, opened_at INTEGER NOT NULL, probe_lease_id TEXT)");
+    this.state.storage.sql.exec("INSERT OR IGNORE INTO provider_circuit (id, state, opened_at, probe_lease_id) VALUES (1, 'closed', 0, NULL)");
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -126,11 +183,13 @@ export class AdmissionDurableObject {
     const path = new URL(request.url).pathname;
     if (path === '/reserve') return this.reserve(request);
     if (path === '/release') return this.release(request);
+    if (path === '/complete') return this.complete(request);
     return new Response(null, { status: 404 });
   }
 
   async alarm(): Promise<void> {
     const nextAlarm = this.state.storage.transactionSync(() => {
+      this.assertCircuit();
       this.deleteExpiredLeases(Date.now());
       return this.earliestLeaseExpiry();
     });
@@ -140,6 +199,7 @@ export class AdmissionDurableObject {
   async activeReservationCount(now: number): Promise<number> {
     if (!Number.isSafeInteger(now) || now < 0) throw new Error('Invalid diagnostics timestamp');
     const state = this.state.storage.transactionSync(() => {
+      this.assertCircuit();
       this.deleteExpiredLeases(now);
       return { count: this.inflightCount(), nextAlarm: this.earliestLeaseExpiry() };
     });
@@ -179,7 +239,12 @@ export class AdmissionDurableObject {
       return new Response(null, { status: 400 });
     }
     const nextAlarm = this.state.storage.transactionSync(() => {
-      this.state.storage.sql.exec('DELETE FROM inflight WHERE lease_id = ?', input.leaseId as string);
+      const leaseId = input.leaseId as string;
+      const accounting = this.leaseAccounting(leaseId);
+      this.assertCircuit();
+      this.state.storage.sql.exec('DELETE FROM inflight WHERE lease_id = ?', leaseId);
+      this.state.storage.sql.exec('DELETE FROM lease_accounting WHERE lease_id = ?', leaseId);
+      if (accounting?.is_probe === 1) this.closeCircuit();
       return this.earliestLeaseExpiry();
     });
     try {
@@ -190,9 +255,84 @@ export class AdmissionDurableObject {
     return new Response(null, { status: 204 });
   }
 
+  private async complete(request: Request): Promise<Response> {
+    const input = await parseJson(request);
+    if (!isRecord(input)
+      || typeof input.leaseId !== 'string'
+      || !input.leaseId
+      || !isCompletionOutcome(input.outcome)
+      || !validTimestamp(input.now)) {
+      return new Response(null, { status: 400 });
+    }
+
+    const nextAlarm = this.state.storage.transactionSync(() => {
+      this.completeSync(input.leaseId as string, input.outcome as AdmissionCompletionOutcome, input.now as number);
+      return this.earliestLeaseExpiry();
+    });
+    try {
+      await this.scheduleAlarm(nextAlarm);
+    } catch {
+      // Completion is durable and idempotent; an existing alarm remains the recovery boundary.
+    }
+    return new Response(null, { status: 204 });
+  }
+
+  private completeSync(leaseId: string, outcome: AdmissionCompletionOutcome, now: number): void {
+    const circuit = this.assertCircuit();
+    const accounting = this.leaseAccounting(leaseId);
+    if (!accounting) {
+      this.state.storage.sql.exec('DELETE FROM inflight WHERE lease_id = ?', leaseId);
+      return;
+    }
+
+    if (outcome !== 'success') {
+      this.refundAccounting(accounting);
+    }
+    this.state.storage.sql.exec('DELETE FROM inflight WHERE lease_id = ?', leaseId);
+    this.state.storage.sql.exec('DELETE FROM lease_accounting WHERE lease_id = ?', leaseId);
+
+    if (outcome === 'success') {
+      if (accounting.is_probe === 1) this.closeCircuit();
+      return;
+    }
+
+    if (outcome === 'invalid_output') {
+      if (accounting.is_probe === 1) this.openCircuit(now);
+      return;
+    }
+
+    this.state.storage.sql.exec('DELETE FROM provider_failures WHERE observed_at < ?', now - PROVIDER_FAILURE_WINDOW_MS);
+    this.state.storage.sql.exec(
+      'INSERT INTO provider_failures (failure_id, observed_at) VALUES (?, ?)',
+      crypto.randomUUID(),
+      now,
+    );
+    const failures = this.providerFailureCount();
+    if (accounting.is_probe === 1) {
+      this.openCircuit(now);
+    } else if (circuit.state === 'closed' && failures >= PROVIDER_FAILURE_THRESHOLD) {
+      this.openCircuit(now);
+    }
+  }
+
   private reserveSync(input: InternalReservation): AdmissionRejection | ReservedLease {
+    this.assertCircuit();
     this.deleteExpiredLeases(input.now);
     this.runDailyRetention(input.now);
+
+    this.state.storage.sql.exec('DELETE FROM provider_failures WHERE observed_at < ?', input.now - PROVIDER_FAILURE_WINDOW_MS);
+    const circuit = this.assertCircuit();
+    let isProbe = false;
+    if (circuit.state === 'open') {
+      const retryAt = circuit.opened_at + PROVIDER_CIRCUIT_COOLDOWN_MS;
+      if (input.now < retryAt) return reject('PROVIDER_UNAVAILABLE', retrySeconds(input.now, retryAt));
+      isProbe = true;
+    } else if (circuit.state === 'half_open') {
+      return reject('PROVIDER_UNAVAILABLE', 1);
+    } else if (this.providerFailureCount() >= PROVIDER_FAILURE_THRESHOLD) {
+      this.openCircuit(input.now);
+      return reject('PROVIDER_UNAVAILABLE', Math.ceil(PROVIDER_CIRCUIT_COOLDOWN_MS / 1_000));
+    }
 
     const quota = this.quotaState(input);
     if (quota.count >= quota.limit) {
@@ -210,6 +350,9 @@ export class AdmissionDurableObject {
     const usedProviderUnits = this.providerUnits(day);
     if (!Number.isSafeInteger(usedProviderUnits) || usedProviderUnits < 0) throw new Error('Invalid budget state');
     const projected = usedProviderUnits + providerUnits;
+    const budgetWarning: BudgetWarning = projected / input.maxDailyProviderUnits >= 0.8
+      ? 'at-least-80'
+      : 'under-80';
     const dailyRetry = retrySeconds(input.now, nextUtcDay(input.now));
     if (!Number.isSafeInteger(projected) || projected >= input.maxDailyProviderUnits) {
       return reject('DAILY_BUDGET_REACHED', dailyRetry);
@@ -233,7 +376,25 @@ export class AdmissionDurableObject {
       quota.period,
       input.route,
     );
-    return { allowed: true, leaseId, inFlight: inflight + 1, expiresAt, day, period: quota.period, providerUnits };
+    this.state.storage.sql.exec(
+      'INSERT INTO lease_accounting (lease_id, subject_digest, period, route, day, provider_units, is_probe) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      leaseId,
+      input.subjectDigest,
+      quota.period,
+      input.route,
+      day,
+      providerUnits,
+      isProbe ? 1 : 0,
+    );
+    if (isProbe) {
+      this.state.storage.sql.exec(
+        "UPDATE provider_circuit SET state = 'half_open', probe_lease_id = ? WHERE id = 1 AND state = 'open'",
+        leaseId,
+      );
+      const updated = this.assertCircuit();
+      if (updated.state !== 'half_open' || updated.probe_lease_id !== leaseId) throw new Error('Invalid circuit transition');
+    }
+    return { allowed: true, leaseId, inFlight: inflight + 1, expiresAt, day, period: quota.period, providerUnits, budgetWarning, isProbe };
   }
 
   private quotaState(input: InternalReservation): { count: number; limit: number; period: string; retryAfterSeconds: number } {
@@ -291,6 +452,86 @@ export class AdmissionDurableObject {
     ).toArray()[0]?.provider_units ?? 0;
   }
 
+  private leaseAccounting(leaseId: string): LeaseAccounting | undefined {
+    const row = this.state.storage.sql.exec<LeaseAccounting>(
+      'SELECT lease_id, subject_digest, period, route, day, provider_units, is_probe FROM lease_accounting WHERE lease_id = ?',
+      leaseId,
+    ).toArray()[0];
+    if (!row) return undefined;
+    if (row.lease_id !== leaseId
+      || !DIGEST_PATTERN.test(row.subject_digest)
+      || (row.route !== '/v1/analyses' && row.route !== '/v1/responses')
+      || !/^(free:\d{4}-\d{2}-\d{2}|pro:\d{4}-\d{2})$/.test(row.period)
+      || !/^\d{4}-\d{2}-\d{2}$/.test(row.day)
+      || (row.provider_units !== 1 && row.provider_units !== 3)
+      || (row.is_probe !== 0 && row.is_probe !== 1)) {
+      throw new Error('Invalid lease accounting state');
+    }
+    return row;
+  }
+
+  private refundAccounting(accounting: LeaseAccounting): void {
+    const budget = this.providerUnits(accounting.day);
+    const usage = this.usageForPeriod(accounting.subject_digest, accounting.period, accounting.route);
+    if (budget < accounting.provider_units || usage < 1) throw new Error('Invalid refundable accounting state');
+    this.state.storage.sql.exec(
+      'UPDATE daily_budget SET provider_units = provider_units - ? WHERE day = ?',
+      accounting.provider_units,
+      accounting.day,
+    );
+    this.state.storage.sql.exec('DELETE FROM daily_budget WHERE day = ? AND provider_units = 0', accounting.day);
+    this.state.storage.sql.exec(
+      'UPDATE plan_usage SET count = count - 1 WHERE subject_digest = ? AND period = ? AND route = ?',
+      accounting.subject_digest,
+      accounting.period,
+      accounting.route,
+    );
+    this.state.storage.sql.exec(
+      'DELETE FROM plan_usage WHERE subject_digest = ? AND period = ? AND route = ? AND count = 0',
+      accounting.subject_digest,
+      accounting.period,
+      accounting.route,
+    );
+  }
+
+  private assertCircuit(): CircuitRow {
+    const row = this.state.storage.sql.exec<CircuitRow>(
+      'SELECT state, opened_at, probe_lease_id FROM provider_circuit WHERE id = 1',
+    ).toArray()[0];
+    const validBase = row
+      && Number.isSafeInteger(row.opened_at)
+      && row.opened_at >= 0;
+    const validState = row?.state === 'closed'
+      ? row.probe_lease_id === null
+      : row?.state === 'open'
+        ? row.probe_lease_id === null && row.opened_at > 0
+        : row?.state === 'half_open'
+          ? typeof row.probe_lease_id === 'string' && row.probe_lease_id.length > 0 && row.opened_at > 0
+          : false;
+    if (!validBase || !validState) throw new Error('Invalid provider circuit state');
+    return row;
+  }
+
+  private providerFailureCount(): number {
+    const count = this.state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM provider_failures').one().count;
+    if (!Number.isSafeInteger(count) || count < 0) throw new Error('Invalid provider failure state');
+    return count;
+  }
+
+  private openCircuit(now: number): void {
+    this.state.storage.sql.exec(
+      "UPDATE provider_circuit SET state = 'open', opened_at = ?, probe_lease_id = NULL WHERE id = 1",
+      now,
+    );
+  }
+
+  private closeCircuit(): void {
+    this.state.storage.sql.exec('DELETE FROM provider_failures');
+    this.state.storage.sql.exec(
+      "UPDATE provider_circuit SET state = 'closed', opened_at = 0, probe_lease_id = NULL WHERE id = 1",
+    );
+  }
+
   private inflightCount(): number {
     const count = this.state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM inflight').one().count;
     if (!Number.isSafeInteger(count) || count < 0) throw new Error('Invalid inflight state');
@@ -305,6 +546,15 @@ export class AdmissionDurableObject {
   }
 
   private deleteExpiredLeases(now: number): void {
+    const expiredProbe = this.state.storage.sql.exec<{ lease_id: string }>(
+      'SELECT lease_id FROM lease_accounting WHERE is_probe = 1 AND lease_id IN (SELECT lease_id FROM inflight WHERE expires_at <= ?)',
+      now,
+    ).toArray()[0];
+    if (expiredProbe) this.openCircuit(now);
+    this.state.storage.sql.exec(
+      'DELETE FROM lease_accounting WHERE lease_id IN (SELECT lease_id FROM inflight WHERE expires_at <= ?)',
+      now,
+    );
     this.state.storage.sql.exec('DELETE FROM inflight WHERE expires_at <= ?', now);
   }
 
@@ -318,11 +568,15 @@ export class AdmissionDurableObject {
     const oldestRetainedFreePeriod = `free:${utcDay(now - (FREE_WINDOW_DAYS - 1) * DAY_MS)}`;
     const currentProPeriod = `pro:${utcMonth(now)}`;
     this.state.storage.sql.exec(
-      "DELETE FROM plan_usage WHERE (period >= 'free:' AND period < ?) OR (period >= 'pro:' AND period < ?)",
+      "DELETE FROM plan_usage WHERE ((period >= 'free:' AND period < ?) OR (period >= 'pro:' AND period < ?)) AND NOT EXISTS (SELECT 1 FROM lease_accounting WHERE lease_accounting.subject_digest = plan_usage.subject_digest AND lease_accounting.period = plan_usage.period AND lease_accounting.route = plan_usage.route)",
       oldestRetainedFreePeriod,
       currentProPeriod,
     );
-    this.state.storage.sql.exec('DELETE FROM daily_budget WHERE day < ?', day);
+    this.state.storage.sql.exec(
+      'DELETE FROM daily_budget WHERE day < ? AND NOT EXISTS (SELECT 1 FROM lease_accounting WHERE lease_accounting.day = daily_budget.day)',
+      day,
+    );
+    this.state.storage.sql.exec('DELETE FROM provider_failures WHERE observed_at < ?', now - PROVIDER_FAILURE_WINDOW_MS);
     this.state.storage.sql.exec(
       'INSERT INTO maintenance_state (id, last_retention_day) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET last_retention_day = excluded.last_retention_day',
       day,
@@ -331,6 +585,7 @@ export class AdmissionDurableObject {
 
   private rollbackReservation(reservation: ReservedLease, input: InternalReservation): void {
     this.state.storage.sql.exec('DELETE FROM inflight WHERE lease_id = ?', reservation.leaseId);
+    this.state.storage.sql.exec('DELETE FROM lease_accounting WHERE lease_id = ?', reservation.leaseId);
     this.state.storage.sql.exec(
       'UPDATE daily_budget SET provider_units = provider_units - ? WHERE day = ?',
       reservation.providerUnits,
@@ -349,6 +604,7 @@ export class AdmissionDurableObject {
       reservation.period,
       input.route,
     );
+    if (reservation.isProbe) this.openCircuit(input.now);
   }
 
   private async scheduleAlarm(expiresAt: number | undefined): Promise<void> {
@@ -372,9 +628,16 @@ function validAdmissionRequest(value: AdmissionRequest): boolean {
   return (value.plan === 'free' || value.plan === 'pro')
     && (value.route === '/v1/analyses' || value.route === '/v1/responses')
     && DIGEST_PATTERN.test(value.subjectDigest)
-    && Number.isSafeInteger(value.now)
-    && value.now >= 0
+    && validTimestamp(value.now)
     && value.now <= 8_640_000_000_000_000 - LEASE_TTL_MS;
+}
+
+function validTimestamp(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= 8_640_000_000_000_000;
+}
+
+function isCompletionOutcome(value: unknown): value is AdmissionCompletionOutcome {
+  return value === 'success' || value === 'provider_failure' || value === 'invalid_output';
 }
 
 function isInternalReservation(value: unknown): value is InternalReservation {
@@ -388,15 +651,18 @@ function isAdmissionResult(value: unknown): value is AdmissionResult {
   if (!isRecord(value) || typeof value.allowed !== 'boolean') return false;
   if (value.allowed) {
     return typeof value.leaseId === 'string' && value.leaseId.length > 0
-      && Number.isSafeInteger(value.inFlight) && (value.inFlight as number) > 0;
+      && Number.isSafeInteger(value.inFlight) && (value.inFlight as number) > 0
+      && (value.budgetWarning === 'under-80' || value.budgetWarning === 'at-least-80');
   }
-  return (value.code === 'PLAN_LIMIT_REACHED' || value.code === 'SERVICE_BUSY' || value.code === 'DAILY_BUDGET_REACHED')
+  return (value.code === 'PLAN_LIMIT_REACHED' || value.code === 'SERVICE_BUSY' || value.code === 'DAILY_BUDGET_REACHED' || value.code === 'PROVIDER_UNAVAILABLE')
     && Number.isSafeInteger(value.retryAfterSeconds)
     && (value.retryAfterSeconds as number) > 0;
 }
 
 function publicResult(result: AdmissionRejection | ReservedLease): AdmissionResult {
-  return result.allowed ? { allowed: true, leaseId: result.leaseId, inFlight: result.inFlight } : result;
+  return result.allowed
+    ? { allowed: true, leaseId: result.leaseId, inFlight: result.inFlight, budgetWarning: result.budgetWarning }
+    : result;
 }
 
 function reject(code: AdmissionRejectionCode, retryAfterSeconds: number): AdmissionRejection {

@@ -57,6 +57,7 @@ describe('privacy-safe logging', () => {
       providerUnitBucket: '3',
       inFlightBucket: '<10',
       entitlementCache: 'bypass',
+      budgetWarning: 'under-80',
       outcome: 'allowed',
     });
     expect(Object.keys(records[0].metric)).toEqual([
@@ -68,6 +69,7 @@ describe('privacy-safe logging', () => {
       'providerUnitBucket',
       'inFlightBucket',
       'entitlementCache',
+      'budgetWarning',
       'outcome',
     ]);
     expect(Object.isFrozen(records[0].metric)).toBe(true);

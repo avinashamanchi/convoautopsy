@@ -14,6 +14,9 @@ jest.mock('expo-router', () => ({
   useFocusEffect: (effect: () => void | (() => void)) => { require('react').useEffect(effect, [effect]); },
   useLocalSearchParams: () => ({ id: 'report-1', reportId: 'report-1' }),
 }));
+jest.mock('../src/billing/BillingProvider', () => ({
+  useBilling: () => ({ appUserId: '$RCAnonymousID:revision-test', identityStatus: 'ready' }),
+}));
 
 const result: AnalysisResult = {
   schemaVersion: 1, mode: 'local', intensityScore: 20, conflictMode: 'Collaborating',

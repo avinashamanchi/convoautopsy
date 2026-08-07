@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 
-import { checkRateLimits, deriveRateLimitKeys, evaluateWindow } from '../src/rateLimit';
+import { checkRateLimits, deriveRateLimitKeys, evaluateWindow } from '../src/fairRateLimit';
 
 describe('rate limits', () => {
   it('uses independent HMAC-digest Durable Objects and atomically allows exactly ten concurrent analyses', async () => {
@@ -28,15 +28,14 @@ describe('rate limits', () => {
     expect(results.filter((result) => !result.allowed)).toHaveLength(30);
   });
 
-  it('enforces the IP bucket when valid installation tokens rotate', async () => {
+  it('allows 100 legitimate installation tokens behind one shared IP', async () => {
     const results = [];
-    for (let index = 0; index < 11; index += 1) {
+    for (let index = 0; index < 100; index += 1) {
       const keys = await deriveRateLimitKeys(`rotating-token-${index}-long-enough`, '203.0.113.44', 'rotation-hmac-key', '/v1/analyses');
       results.push(await checkRateLimits(env.RATE_LIMITER, keys, '/v1/analyses'));
     }
 
-    expect(results.slice(0, 10).every((result) => result.allowed)).toBe(true);
-    expect(results[10]).toMatchObject({ allowed: false });
+    expect(results.every((result) => result.allowed)).toBe(true);
   });
 
   it('enforces the token bucket when source IPs rotate', async () => {

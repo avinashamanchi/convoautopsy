@@ -8,6 +8,7 @@ export type BodySizeBucket = '0' | '<1KiB' | '<16KiB' | '<64KiB' | '<=128KiB' | 
 export type ProviderUnitBucket = '0' | '1' | '3' | 'unknown';
 export type InFlightBucket = '0' | '<10' | '<50' | '<100' | '100+' | 'unknown';
 export type EntitlementCacheMetric = 'unknown' | 'bypass' | 'hit' | 'miss' | 'error';
+export type BudgetWarningMetric = 'unknown' | 'under-80' | 'at-least-80';
 export type MetricOutcome = 'allowed' | PublicErrorCode;
 
 export type SafeMetric = Readonly<{
@@ -19,6 +20,7 @@ export type SafeMetric = Readonly<{
   providerUnitBucket: ProviderUnitBucket;
   inFlightBucket: InFlightBucket;
   entitlementCache: EntitlementCacheMetric;
+  budgetWarning: BudgetWarningMetric;
   outcome: MetricOutcome;
 }>;
 
@@ -31,6 +33,7 @@ export type SafeMetricInput = Readonly<{
   providerUnits: number | undefined;
   inFlight: number | undefined;
   entitlementCache: EntitlementCacheMetric;
+  budgetWarning: unknown;
   outcome: MetricOutcome;
 }>;
 
@@ -44,6 +47,7 @@ export function createSafeMetric(input: SafeMetricInput): SafeMetric {
     providerUnitBucket: providerUnitBucket(input.providerUnits),
     inFlightBucket: inFlightBucket(input.inFlight),
     entitlementCache: normalizeEntitlementCache(input.entitlementCache),
+    budgetWarning: normalizeBudgetWarning(input.budgetWarning),
     outcome: normalizeOutcome(input.outcome),
   });
 }
@@ -99,6 +103,10 @@ function inFlightBucket(value: number | undefined): InFlightBucket {
 
 function normalizeEntitlementCache(value: EntitlementCacheMetric): EntitlementCacheMetric {
   return value === 'bypass' || value === 'hit' || value === 'miss' || value === 'error' ? value : 'unknown';
+}
+
+function normalizeBudgetWarning(value: unknown): BudgetWarningMetric {
+  return value === 'under-80' || value === 'at-least-80' ? value : 'unknown';
 }
 
 function normalizeOutcome(value: MetricOutcome): MetricOutcome {

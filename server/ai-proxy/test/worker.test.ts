@@ -166,6 +166,33 @@ describe('AI proxy routes', () => {
     expect(await currentInFlight()).toBe(0);
   });
 
+  it('refunds invalid model output without letting one installation open the global outage circuit', async () => {
+    let invalidCalls = 0;
+    const invalidProvider: AiProvider = {
+      analyze: async () => {
+        invalidCalls += 1;
+        return { callerInfluenced: 'not the analysis contract' } as unknown as AnalysisResult;
+      },
+      craftResponse: validProvider().craftResponse,
+    };
+    for (let index = 0; index < 5; index += 1) {
+      const response = await app(invalidProvider).fetch(request('/v1/analyses', analysisRequest()), env as unknown as Env);
+      expect(response.status).toBe(502);
+      await expect(response.json()).resolves.toMatchObject({ error: { code: 'PROVIDER_INVALID_RESPONSE' } });
+    }
+
+    const otherInstallation = await app().fetch(request('/v1/analyses', analysisRequest({
+      installationToken: 'different-installation-after-invalid-output',
+    })), env as unknown as Env);
+
+    expect(invalidCalls).toBe(5);
+    expect(otherInstallation.status).toBe(200);
+    await runInDurableObject(admissionStub(), (_instance, state) => {
+      expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM provider_failures').one().count).toBe(0);
+      expect(state.storage.sql.exec<{ total: number | null }>('SELECT SUM(count) AS total FROM plan_usage').one().total ?? 0).toBe(1);
+    });
+  });
+
   it('maps provider timeouts to a retryable safe public error', async () => {
     const response = await app({
       analyze: async () => { throw new DOMException('slow', 'TimeoutError'); },
@@ -186,6 +213,47 @@ describe('AI proxy routes', () => {
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({ error: { code: 'PROVIDER_UNAVAILABLE' } });
     expect(await currentInFlight()).toBe(0);
+  });
+
+  it('opens the provider circuit after five failures, refunds quota and budget, and makes no sixth provider call', async () => {
+    let providerCalls = 0;
+    const failingProvider: AiProvider = {
+      analyze: async () => { providerCalls += 1; throw new ProviderUnavailableError(); },
+      craftResponse: validProvider().craftResponse,
+    };
+
+    for (let index = 0; index < 6; index += 1) {
+      const response = await app(failingProvider).fetch(request('/v1/analyses', analysisRequest({
+        installationToken: `circuit-installation-token-${index}`,
+      })), env as unknown as Env);
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toMatchObject({ error: { code: 'PROVIDER_UNAVAILABLE' } });
+    }
+
+    expect(providerCalls).toBe(5);
+    await runInDurableObject(admissionStub(), (_instance, state) => {
+      expect(state.storage.sql.exec<{ total: number | null }>('SELECT SUM(count) AS total FROM plan_usage').one().total ?? 0).toBe(0);
+      expect(state.storage.sql.exec<{ total: number | null }>('SELECT SUM(provider_units) AS total FROM daily_budget').one().total ?? 0).toBe(0);
+      expect(state.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM inflight').one().count).toBe(0);
+    });
+  });
+
+  it('returns a content-free 80 percent budget warning header and metric', async () => {
+    const day = new Date().toISOString().slice(0, 10);
+    await runInDurableObject(admissionStub(), (_instance, state) => {
+      state.storage.sql.exec('INSERT INTO daily_budget (day, provider_units) VALUES (?, ?)', day, 1_039_997);
+    });
+    const metrics: import('../src/metrics').SafeMetric[] = [];
+    const response = await createApp({
+      provider: validProvider(),
+      logger: { info: (metric) => { metrics.push(metric); } },
+      rateLimitSecret: 'test-only-rate-key',
+    }).fetch(request('/v1/analyses', analysisRequest()), env as unknown as Env);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-provider-budget-warning')).toBe('at-least-80');
+    expect(metrics[0]).toMatchObject({ budgetWarning: 'at-least-80' });
+    expect(JSON.stringify(metrics[0])).not.toMatch(/installation|message|content|requestId/i);
   });
 
   it('holds exactly one lease during provider work and releases it after success', async () => {

@@ -14,6 +14,7 @@ Live site → **[avinashamanchi.github.io/convoautopsy](https://avinashamanchi.g
 - **Receipt Export** — download a shareable 9:16 PNG of your analysis (Instagram/TikTok ready)
 - **File Upload** — drag-and-drop .txt chat exports (WhatsApp, Discord, etc.)
 - **Saved History** — analyses are stored locally and can be deleted by the user
+- **Guest-first web app** — the browser-local guest profile has no ConvoAutopsy account or backend account credentials
 
 ---
 
@@ -25,7 +26,7 @@ Live site → **[avinashamanchi.github.io/convoautopsy](https://avinashamanchi.g
 | 3D / Animation | Three.js · React Three Fiber · GSAP ScrollTrigger |
 | AI Analysis | Optional consented ConvoAutopsy AI proxy (when deployed); on-device estimates remain available |
 | Frameworks | Educational heuristic inspirations: Gottman · Thomas-Kilmann · Transactional Analysis |
-| Auth / Storage | localStorage; optional AI proxy for consented assistance |
+| Profile / Storage | Browser-local guest profile in localStorage; optional AI proxy for consented assistance |
 | Receipt Export | html2canvas |
 | Mobile | Expo / React Native app in `mobile/`; it does not load the website in a WebView |
 | Deployment | GitHub Pages via GitHub Actions |
@@ -119,8 +120,7 @@ convoautopsy/
 │   ├── pages/
 │   │   ├── LandingPage.jsx     # Marketing site with 3D phone + all sections
 │   │   ├── LandingPage.css     # Landing page styles
-│   │   ├── Dashboard.jsx       # Main app (input, history, analysis)
-│   │   └── AuthPage.jsx        # Login / signup
+│   │   └── Dashboard.jsx       # Browser-local guest workspace (input, history, analysis)
 │   ├── components/
 │   │   ├── PhoneScene.jsx      # 3D Apple iPhone (React Three Fiber)
 │   │   ├── ChatBubbles.jsx     # Floating chat bubbles in 3D scene
@@ -130,7 +130,7 @@ convoautopsy/
 │   ├── utils/
 │   │   ├── analyzeConversation.js  # Proxy client + local regex fallback
 │   │   ├── craftResponse.js        # Proxy client + local response templates
-│   │   └── storage.js              # localStorage auth + conversation history
+│   │   └── storage.js              # Guest-profile migration + local report history
 │   └── index.css               # Global styles + all component styles
 ├── mobile/                     # Expo / React Native iOS app
 │   ├── app/                    # Expo Router screens

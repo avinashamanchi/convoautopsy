@@ -1,12 +1,22 @@
 import { readFile } from 'node:fs/promises'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DEMO_RESULT, analyzeConversation, localAnalyze, parseConversation } from './analyzeConversation'
+import {
+  DEMO_RESULT,
+  analyzeConversation,
+  localAnalyze,
+  parseConversation,
+  prepareAnalysisReview,
+} from './analyzeConversation'
 import { readBoundedJson } from './fetchBoundedJson'
 
-const options = {
+const baseOptions = {
   allowRemote: true,
-  consentVersion: '2026-08-02',
+  consentVersion: '2026-08-07',
   installationToken: 'installation-token-0001',
+}
+
+function reviewedOptions(text, overrides = {}) {
+  return { ...baseOptions, ...overrides, reviewedSnapshot: prepareAnalysisReview(text) }
 }
 const directProviderHost = ['api', 'groq', 'com'].join('.')
 const clientKeyName = ['VITE', 'GROQ', 'API', 'KEY'].join('_')
@@ -57,6 +67,8 @@ describe('analyzeConversation', () => {
   })
 
   it('counts message bounds by Unicode code point', async () => {
+    const boundedInput = `Alice: ${'🫠'.repeat(1_000)}`
+    const oversizedInput = `Alice: ${'🫠'.repeat(1_001)}`
     vi.stubEnv('VITE_AI_PROXY_URL', 'https://proxy.example')
     const fetch = vi.fn().mockResolvedValue(Response.json({
       analysis: {
@@ -67,11 +79,11 @@ describe('analyzeConversation', () => {
         messages: [{ sender: 'Person A', text: '🫠'.repeat(1_000), pattern: 'Neutral', egoState: 'Adult', possibleInterpretation: 'Calm.' }],
       },
       requestId: 'unicode-request',
-    }))
+    }, { headers: { 'x-request-id': 'unicode-request' } }))
     vi.stubGlobal('fetch', fetch)
 
-    await expect(analyzeConversation(`Alice: ${'🫠'.repeat(1_000)}`, options)).resolves.toMatchObject({ source: 'ai' })
-    await expect(analyzeConversation(`Alice: ${'🫠'.repeat(1_001)}`, options)).resolves.toMatchObject({ source: 'local', fallbackReason: 'NOT_CONFIGURED' })
+    await expect(analyzeConversation(boundedInput, reviewedOptions(boundedInput))).resolves.toMatchObject({ source: 'ai' })
+    await expect(analyzeConversation(oversizedInput, reviewedOptions(oversizedInput))).resolves.toMatchObject({ source: 'local', fallbackReason: 'NOT_CONFIGURED' })
     expect(fetch).toHaveBeenCalledTimes(1)
   })
 
@@ -86,10 +98,11 @@ describe('analyzeConversation', () => {
         messages: [{ sender: 'Person A', text: '[Person], please listen.', pattern: 'Criticism', egoState: 'Parent', possibleInterpretation: 'Needs to be heard.' }],
       },
       requestId: 'request-1',
-    }), { status: 200 }))
+    }), { status: 200, headers: { 'x-request-id': 'request-1' } }))
     vi.stubGlobal('fetch', fetch)
 
-    const output = await analyzeConversation('Alice: Bob, please listen.\nBob: Okay.', options)
+    const input = 'Alice: Bob, please listen.\nBob: Okay.'
+    const output = await analyzeConversation(input, reviewedOptions(input))
 
     expect(fetch).toHaveBeenCalledWith('https://proxy.example/v1/analyses', expect.objectContaining({
       method: 'POST',
@@ -98,7 +111,7 @@ describe('analyzeConversation', () => {
     const request = JSON.parse(fetch.mock.calls[0][1].body)
     expect(request).toEqual({
       schemaVersion: 1,
-      consentVersion: '2026-08-02',
+      consentVersion: '2026-08-07',
       installationToken: 'installation-token-0001',
       messages: [
         { sender: 'Person A', text: '[Person], please listen.' },
@@ -123,26 +136,38 @@ describe('analyzeConversation', () => {
     expect(output).toMatchObject({ source: 'local', fallbackReason: 'NOT_CONFIGURED', result: { analysis_mode: 'local' } })
   })
 
+  it('rejects a reviewed snapshot when required message text is missing instead of coercing it', async () => {
+    vi.stubEnv('VITE_AI_PROXY_URL', 'https://proxy.example')
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+    const reviewedSnapshot = prepareAnalysisReview('Alice: Hello')
+    delete reviewedSnapshot.messages[0].text
+
+    await expect(analyzeConversation('Alice: Hello', { ...baseOptions, reviewedSnapshot }))
+      .resolves.toMatchObject({ source: 'local', fallbackReason: 'NOT_CONFIGURED' })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
   it('rejects public cleartext proxy URLs without fetching while allowing localhost development', async () => {
     const fetch = vi.fn()
     vi.stubGlobal('fetch', fetch)
     vi.stubEnv('VITE_AI_PROXY_URL', 'http://proxy.example')
-    await expect(analyzeConversation('Alice: Hi', options)).resolves.toMatchObject({ fallbackReason: 'NOT_CONFIGURED' })
+    await expect(analyzeConversation('Alice: Hi', reviewedOptions('Alice: Hi'))).resolves.toMatchObject({ fallbackReason: 'NOT_CONFIGURED' })
     expect(fetch).not.toHaveBeenCalled()
 
     vi.stubEnv('VITE_AI_PROXY_URL', 'http://localhost:8787')
-    fetch.mockResolvedValueOnce(new Response(JSON.stringify({ analysis: { schemaVersion: 1, mode: 'ai', intensityScore: 1, conflictMode: 'Collaborating', messages: [{ sender: 'Person A', text: 'Hi', pattern: 'Neutral', egoState: 'Adult', possibleInterpretation: 'Calm.' }] }, requestId: 'id' }), { status: 200 }))
-    await analyzeConversation('Alice: Hi', options)
+    fetch.mockResolvedValueOnce(new Response(JSON.stringify({ analysis: { schemaVersion: 1, mode: 'ai', intensityScore: 1, conflictMode: 'Collaborating', messages: [{ sender: 'Person A', text: 'Hi', pattern: 'Neutral', egoState: 'Adult', possibleInterpretation: 'Calm.' }] }, requestId: 'id' }), { status: 200, headers: { 'x-request-id': 'id' } }))
+    await analyzeConversation('Alice: Hi', reviewedOptions('Alice: Hi'))
     expect(fetch).toHaveBeenCalledWith('http://localhost:8787/v1/analyses', expect.any(Object))
   })
 
   it('returns a remote-unavailable local result on a hung request but propagates caller cancellation', async () => {
     vi.stubEnv('VITE_AI_PROXY_URL', 'https://proxy.example')
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
-    await expect(analyzeConversation('Alice: Hi', { ...options, timeoutMs: 1 })).resolves.toMatchObject({ source: 'local', fallbackReason: 'REMOTE_UNAVAILABLE', result: { analysis_mode: 'local' } })
+    await expect(analyzeConversation('Alice: Hi', reviewedOptions('Alice: Hi', { timeoutMs: 1 }))).resolves.toMatchObject({ source: 'local', fallbackReason: 'REMOTE_UNAVAILABLE', result: { analysis_mode: 'local' } })
 
     const controller = new AbortController()
-    const pending = analyzeConversation('Alice: Hi', { ...options, signal: controller.signal, timeoutMs: 50 })
+    const pending = analyzeConversation('Alice: Hi', reviewedOptions('Alice: Hi', { signal: controller.signal, timeoutMs: 50 }))
     controller.abort()
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
   })
@@ -155,8 +180,8 @@ describe('analyzeConversation', () => {
       .mockResolvedValueOnce(new Response('x'.repeat(256 * 1024 + 1), { status: 200 }))
     vi.stubGlobal('fetch', fetch)
 
-    await expect(analyzeConversation('Alice: Hi', { ...options, timeoutMs: 5 })).resolves.toMatchObject({ fallbackReason: 'REMOTE_UNAVAILABLE' })
-    await expect(analyzeConversation('Alice: Hi', options)).resolves.toMatchObject({ fallbackReason: 'REMOTE_UNAVAILABLE' })
+    await expect(analyzeConversation('Alice: Hi', reviewedOptions('Alice: Hi', { timeoutMs: 5 }))).resolves.toMatchObject({ fallbackReason: 'REMOTE_UNAVAILABLE' })
+    await expect(analyzeConversation('Alice: Hi', reviewedOptions('Alice: Hi'))).resolves.toMatchObject({ fallbackReason: 'REMOTE_UNAVAILABLE' })
   })
 
   it('rejects oversized bodies without waiting for an uncooperative stream cancel', async () => {
@@ -190,5 +215,30 @@ describe('analyzeConversation', () => {
     const source = await readFile(new URL('./analyzeConversation.js', import.meta.url), 'utf8')
     expect(source).not.toContain(directProviderHost)
     expect(source).not.toContain(clientKeyName)
+  })
+
+  it('requires an exact nonempty matching request ID header', async () => {
+    vi.stubEnv('VITE_AI_PROXY_URL', 'https://proxy.example')
+    const body = JSON.stringify({
+      analysis: {
+        schemaVersion: 1,
+        mode: 'ai',
+        intensityScore: 1,
+        conflictMode: 'Collaborating',
+        messages: [{ sender: 'Person A', text: 'Hello', pattern: 'Neutral', egoState: 'Adult', possibleInterpretation: 'Possibly calm.' }],
+      },
+      requestId: 'analysis-request-id',
+    })
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(body, { status: 200 }))
+      .mockResolvedValueOnce(new Response(body, { status: 200, headers: { 'x-request-id': '' } }))
+      .mockResolvedValueOnce(new Response(body, { status: 200, headers: { 'x-request-id': 'different' } }))
+      .mockResolvedValueOnce(new Response(body, { status: 200, headers: { 'x-request-id': 'analysis-request-id' } }))
+    vi.stubGlobal('fetch', fetch)
+
+    for (let index = 0; index < 3; index += 1) {
+      await expect(analyzeConversation('Alex: Hello', reviewedOptions('Alex: Hello'))).resolves.toMatchObject({ source: 'local', fallbackReason: 'REMOTE_UNAVAILABLE' })
+    }
+    await expect(analyzeConversation('Alex: Hello', reviewedOptions('Alex: Hello'))).resolves.toMatchObject({ source: 'ai' })
   })
 })

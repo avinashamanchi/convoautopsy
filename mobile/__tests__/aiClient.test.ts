@@ -3,6 +3,9 @@ import type { AnalysisResult, ParsedMessage } from '../src/domain/analysis';
 import { parseConversation } from '../src/domain/parser';
 import { SECURE_STORAGE_UNAVAILABLE_MESSAGE, SecureStorageUnavailableError, type ConsentRecord } from '../src/services/consentStore';
 
+const mockExpoFetch = jest.fn();
+jest.mock('expo/fetch', () => ({ fetch: (...args: unknown[]) => mockExpoFetch(...args) }));
+
 const consent: ConsentRecord = {
   version: '2026-08-07',
   grantedAt: '2026-08-07T12:00:00.000Z',
@@ -42,7 +45,7 @@ function response(body: unknown, init: ResponseInit = {}) {
 }
 
 type FetchMock = jest.Mock<Promise<Response>, [RequestInfo | URL, RequestInit?]>;
-const noRevenueCatId = async () => null;
+const noRevenueCatId = async () => '$RCAnonymousID:mobile-test';
 
 function client(fetchImpl: FetchMock) {
   return createAiClient({
@@ -87,7 +90,37 @@ it('sends only anonymous parsed Person labels with consent and a device token', 
   expect(JSON.stringify(requestBody.messages)).not.toContain('Alex');
 });
 
-it('omits the RevenueCat identifier when billing is unavailable', async () => {
+it('uses the Expo streaming fetch implementation for native analysis by default', async () => {
+  const originalFetch = globalThis.fetch;
+  const incompatibleGlobalFetch = jest.fn().mockRejectedValue(new Error('React Native global fetch has no response stream'));
+  Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true, value: incompatibleGlobalFetch });
+  mockExpoFetch.mockResolvedValueOnce(response({ analysis: aiResult, requestId: 'req-expo-stream' }));
+  const analyze = createAiClient({
+    endpoint: 'https://ai.example.test',
+    getConsent: async () => consent,
+    getInstallationToken: async () => '4b479c21-5169-41b5-ba54-3d0c5bdb82ba',
+    getRevenueCatAppUserId: async () => '$RCAnonymousID:mobile-test',
+  });
+
+  try {
+    let result: AnalysisResult | undefined;
+    let failure: unknown;
+    try {
+      result = await analyze(anonymousMessages, new AbortController().signal);
+    } catch (error) {
+      failure = error;
+    }
+    expect(mockExpoFetch).toHaveBeenCalledTimes(1);
+    expect(incompatibleGlobalFetch).not.toHaveBeenCalled();
+    expect(failure).toBeUndefined();
+    expect(result).toEqual(aiResult);
+  } finally {
+    Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true, value: originalFetch });
+    mockExpoFetch.mockReset();
+  }
+});
+
+it('fails closed before fetch when billing identity is still unavailable', async () => {
   const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockResolvedValue(response({ analysis: aiResult, requestId: 'req-free' }));
   const analyze = createAiClient({
     endpoint: 'https://ai.example.test',
@@ -97,12 +130,11 @@ it('omits the RevenueCat identifier when billing is unavailable', async () => {
     getRevenueCatAppUserId: async () => null,
   });
 
-  await analyze(anonymousMessages, new AbortController().signal);
-
-  expect(JSON.parse(String(fetchImpl.mock.calls[0][1]?.body))).not.toHaveProperty('revenueCatAppUserId');
+  await expectCode(analyze(anonymousMessages, new AbortController().signal), 'NOT_CONFIGURED');
+  expect(fetchImpl).not.toHaveBeenCalled();
 });
 
-it('continues as a free request when billing identifier lookup fails', async () => {
+it('fails closed before fetch when billing identity lookup fails', async () => {
   const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockResolvedValue(response({ analysis: aiResult, requestId: 'req-billing-failure' }));
   const analyze = createAiClient({
     endpoint: 'https://ai.example.test',
@@ -112,8 +144,8 @@ it('continues as a free request when billing identifier lookup fails', async () 
     getRevenueCatAppUserId: async () => { throw new Error('billing unavailable'); },
   });
 
-  await expect(analyze(anonymousMessages, new AbortController().signal)).resolves.toEqual(aiResult);
-  expect(JSON.parse(String(fetchImpl.mock.calls[0][1]?.body))).not.toHaveProperty('revenueCatAppUserId');
+  await expectCode(analyze(anonymousMessages, new AbortController().signal), 'NOT_CONFIGURED');
+  expect(fetchImpl).not.toHaveBeenCalled();
 });
 
 it('never serializes known participant names found in accepted message bodies', async () => {
@@ -236,12 +268,20 @@ it('times out and aborts a fetch implementation that ignores AbortSignal', async
 
 it('times out while a response body never finishes parsing', async () => {
   jest.useFakeTimers();
-  const responseWithStalledJson = {
+  let rejectRead!: (reason?: unknown) => void;
+  const read = jest.fn(() => new Promise<ReadableStreamReadResult<Uint8Array>>((_resolve, reject) => { rejectRead = reject; }));
+  const cancel = jest.fn(() => {
+    rejectRead(new Error('stream canceled'));
+    return Promise.resolve();
+  });
+  const responseWithStalledBody = {
+    body: { getReader: () => ({ read, cancel, releaseLock: jest.fn() }) },
     ok: true,
-    headers: new Headers(),
-    json: () => new Promise<unknown>(() => undefined),
+    status: 200,
+    headers: new Headers({ 'content-type': 'application/json' }),
+    json: jest.fn(),
   } as unknown as Response;
-  const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockResolvedValue(responseWithStalledJson);
+  const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockResolvedValue(responseWithStalledBody);
   let error: unknown;
   const request = client(fetchImpl)(anonymousMessages, new AbortController().signal).catch((reason) => { error = reason; });
 
@@ -249,8 +289,63 @@ it('times out while a response body never finishes parsing', async () => {
   await request;
 
   expect(error).toMatchObject({ code: 'TIMEOUT' });
+  expect(cancel).toHaveBeenCalledTimes(1);
+  expect(responseWithStalledBody.json).not.toHaveBeenCalled();
   expect(jest.getTimerCount()).toBe(0);
   jest.useRealTimers();
+});
+
+it('uses the bounded streaming reader for analysis responses and never calls response.json()', async () => {
+  const payload = new TextEncoder().encode(JSON.stringify({ analysis: aiResult, requestId: 'req-streamed-analysis' }));
+  const read = jest.fn()
+    .mockResolvedValueOnce({ done: false, value: payload })
+    .mockResolvedValueOnce({ done: true, value: undefined });
+  const cancel = jest.fn().mockResolvedValue(undefined);
+  const json = jest.fn().mockRejectedValue(new Error('unbounded parser must not run'));
+  const streamed = {
+    body: { getReader: () => ({ read, cancel, releaseLock: jest.fn() }) },
+    headers: new Headers({ 'content-type': 'application/json', 'x-request-id': 'req-streamed-analysis' }),
+    ok: true,
+    status: 200,
+    json,
+  } as unknown as Response;
+  const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockResolvedValue(streamed);
+
+  await expect(client(fetchImpl)(anonymousMessages, new AbortController().signal)).resolves.toEqual(aiResult);
+  expect(json).not.toHaveBeenCalled();
+  expect(read).toHaveBeenCalledTimes(2);
+});
+
+it('rejects declared and streamed oversized analysis bodies without accumulating them', async () => {
+  const declaredRead = jest.fn();
+  const declaredCancel = jest.fn().mockResolvedValue(undefined);
+  const declared = {
+    body: { getReader: () => ({ read: declaredRead, cancel: declaredCancel, releaseLock: jest.fn() }) },
+    headers: new Headers({ 'content-type': 'application/json', 'content-length': '32769', 'x-request-id': 'req-large' }),
+    ok: true,
+    status: 200,
+    json: jest.fn().mockResolvedValue({ analysis: aiResult, requestId: 'req-large' }),
+  } as unknown as Response;
+  const streamRead = jest.fn()
+    .mockResolvedValueOnce({ done: false, value: new Uint8Array(20_000) })
+    .mockResolvedValueOnce({ done: false, value: new Uint8Array(20_000) });
+  const streamCancel = jest.fn().mockResolvedValue(undefined);
+  const streamed = {
+    body: { getReader: () => ({ read: streamRead, cancel: streamCancel, releaseLock: jest.fn() }) },
+    headers: new Headers({ 'content-type': 'application/json', 'x-request-id': 'req-stream-large' }),
+    ok: true,
+    status: 200,
+    json: jest.fn().mockResolvedValue({ analysis: aiResult, requestId: 'req-stream-large' }),
+  } as unknown as Response;
+
+  for (const item of [declared, streamed]) {
+    const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockResolvedValue(item);
+    await expectCode(client(fetchImpl)(anonymousMessages, new AbortController().signal), 'INVALID_RESPONSE');
+  }
+  expect(declaredRead).not.toHaveBeenCalled();
+  expect(declaredCancel).toHaveBeenCalledTimes(1);
+  expect(streamRead).toHaveBeenCalledTimes(2);
+  expect(streamCancel).toHaveBeenCalledTimes(1);
 });
 
 it.each([

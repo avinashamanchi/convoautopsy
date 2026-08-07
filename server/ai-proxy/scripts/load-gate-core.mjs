@@ -1,4 +1,5 @@
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
+const INSTALLATION_COHORT_SIZE = 100;
 
 export function parseLoadOptions(args) {
   const values = [...args];
@@ -85,15 +86,37 @@ export function createRequestIdentity(runId, index) {
   if (!/^[A-Za-z0-9_-]{8,128}$/.test(runId) || !Number.isSafeInteger(index) || index < 0 || index >= 131_072) {
     throw new Error('Invalid load identity input');
   }
-  const host = index;
-  const second = 18 + Math.floor(host / 65_536);
-  const within = host % 65_536;
-  const third = Math.floor(within / 256);
-  const fourth = within % 256;
+  const cohortIndex = index % INSTALLATION_COHORT_SIZE;
   return Object.freeze({
-    installationToken: `load_${runId}_${String(index).padStart(6, '0')}`,
-    syntheticIp: `198.${second}.${third}.${fourth}`,
+    installationToken: `load_${runId}_${String(cohortIndex).padStart(3, '0')}`,
+    syntheticIp: '198.18.0.1',
   });
+}
+
+export function routeForRequestIndex(index) {
+  if (!Number.isSafeInteger(index) || index < 0) throw new Error('Invalid load request index');
+  const cohortPosition = index % INSTALLATION_COHORT_SIZE;
+  const cohortCycle = Math.floor(index / INSTALLATION_COHORT_SIZE);
+  return (cohortPosition + cohortCycle * 3) % 10 < 7 ? '/v1/analyses' : '/v1/responses';
+}
+
+export function exactRouteMix(routeCounts, total) {
+  if (!Number.isSafeInteger(total) || total <= 0 || total % 10 !== 0) return false;
+  if (!routeCounts || typeof routeCounts !== 'object' || Array.isArray(routeCounts)) return false;
+  if (Object.keys(routeCounts).some((route) => route !== '/v1/analyses' && route !== '/v1/responses')) return false;
+  const analyses = routeCounts['/v1/analyses'] ?? 0;
+  const responses = routeCounts['/v1/responses'] ?? 0;
+  return Number.isSafeInteger(analyses)
+    && Number.isSafeInteger(responses)
+    && analyses + responses === total
+    && analyses * 10 === total * 7
+    && responses * 10 === total * 3;
+}
+
+export function abusiveRateLimitObserved(samples) {
+  return Array.isArray(samples) && samples.some((sample) => sample?.injected === true
+    && sample.status === 429
+    && sample.code === 'RATE_LIMITED');
 }
 
 export function nearestRank(values, percentile) {
@@ -110,6 +133,7 @@ export function aggregateResults(samples, activeReservations) {
   const failures = nonInjected.filter((sample) => sample.status < 200 || sample.status >= 300);
   const statusCounts = countBy(samples, (sample) => String(sample.status), numericKeyOrder);
   const codeCounts = countBy(samples, (sample) => sample.code, lexicalKeyOrder);
+  const routeCounts = countBy(nonInjected, (sample) => sample.route, lexicalKeyOrder);
   const latencies = nonInjected.map((sample) => sample.latencyMs);
   return Object.freeze({
     requests: samples.length,
@@ -118,6 +142,7 @@ export function aggregateResults(samples, activeReservations) {
     nonInjectedFailureRate: nonInjected.length === 0 ? 0 : failures.length / nonInjected.length,
     statusCounts,
     codeCounts,
+    routeCounts,
     latencyMs: Object.freeze({
       p50: nearestRank(latencies, 0.5),
       p95: nearestRank(latencies, 0.95),
@@ -218,7 +243,7 @@ function lexicalKeyOrder(left, right) {
 }
 
 function safeStage(stage) {
-  return ['STARTUP', 'SUSTAINED', 'BURST', 'CAPACITY', 'EVALUATION'].includes(stage) ? stage : 'INTERNAL';
+  return ['STARTUP', 'SUSTAINED', 'BURST', 'MIX', 'CAPACITY', 'TOKEN_LIMIT', 'EVALUATION'].includes(stage) ? stage : 'INTERNAL';
 }
 
 function settleBeforeAbort(operation, signal) {

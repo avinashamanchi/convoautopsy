@@ -8,6 +8,11 @@ const messages: ParsedMessage[] = [
   { id: 'line-2', sender: 'Person B', text: 'Meet in room 42', sourceLine: 2 },
 ];
 
+const responseMessages = [
+  { ...messages[0], possibleInterpretation: 'Email sam@example.com may be a request.' },
+  { ...messages[1], possibleInterpretation: 'Room 42 could be a meeting place.' },
+];
+
 it('warns that automatic detection can miss details even when no candidates exist', () => {
   render(
     <RemoteDataReview
@@ -120,4 +125,27 @@ it('uses response-specific consent copy for a reviewed AI draft', () => {
   expect(screen.getByText('Before AI-assisted response drafting')).toBeOnTheScreen();
   expect(screen.getByText(/The reviewed message text is sent to Groq/)).toBeOnTheScreen();
   expect(screen.getByText(/On-device response drafts are available without sharing/)).toBeOnTheScreen();
+});
+
+it('shows, edits, redacts, and freezes response possible interpretations with message text', () => {
+  const onConfirm = jest.fn();
+  render(<RemoteDataReview isConfirming={false} messages={responseMessages} onCancel={() => {}} onConfirm={onConfirm} />);
+
+  expect(screen.getByLabelText('Outgoing possible interpretation for Person A message 1')).toHaveProp(
+    'value',
+    'Email sam@example.com may be a request.',
+  );
+  expect(screen.getByLabelText(
+    'Possible interpretation sent for Person A message 1: Email [EMAIL] may be a request.',
+  )).toBeOnTheScreen();
+  fireEvent.changeText(
+    screen.getByLabelText('Outgoing possible interpretation for Person A message 1'),
+    'New contact new@example.com may want space.',
+  );
+  fireEvent.press(screen.getByRole('button', { name: 'Confirm exact text' }));
+
+  const confirmed = onConfirm.mock.calls[0][0];
+  expect(confirmed[0].possibleInterpretation).toBe('New contact [EMAIL] may want space.');
+  expect(Object.isFrozen(confirmed)).toBe(true);
+  expect(Object.isFrozen(confirmed[0])).toBe(true);
 });

@@ -8,20 +8,21 @@ import {
   type CraftResponseRequest,
 } from './contract';
 import { asPublicError, ProviderInvalidResponseError, ProviderUnavailableError, PublicError, type PublicErrorCode } from './errors';
-import { resolveEntitlement } from './entitlements';
+import { resolveEntitlement, type EntitlementResolution } from './entitlements';
 import { createGroqProvider, type AiProvider, type ProviderCraftInput } from './provider';
-import { checkRateLimits, deriveRateLimitKeys } from './rateLimit';
-import { deriveAdmissionSubjectDigest, releaseAdmission, reserveAdmission } from './admission';
+import { checkRateLimits, deriveRateLimitKeys } from './fairRateLimit';
+import { completeAdmission, deriveAdmissionSubjectDigest, reserveAdmission } from './admission';
 import {
   createSafeMetric,
   type EntitlementCacheMetric,
+  type BudgetWarningMetric,
   type MetricPlan,
   type MetricRoute,
   type SafeMetric,
 } from './metrics';
 
 export type { AiProvider } from './provider';
-export { RateLimitDurableObject } from './rateLimit';
+export { RateLimitDurableObject } from './fairRateLimit';
 export { AdmissionDurableObject } from './admission';
 
 export interface Env {
@@ -41,10 +42,12 @@ type OperationalContext = {
   providerUnits: number | undefined;
   inFlight: number | undefined;
   entitlementCache: EntitlementCacheMetric;
+  budgetWarning: BudgetWarningMetric;
 };
 
 type Logger = { info(metric: SafeMetric, requestId: string): void | Promise<void> };
-type AppOptions = { provider?: AiProvider; logger?: Logger; rateLimitSecret?: string };
+type EntitlementResolver = (appUserId: string | undefined, env: Env, now: number) => Promise<EntitlementResolution>;
+type AppOptions = { provider?: AiProvider; logger?: Logger; rateLimitSecret?: string; entitlementResolver?: EntitlementResolver };
 type BodyByteObserver = (bodyBytes: number) => void;
 const MAX_BODY_BYTES = 128 * 1024;
 
@@ -60,6 +63,7 @@ export function createApp(options: AppOptions = {}) {
         providerUnits: undefined,
         inFlight: undefined,
         entitlementCache: 'unknown',
+        budgetWarning: 'unknown',
       };
       let status = 500;
       let code: PublicErrorCode | undefined;
@@ -84,6 +88,7 @@ export function createApp(options: AppOptions = {}) {
           providerUnits: operational.providerUnits,
           inFlight: operational.inFlight,
           entitlementCache: operational.entitlementCache,
+          budgetWarning: operational.budgetWarning,
           outcome: code ?? 'allowed',
         });
         try {
@@ -131,7 +136,7 @@ async function handle(
   if (!rate.allowed) throw new PublicError('RATE_LIMITED', 429, rate.retryAfterSeconds);
 
   const now = Date.now();
-  const entitlement = await resolveEntitlement(parsed.data.revenueCatAppUserId, env, now);
+  const entitlement = await (options.entitlementResolver ?? resolveEntitlement)(parsed.data.revenueCatAppUserId, env, now);
   const verifiedPlan = entitlement.plan;
   operational.plan = verifiedPlan;
   operational.entitlementCache = entitlement.cache;
@@ -156,50 +161,80 @@ async function handle(
   }
   operational.inFlight = reservation.inFlight;
   operational.providerUnits = route === '/v1/analyses' ? 3 : 1;
+  operational.budgetWarning = reservation.budgetWarning;
 
   const provider = options.provider ?? createGroqProvider(env.GROQ_API_KEY);
-  try {
-    if (route === '/v1/analyses') {
-      let analysis;
-      try {
-        analysis = AnalysisResultSchema.parse(await provider.analyze((parsed.data as AnalyzeRequest).messages));
-      } catch (error) {
-        if (error instanceof DOMException && error.name === 'TimeoutError') throw error;
-        if (error instanceof ProviderInvalidResponseError || error instanceof ProviderUnavailableError) throw error;
-        if (error instanceof Error && !(error instanceof PublicError)) throw new ProviderInvalidResponseError();
-        throw error;
-      }
-      return json({ analysis, requestId }, 200, origin, requestId);
-    }
-
-    let response;
+  if (route === '/v1/analyses') {
+    let analysis;
     try {
-      const input = parsed.data as CraftResponseRequest;
-      const providerInput: ProviderCraftInput = {
-        sender: input.sender,
-        goal: input.goal,
-        tone: input.tone,
-        analysis: {
-          intensityScore: input.analysis.intensityScore,
-          conflictMode: input.analysis.conflictMode,
-          messages: input.analysis.messages,
-        },
-      };
-      response = ResponseDraftSchema.parse(await provider.craftResponse(providerInput));
+      analysis = AnalysisResultSchema.parse(await provider.analyze((parsed.data as AnalyzeRequest).messages));
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'TimeoutError') throw error;
-      if (error instanceof ProviderInvalidResponseError || error instanceof ProviderUnavailableError) throw error;
-      if (error instanceof Error && !(error instanceof PublicError)) throw new ProviderInvalidResponseError();
-      throw error;
+      const normalized = normalizeProviderError(error);
+      await recordProviderFailure(env.AI_ADMISSION, reservation.leaseId, normalized);
+      throw normalized;
     }
-    return json({ response, requestId }, 200, origin, requestId);
-  } finally {
+    await recordProviderSuccess(env.AI_ADMISSION, reservation.leaseId);
+    return addBudgetWarning(json({ analysis, requestId }, 200, origin, requestId), reservation.budgetWarning);
+  }
+
+  let response;
+  try {
+    const input = parsed.data as CraftResponseRequest;
+    const providerInput: ProviderCraftInput = {
+      sender: input.sender,
+      goal: input.goal,
+      tone: input.tone,
+      analysis: {
+        intensityScore: input.analysis.intensityScore,
+        conflictMode: input.analysis.conflictMode,
+        messages: input.analysis.messages,
+      },
+    };
+    response = ResponseDraftSchema.parse(await provider.craftResponse(providerInput));
+  } catch (error) {
+    const normalized = normalizeProviderError(error);
+    await recordProviderFailure(env.AI_ADMISSION, reservation.leaseId, normalized);
+    throw normalized;
+  }
+  await recordProviderSuccess(env.AI_ADMISSION, reservation.leaseId);
+  return addBudgetWarning(json({ response, requestId }, 200, origin, requestId), reservation.budgetWarning);
+}
+
+async function recordProviderFailure(namespace: DurableObjectNamespace, leaseId: string, error: unknown): Promise<void> {
+  try {
+    const outcome = error instanceof ProviderUnavailableError || (error instanceof DOMException && error.name === 'TimeoutError')
+      ? 'provider_failure'
+      : 'invalid_output';
+    await completeAdmission(namespace, leaseId, outcome, Date.now());
+  } catch {
+    // The provider error remains the public result; lease expiry recovers in-flight capacity.
+  }
+}
+
+async function recordProviderSuccess(namespace: DurableObjectNamespace, leaseId: string): Promise<void> {
+  try {
+    await completeAdmission(namespace, leaseId, 'success', Date.now());
+  } catch {
+    // A valid provider result is not replaced; lease expiry recovers in-flight capacity.
+  }
+}
+
+function normalizeProviderError(error: unknown): unknown {
+  if (error instanceof DOMException && error.name === 'TimeoutError') return error;
+  if (error instanceof ProviderInvalidResponseError || error instanceof ProviderUnavailableError || error instanceof PublicError) return error;
+  if (error instanceof Error) return new ProviderInvalidResponseError();
+  return error;
+}
+
+function addBudgetWarning(response: Response, warning: 'under-80' | 'at-least-80'): Response {
+  if (warning === 'at-least-80') {
     try {
-      await releaseAdmission(env.AI_ADMISSION, reservation.leaseId);
+      response.headers.set('x-provider-budget-warning', warning);
     } catch {
-      // Lease expiry and the coordinator alarm recover capacity without replacing a valid response.
+      // Headers created by this Worker are mutable; this is defensive for alternate runtimes.
     }
   }
+  return response;
 }
 
 async function readBoundedJson(request: Request, observeBodyBytes: BodyByteObserver): Promise<{ value: unknown; bodyBytes: number }> {
@@ -283,7 +318,7 @@ function corsHeaders(origin: string | null): Headers {
   const headers = new Headers({ Vary: 'Origin' });
   if (isAllowedOrigin(origin) && origin) {
     headers.set('access-control-allow-origin', origin);
-    headers.set('access-control-expose-headers', 'x-request-id, retry-after');
+    headers.set('access-control-expose-headers', 'x-request-id, retry-after, x-provider-budget-warning');
   }
   return headers;
 }

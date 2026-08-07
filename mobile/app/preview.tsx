@@ -15,6 +15,7 @@ import { SECURE_STORAGE_UNAVAILABLE_MESSAGE, createConsentStore } from '../src/s
 import { useReportRepository } from '../src/services/reportRepositoryContext';
 import { useAnalysisSession } from '../src/state/AnalysisSession';
 import { tokens } from '../src/theme/tokens';
+import { formatRetryDuration } from '../src/services/retryTiming';
 
 const NO_MESSAGES_ERROR = "Couldn't find any messages. Use Name: Message on each line.";
 const AI_FAILURE = "AI-assisted analysis couldn't be completed. Your conversation is still available.";
@@ -31,7 +32,7 @@ export default function PreviewScreen() {
     cancel,
   } = useAnalysisSession();
   const { preferences } = useReportRepository();
-  const { appUserId } = useBilling();
+  const { appUserId, identityStatus } = useBilling();
   const [preview, setPreview] = useState<ParseResult | null>(null);
   const [aiNotice, setAiNotice] = useState<string | null>(null);
   const [reviewVisible, setReviewVisible] = useState(false);
@@ -53,9 +54,12 @@ export default function PreviewScreen() {
     () => createAiClient({
       getConsent: consentStore.getConsent,
       getInstallationToken: consentStore.getInstallationToken,
-      getRevenueCatAppUserId: async () => appUserId,
+      getRevenueCatAppUserId: async () => {
+        if (identityStatus !== 'ready' || !appUserId) throw new AiClientError('NOT_CONFIGURED');
+        return appUserId;
+      },
     }),
-    [appUserId, consentStore],
+    [appUserId, consentStore, identityStatus],
   );
   const cancelPendingWork = useCallback(() => {
     consentCheckCounterRef.current += 1;
@@ -234,6 +238,12 @@ function aiFailureMessage(error: unknown): string {
   if (error instanceof AiClientError && error.code === 'NOT_CONFIGURED') return 'AI-assisted analysis is not configured. On-device analysis is available.';
   if (error instanceof AiClientError && error.code === 'RATE_LIMITED' && error.retryAfterSeconds) {
     return `AI-assisted analysis rate limit reached. Try again in ${error.retryAfterSeconds} seconds.`;
+  }
+  if (error instanceof AiClientError && error.code === 'PLAN_LIMIT_REACHED') {
+    const reset = formatRetryDuration(error.retryAfterSeconds);
+    return reset
+      ? `AI-assisted analysis allowance reached. It resets in ${reset}.`
+      : 'AI-assisted analysis allowance reached for this period.';
   }
   if (error instanceof AiClientError && (error.code === 'SERVICE_UNAVAILABLE' || error.code === 'OFFLINE' || error.code === 'TIMEOUT')) return 'AI-assisted analysis is temporarily unavailable. Your conversation is still available.';
   return AI_FAILURE;

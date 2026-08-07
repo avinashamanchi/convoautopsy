@@ -84,7 +84,7 @@ export function localAnalyze(text) {
   return { messages: analyzed, overall_tension_score, conflict_mode, analysis_mode: 'local' }
 }
 
-const CONSENT_VERSION = '2026-08-02'
+const CONSENT_VERSION = '2026-08-07'
 const MODES = new Set(['local', 'ai'])
 const CONFLICT_MODES = new Set(['Competing', 'Avoiding', 'Compromising', 'Collaborating', 'Accommodating', 'Competing vs Avoiding'])
 const PATTERNS = new Set(['Criticism', 'Contempt', 'Defensiveness', 'Stonewalling', 'Neutral'])
@@ -125,11 +125,33 @@ function proxyUrl(path) {
   }
 }
 
-function anonymousMessages(text) {
+export function prepareAnalysisReview(text) {
   const parsed = parseConversation(text)
   if (!parsed.length) return null
   const names = [...new Set(parsed.map(message => message.rawName))]
-  return parsed.map(({ sender, text: messageText }) => ({ sender, text: redactKnownParticipantNames(messageText, names) }))
+  const participants = []
+  const labels = new Set()
+  for (const message of parsed) {
+    if (labels.has(message.sender)) continue
+    labels.add(message.sender)
+    participants.push({ sourceLabel: message.rawName, outboundLabel: message.sender })
+  }
+  return {
+    participants,
+    messages: parsed.map(({ sender, text: messageText }) => ({
+      sender,
+      text: redactKnownParticipantNames(messageText, names),
+    })),
+  }
+}
+
+function reviewedAnalysisMessages(snapshot) {
+  if (!snapshot || !Array.isArray(snapshot.messages) || snapshot.messages.length === 0 || snapshot.messages.length > MAX_MESSAGES) return null
+  if (snapshot.messages.some((message) => !message || typeof message !== 'object' || typeof message.text !== 'string')) return null
+  const messages = snapshot.messages.map((message) => ({ sender: message?.sender, text: normalizeText(message?.text) }))
+  return messages.every((message) => isAnonymousSender(message.sender) && isCodePointLength(message.text, 1, MAX_MESSAGE_CHARACTERS))
+    ? messages
+    : null
 }
 
 function isRequestId(value) {
@@ -161,14 +183,14 @@ function isSuccessEnvelope(value) {
 
 function requestIdMatchesHeader(response, requestId) {
   const header = response.headers.get('x-request-id')
-  return header === null || header === requestId
+  return typeof header === 'string' && header.length > 0 && header === requestId
 }
 
 export async function analyzeConversation(text, options = {}) {
   const fallback = (fallbackReason) => ({ result: localAnalyze(text), source: 'local', fallbackReason })
   if (!remoteOptionsReady(options)) return fallback('NOT_CONFIGURED')
   const url = proxyUrl('/v1/analyses')
-  const messages = anonymousMessages(text)
+  const messages = reviewedAnalysisMessages(options.reviewedSnapshot)
   if (!url || !messages) return fallback('NOT_CONFIGURED')
   try {
     const { response: res, data } = await fetchBoundedJson(url, {

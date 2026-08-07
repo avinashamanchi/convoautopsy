@@ -8,11 +8,14 @@ import { randomBytes } from 'node:crypto';
 
 import {
   aggregateResults,
+  abusiveRateLimitObserved,
   createFatalSummary,
   createRequestIdentity,
   createWranglerArguments,
+  exactRouteMix,
   fetchBoundedJsonWithDeadline,
   parseLoadOptions,
+  routeForRequestIndex,
   scheduledOffsets,
 } from './load-gate-core.mjs';
 
@@ -28,6 +31,19 @@ const PUBLIC_CODES = new Set([
   'PROVIDER_INVALID_RESPONSE',
   'INTERNAL_ERROR',
 ]);
+const SYNTHETIC_ANALYSIS = Object.freeze({
+  schemaVersion: 1,
+  mode: 'ai',
+  intensityScore: 24,
+  conflictMode: 'Collaborating',
+  messages: [Object.freeze({
+    sender: 'Person A',
+    text: 'Synthetic load-gate conversation.',
+    pattern: 'Neutral',
+    egoState: 'Adult',
+    possibleInterpretation: 'This may be an attempt to find common ground.',
+  })],
+});
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const options = parseLoadOptions(process.argv.slice(2));
 const timers = new Set();
@@ -71,6 +87,9 @@ try {
   currentStage = 'BURST';
   const burst = await runScheduledPhase(target, options.burstRps, options.burstSeconds);
   partialSamples.push(...burst);
+  currentStage = 'MIX';
+  const padding = await runRouteMixPaddingPhase(target);
+  partialSamples.push(...padding);
   const samples = partialSamples;
   let activeReservations = 0;
   let capacityPeakReservations = 0;
@@ -78,6 +97,7 @@ try {
 
   if (sustained.length !== options.sustainedRps * options.sustainedSeconds) failures.push('SUSTAINED_COUNT');
   if (burst.length !== options.burstRps * options.burstSeconds) failures.push('BURST_COUNT');
+  if ((sustained.length + burst.length + padding.length) % 10 !== 0) failures.push('ROUTE_MIX_COUNT');
 
   if (options.mode === 'fixture') {
     currentStage = 'CAPACITY';
@@ -86,10 +106,16 @@ try {
     activeReservations = capacity.activeReservations;
     capacityPeakReservations = capacity.peakReservations;
     failures.push(...capacity.failures);
+
+    currentStage = 'TOKEN_LIMIT';
+    const abusiveToken = await runAbusiveTokenPhase(target);
+    samples.push(...abusiveToken);
+    if (!abusiveRateLimitObserved(abusiveToken)) failures.push('TOKEN_RATE_LIMIT');
   }
 
   const summary = aggregateResults(samples, activeReservations);
   currentStage = 'EVALUATION';
+  if (!exactRouteMix(summary.routeCounts, summary.nonInjectedRequests)) failures.push('ROUTE_MIX');
   if (summary.latencyMs.p95 > 12_000) failures.push('P95_LATENCY');
   if (summary.latencyMs.p99 > 20_000) failures.push('P99_LATENCY');
   if (summary.nonInjectedFailureRate > 0.01) failures.push('FAILURE_RATE');
@@ -143,6 +169,12 @@ async function runScheduledPhase(target, rps, seconds) {
   return settledSamples(await Promise.allSettled(operations));
 }
 
+async function runRouteMixPaddingPhase(target) {
+  const count = (10 - (requestIndex % 10)) % 10;
+  const operations = Array.from({ length: count }, () => sendApiRequest(target, nextIdentity(), false));
+  return settledSamples(await Promise.allSettled(operations));
+}
+
 async function runCapacityPhase(target) {
   const failures = [];
   await fixtureControl(target, 'hold');
@@ -155,7 +187,8 @@ async function runCapacityPhase(target) {
     peakReservations = heldDiagnostic.peak;
     if (!heldDiagnostic.matched) failures.push('CAPACITY_DIAGNOSTICS');
     else {
-      busySample = await sendApiRequest(target, nextIdentity(), true);
+      const responseIdentity = createRequestIdentity(runId, 99);
+      busySample = await sendApiRequest(target, Object.freeze({ ...responseIdentity, route: '/v1/responses' }), true);
       if (busySample.status !== 503 || busySample.code !== 'SERVICE_BUSY') failures.push('CAPACITY_101');
     }
   } finally {
@@ -176,30 +209,56 @@ async function runCapacityPhase(target) {
   };
 }
 
+async function runAbusiveTokenPhase(target) {
+  const identity = Object.freeze({ ...createRequestIdentity(runId, 0), route: '/v1/analyses' });
+  const samples = [];
+  for (let index = 0; index < 11; index += 1) {
+    samples.push(await sendApiRequest(target, identity, true));
+  }
+  return samples;
+}
+
 async function sendApiRequest(target, identity, injected) {
   const started = performance.now();
+  const route = identity.route;
   const headers = { 'content-type': 'application/json' };
   if (options.mode === 'fixture') {
     headers['x-load-fixture-secret'] = fixtureSecret;
     headers['x-load-fixture-ip'] = identity.syntheticIp;
   }
   try {
-    const response = await fetchWithDeadline(`${target}/v1/analyses`, {
+    const response = await fetchWithDeadline(`${target}${route}`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({
-        schemaVersion: 1,
-        consentVersion: '2026-08-07',
-        installationToken: identity.installationToken,
-        messages: [{ sender: 'Person A', text: 'Synthetic load-gate conversation.' }],
-      }),
+      body: JSON.stringify(createApiPayload(route, identity.installationToken)),
     }, options.clientMs);
     const code = response.ok ? 'allowed' : await safePublicCode(response);
     if (response.ok) await cancelBody(response.body);
-    return Object.freeze({ status: response.status, latencyMs: performance.now() - started, code, injected });
+    return Object.freeze({ route, status: response.status, latencyMs: performance.now() - started, code, injected });
   } catch {
-    return Object.freeze({ status: 0, latencyMs: performance.now() - started, code: 'CLIENT_FAILURE', injected });
+    return Object.freeze({ route, status: 0, latencyMs: performance.now() - started, code: 'CLIENT_FAILURE', injected });
   }
+}
+
+function createApiPayload(route, installationToken) {
+  const common = {
+    schemaVersion: 1,
+    consentVersion: '2026-08-07',
+    installationToken,
+  };
+  if (route === '/v1/analyses') {
+    return {
+      ...common,
+      messages: [{ sender: 'Person A', text: 'Synthetic load-gate conversation.' }],
+    };
+  }
+  return {
+    ...common,
+    sender: 'Person A',
+    goal: 'resolve',
+    tone: 'diplomatic',
+    analysis: SYNTHETIC_ANALYSIS,
+  };
 }
 
 async function waitUntilReady(target) {
@@ -258,13 +317,14 @@ async function fixtureDiagnostics(target) {
 }
 
 function nextIdentity() {
-  return createRequestIdentity(runId, requestIndex++);
+  const index = requestIndex++;
+  return Object.freeze({ ...createRequestIdentity(runId, index), route: routeForRequestIndex(index) });
 }
 
 function settledSamples(results) {
   return results.map((result) => result.status === 'fulfilled'
     ? result.value
-    : Object.freeze({ status: 0, latencyMs: options.clientMs, code: 'CLIENT_FAILURE', injected: false }));
+    : Object.freeze({ route: '/v1/analyses', status: 0, latencyMs: options.clientMs, code: 'CLIENT_FAILURE', injected: false }));
 }
 
 async function safePublicCode(response) {

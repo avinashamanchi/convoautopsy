@@ -7,8 +7,11 @@ const {
   createFatalSummary,
   createWranglerArguments,
   createRequestIdentity,
+  abusiveRateLimitObserved,
+  exactRouteMix,
   nearestRank,
   parseLoadOptions,
+  routeForRequestIndex,
   scheduledOffsets,
 } = loadGateCore;
 
@@ -96,11 +99,12 @@ describe('load gate runner contract', () => {
     expect(burst.every((value, index) => index === 0 || value > burst[index - 1])).toBe(true);
   });
 
-  it('generates unique valid tokens and unique RFC 2544 synthetic identities', () => {
+  it('reuses exactly 100 valid installations behind one shared RFC 2544 NAT address', () => {
     const values = Array.from({ length: 1_001 }, (_, index) => createRequestIdentity('run-abcdef0123456789', index));
 
-    expect(new Set(values.map((value) => value.installationToken)).size).toBe(1_001);
-    expect(new Set(values.map((value) => value.syntheticIp)).size).toBe(1_001);
+    expect(new Set(values.map((value) => value.installationToken)).size).toBe(100);
+    expect(values[0].installationToken).toBe(values[100].installationToken);
+    expect(new Set(values.slice(0, 100).map((value) => value.syntheticIp))).toEqual(new Set(['198.18.0.1']));
     expect(values.every((value) => /^[A-Za-z0-9_-]{16,256}$/.test(value.installationToken))).toBe(true);
     expect(values.every((value) => {
       const [first, second] = value.syntheticIp.split('.').map(Number);
@@ -108,13 +112,40 @@ describe('load gate runner contract', () => {
     })).toBe(true);
   });
 
+  it('uses a deterministic 70 percent analysis and 30 percent response production-route mix', () => {
+    const routes = Array.from({ length: 100 }, (_, index) => routeForRequestIndex(index));
+
+    expect(routes.filter((route) => route === '/v1/analyses')).toHaveLength(70);
+    expect(routes.filter((route) => route === '/v1/responses')).toHaveLength(30);
+    expect(exactRouteMix({ '/v1/analyses': 70, '/v1/responses': 30 }, 100)).toBe(true);
+    expect(exactRouteMix({ '/v1/analyses': 118, '/v1/responses': 48 }, 166)).toBe(false);
+    expect(exactRouteMix({ '/v1/analyses': 69, '/v1/responses': 31 }, 100)).toBe(false);
+  });
+
+  it('rotates each fixed cohort installation across routes so the burst does not manufacture token throttling', () => {
+    const routesForFirstInstallation = Array.from({ length: 10 }, (_, cycle) => routeForRequestIndex(cycle * 100));
+
+    expect(routesForFirstInstallation.filter((route) => route === '/v1/analyses')).toHaveLength(7);
+    expect(routesForFirstInstallation.filter((route) => route === '/v1/responses')).toHaveLength(3);
+  });
+
+  it('requires an intentional repeated-token probe to observe production RATE_LIMITED behavior', () => {
+    expect(abusiveRateLimitObserved([
+      { route: '/v1/analyses', status: 200, latencyMs: 1, code: 'allowed', injected: true },
+      { route: '/v1/analyses', status: 429, latencyMs: 1, code: 'RATE_LIMITED', injected: true },
+    ])).toBe(true);
+    expect(abusiveRateLimitObserved([
+      { route: '/v1/analyses', status: 429, latencyMs: 1, code: 'PLAN_LIMIT_REACHED', injected: true },
+    ])).toBe(false);
+  });
+
   it('uses nearest-rank percentiles and exposes only aggregate safe output', () => {
     expect(nearestRank([10, 20, 30, 40, 50], 0.5)).toBe(30);
     expect(nearestRank([10, 20, 30, 40, 50], 0.95)).toBe(50);
     const summary = aggregateResults([
-      { status: 200, latencyMs: 100, code: 'allowed', injected: false },
-      { status: 200, latencyMs: 300, code: 'allowed', injected: false },
-      { status: 503, latencyMs: 200, code: 'SERVICE_BUSY', injected: true },
+      { route: '/v1/analyses', status: 200, latencyMs: 100, code: 'allowed', injected: false },
+      { route: '/v1/responses', status: 200, latencyMs: 300, code: 'allowed', injected: false },
+      { route: '/v1/analyses', status: 503, latencyMs: 200, code: 'SERVICE_BUSY', injected: true },
     ], 0);
 
     expect(summary).toEqual({
@@ -124,6 +155,7 @@ describe('load gate runner contract', () => {
       nonInjectedFailureRate: 0,
       statusCounts: { '200': 2, '503': 1 },
       codeCounts: { SERVICE_BUSY: 1, allowed: 2 },
+      routeCounts: { '/v1/analyses': 1, '/v1/responses': 1 },
       latencyMs: { p50: 100, p95: 300, p99: 300 },
       activeReservations: 0,
     });
@@ -134,8 +166,8 @@ describe('load gate runner contract', () => {
     const summary = createFatalSummary({
       stage: 'CAPACITY',
       samples: [
-        { status: 200, latencyMs: 100, code: 'allowed', injected: false },
-        { status: 503, latencyMs: 300, code: 'PROVIDER_UNAVAILABLE', injected: false },
+        { route: '/v1/analyses', status: 200, latencyMs: 100, code: 'allowed', injected: false },
+        { route: '/v1/responses', status: 503, latencyMs: 300, code: 'PROVIDER_UNAVAILABLE', injected: false },
       ],
       activeReservations: undefined,
     });
@@ -149,6 +181,7 @@ describe('load gate runner contract', () => {
       nonInjectedFailureRate: 0.5,
       statusCounts: { '200': 1, '503': 1 },
       codeCounts: { allowed: 1, PROVIDER_UNAVAILABLE: 1 },
+      routeCounts: { '/v1/analyses': 1, '/v1/responses': 1 },
       latencyMs: { p50: 100, p95: 300, p99: 300 },
       activeReservations: 'not-measured',
     });

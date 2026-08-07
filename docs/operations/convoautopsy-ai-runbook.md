@@ -4,7 +4,7 @@
 
 This runbook covers the Cloudflare AI proxy, RevenueCat entitlement checks, Durable Object admission, and the Groq provider boundary. Unlimited deterministic local analysis is the safe fallback for every remote incident.
 
-Operational metrics contain only route, verified plan, HTTP status class, latency bucket, request-body-size bucket, provider-unit bucket, post-reservation in-flight bucket, entitlement-cache outcome, and public outcome code. The request ID is a separate correlation value. Never add conversation text, provider output, raw errors, headers, IP addresses, installation tokens, RevenueCat IDs, sender labels, goals, tones, or message counts to logs, dashboards, traces, alerts, or tickets.
+Operational metrics contain only route, verified plan, HTTP status class, latency bucket, request-body-size bucket, provider-unit bucket, post-reservation in-flight bucket, entitlement-cache outcome, the closed `under-80`/`at-least-80` provider-budget warning, and public outcome code. The request ID is a separate correlation value. Never add conversation text, provider output, raw errors, headers, IP addresses, installation tokens, RevenueCat IDs, sender labels, goals, tones, or message counts to logs, dashboards, traces, alerts, or tickets.
 
 ## Routine checks
 
@@ -17,7 +17,7 @@ Review these aggregate signals at the start of each on-call shift and after ever
 - provider spend and the current UTC-day provider-unit budget in the provider and Cloudflare operator consoles.
 - the deterministic local gate with `npm run test:load:ci`; use `npm run test:load` before a production release.
 
-The deterministic gate starts an ephemeral loopback Worker, uses a stub provider, generates unique synthetic rate identities in `198.18.0.0/15`, and deletes its temporary state. It must show exactly 100 peak reservations, a 503 `SERVICE_BUSY` result for request 101, no ordinary 429 responses, and zero final reservations.
+The deterministic gate starts an ephemeral loopback Worker, uses a stub provider, puts 100 unique synthetic installation tokens behind the same `198.18.0.1` network address, sends a deterministic 70% analysis / 30% response-draft route mix through production request behavior, and deletes its temporary state. It must show exactly 100 peak reservations, a 503 `SERVICE_BUSY` result for request 101, no ordinary 429 responses, the exact route mix, and zero final reservations. Per-token limits must still reject an abusive installation while the shared-network limit admits the legitimate 100-install cohort.
 
 ## Daily provider-budget thresholds
 
@@ -25,7 +25,7 @@ The deterministic gate starts an ephemeral loopback Worker, uses a stub provider
 
 At 80% of the UTC-day provider budget:
 
-1. Page the application operator and acknowledge the alert.
+1. Page the application operator when the `at-least-80` metric or `x-provider-budget-warning` response signal appears and acknowledge the alert.
 2. Confirm the signal in the provider spend console and Cloudflare aggregate metrics; do not inspect conversation payloads.
 3. Check for deploy changes, retry storms, entitlement-cache errors, route mix, and abnormal request-rate buckets.
 4. Freeze nonessential AI releases and prepare the local-mode status copy below.
@@ -62,12 +62,14 @@ The entitlement resolver fails closed to Free with cache outcome `error`; it nev
 
 ### Groq/provider outage
 
-Provider failures return the bounded public `PROVIDER_UNAVAILABLE` or `PROVIDER_INVALID_RESPONSE` outcome and release admission in `finally`.
+Provider failures return the bounded public `PROVIDER_UNAVAILABLE` or `PROVIDER_INVALID_RESPONSE` outcome. The admission coordinator atomically refunds that request's plan allowance and provider units and removes its lease. Only availability and timeout failures add a content-free rolling outage timestamp; caller-influenced schema-invalid output is refunded but cannot open the global outage circuit.
 
-1. Confirm elevated public codes and zero leaked reservations.
-2. Display or publish: “AI analysis is temporarily unavailable. Your conversation stays on this device; use Local analysis and try again later.”
-3. Do not retry automatically in a tight loop and do not send real conversation content to a diagnostic provider.
-4. Run the local stub gate. A green stub gate separates proxy capacity from the external provider outage.
+1. Five provider failures inside 60 seconds open the global provider circuit for 30 seconds. Confirm the sixth request is rejected before Groq is called.
+2. After cooldown, exactly one request is admitted as the half-open probe. Other requests remain rejected; a probe failure restarts the 30-second cooldown and a probe success closes the circuit and clears the rolling failures.
+3. Confirm elevated public codes, zero leaked reservations, and refunded quota/budget for provider failures. Confirm `PROVIDER_INVALID_RESPONSE` does not increase the availability-breaker count. A corrupt or unavailable circuit/admission record must fail closed rather than call Groq.
+4. Display or publish: “AI analysis is temporarily unavailable. Your conversation stays on this device; use Local analysis and try again later.”
+5. Do not retry automatically in a tight loop and do not send real conversation content to a diagnostic provider.
+6. Run the local stub gate. A green stub gate separates proxy capacity from the external provider outage.
 
 ## Worker rollback
 

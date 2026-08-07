@@ -205,7 +205,7 @@ function localCraftResponse({ goal, tone }) {
   return templates.map((t, i) => ({ id: i + 1, text: t.text, hint: t.hint }))
 }
 
-const CONSENT_VERSION = '2026-08-02'
+const CONSENT_VERSION = '2026-08-07'
 const MAX_MESSAGES = 100
 const MAX_MESSAGE_LENGTH = 1000
 const CONFLICT_MODES = new Set(['Competing', 'Avoiding', 'Compromising', 'Collaborating', 'Accommodating', 'Competing vs Avoiding'])
@@ -254,6 +254,68 @@ function toProxyAnalysis(result, conversationText = '') {
   return { schemaVersion: 1, mode, intensityScore, conflictMode: result.conflict_mode, messages, senderMap }
 }
 
+export function prepareResponseReview(params) {
+  const adapted = toProxyAnalysis(params.result, params.conversationText)
+  const sender = adapted?.senderMap.get(normalizeText(params.sender).toLowerCase()) || params.sender
+  if (!adapted || !isAnonymousSender(sender)) return null
+
+  const parsed = parseConversation(params.conversationText || '')
+  const participants = []
+  const labels = new Set()
+  for (const message of parsed) {
+    if (labels.has(message.sender)) continue
+    labels.add(message.sender)
+    participants.push({ sourceLabel: message.rawName, outboundLabel: message.sender })
+  }
+
+  return {
+    participants,
+    sender,
+    goal: params.goal,
+    tone: params.tone,
+    analysis: {
+      schemaVersion: adapted.schemaVersion,
+      mode: adapted.mode,
+      intensityScore: adapted.intensityScore,
+      conflictMode: adapted.conflictMode,
+    },
+    messages: adapted.messages,
+  }
+}
+
+function reviewedResponsePayload(snapshot) {
+  if (!snapshot || !snapshot.analysis || !Array.isArray(snapshot.messages) || snapshot.messages.length === 0 || snapshot.messages.length > MAX_MESSAGES) return null
+  if (snapshot.messages.some((message) => !message
+    || typeof message !== 'object'
+    || typeof message.text !== 'string'
+    || typeof message.possibleInterpretation !== 'string')) return null
+  const messages = snapshot.messages.map((message) => ({
+    sender: message?.sender,
+    text: normalizeText(message?.text),
+    pattern: message?.pattern,
+    egoState: message?.egoState,
+    possibleInterpretation: normalizeText(message?.possibleInterpretation),
+  }))
+  if (messages.some((message) => !isAnonymousSender(message.sender)
+    || !isCodePointLength(message.text, 1, MAX_MESSAGE_LENGTH)
+    || !PATTERNS.has(message.pattern)
+    || !EGO_STATES.has(message.egoState)
+    || !isCodePointLength(message.possibleInterpretation, 1, 300))) return null
+  if (!isAnonymousSender(snapshot.sender)
+    || typeof snapshot.goal !== 'string'
+    || typeof snapshot.tone !== 'string'
+    || !isCodePointLength(snapshot.goal, 1, 100)
+    || !isCodePointLength(snapshot.tone, 1, 100)) return null
+  const analysis = { ...snapshot.analysis, messages }
+  if (analysis.schemaVersion !== 1
+    || !['local', 'ai'].includes(analysis.mode)
+    || !Number.isInteger(analysis.intensityScore)
+    || analysis.intensityScore < 0
+    || analysis.intensityScore > 100
+    || !CONFLICT_MODES.has(analysis.conflictMode)) return null
+  return { sender: snapshot.sender, goal: snapshot.goal, tone: snapshot.tone, analysis }
+}
+
 function hasOnlyKeys(value, allowed) {
   return Object.keys(value).every(key => allowed.includes(key))
 }
@@ -275,17 +337,15 @@ function isSuccessEnvelope(value) {
 
 function requestIdMatchesHeader(response, requestId) {
   const header = response.headers.get('x-request-id')
-  return header === null || header === requestId
+  return typeof header === 'string' && header.length > 0 && header === requestId
 }
 
 export async function craftResponse(params, options = {}) {
   const fallback = (fallbackReason) => ({ drafts: localCraftResponse(params), source: 'local', fallbackReason })
   if (!remoteOptionsReady(options)) return fallback('NOT_CONFIGURED')
   const url = proxyUrl('/v1/responses')
-  const adapted = toProxyAnalysis(params.result, params.conversationText)
-  const analysis = adapted && { schemaVersion: adapted.schemaVersion, mode: adapted.mode, intensityScore: adapted.intensityScore, conflictMode: adapted.conflictMode, messages: adapted.messages }
-  const sender = adapted?.senderMap.get(normalizeText(params.sender).toLowerCase()) || params.sender
-  if (!url || !analysis || !isAnonymousSender(sender)) return fallback('NOT_CONFIGURED')
+  const reviewed = reviewedResponsePayload(options.reviewedSnapshot)
+  if (!url || !reviewed) return fallback('NOT_CONFIGURED')
   try {
     const { response, data } = await fetchBoundedJson(url, {
       method: 'POST',
@@ -294,10 +354,10 @@ export async function craftResponse(params, options = {}) {
         schemaVersion: 1,
         consentVersion: options.consentVersion,
         installationToken: options.installationToken,
-        sender,
-        goal: params.goal,
-        tone: params.tone,
-        analysis,
+        sender: reviewed.sender,
+        goal: reviewed.goal,
+        tone: reviewed.tone,
+        analysis: reviewed.analysis,
       }),
     }, options)
     if (!response.ok || !isSuccessEnvelope(data) || !requestIdMatchesHeader(response, data.requestId)) throw new Error()

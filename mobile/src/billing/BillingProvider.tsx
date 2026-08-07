@@ -17,6 +17,7 @@ export type BillingContextValue = {
   busy: boolean;
   message: string | null;
   appUserId: string | null;
+  identityStatus: 'loading' | 'ready' | 'unavailable';
   purchase(productId: string): Promise<void>;
   restore(): Promise<void>;
   reload(): Promise<void>;
@@ -36,6 +37,7 @@ export function BillingProvider({ children, service = appBillingService }: Props
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [appUserId, setAppUserId] = useState<string | null>(null);
+  const [identityStatus, setIdentityStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading');
   const operation = useRef(Promise.resolve());
   const mountedRef = useRef(true);
   const reloadGeneration = useRef(0);
@@ -60,18 +62,24 @@ export function BillingProvider({ children, service = appBillingService }: Props
     }
     setBusy(true);
     setMessage(null);
+    setAppUserId(null);
+    setIdentityStatus('loading');
     try {
       const next = await service.load();
       if (!mountedRef.current || generation !== reloadGeneration.current) {
         return;
       }
       applySnapshot(next);
-      const nextAppUserId = await service.getAppUserId();
+      const nextAppUserId = next.availability === 'ready' ? await service.getAppUserId() : null;
       if (mountedRef.current && generation === reloadGeneration.current) {
-        setAppUserId(nextAppUserId);
+        const validIdentity = validAppUserId(nextAppUserId);
+        setAppUserId(validIdentity);
+        setIdentityStatus(validIdentity ? 'ready' : 'unavailable');
       }
     } catch {
       if (mountedRef.current && generation === reloadGeneration.current) {
+        setAppUserId(null);
+        setIdentityStatus('unavailable');
         setMessage('Could not refresh billing.');
       }
     } finally {
@@ -86,8 +94,12 @@ export function BillingProvider({ children, service = appBillingService }: Props
       setBusy(true);
       setMessage(null);
       try {
-        applySnapshot(await work());
-        setAppUserId(await service.getAppUserId());
+        const nextSnapshot = await work();
+        applySnapshot(nextSnapshot);
+        const nextAppUserId = nextSnapshot.availability === 'ready' ? await service.getAppUserId() : null;
+        const validIdentity = validAppUserId(nextAppUserId);
+        setAppUserId(validIdentity);
+        setIdentityStatus(validIdentity ? 'ready' : 'unavailable');
       } catch (error) {
         if (!(error instanceof PurchaseCancelledError)) {
           setMessage('Could not update billing.');
@@ -109,7 +121,13 @@ export function BillingProvider({ children, service = appBillingService }: Props
     void (async () => {
       await reload();
       if (mounted) {
-        unsubscribe = service.subscribe((next) => { applySnapshot(next); });
+        unsubscribe = service.subscribe((next) => {
+          applySnapshot(next);
+          if (next.availability !== 'ready') {
+            setAppUserId(null);
+            setIdentityStatus('unavailable');
+          }
+        });
       }
     })();
     const appStateSubscription = AppState.addEventListener('change', (state) => {
@@ -125,10 +143,14 @@ export function BillingProvider({ children, service = appBillingService }: Props
   }, [applySnapshot, reload, service]);
 
   return (
-    <BillingContext.Provider value={{ ...snapshot, busy, message, appUserId, purchase, restore, reload }}>
+    <BillingContext.Provider value={{ ...snapshot, busy, message, appUserId, identityStatus, purchase, restore, reload }}>
       {children}
     </BillingContext.Provider>
   );
+}
+
+function validAppUserId(value: string | null): string | null {
+  return typeof value === 'string' && value.trim().length > 0 && Array.from(value).length <= 100 ? value : null;
 }
 
 export function useBilling(): BillingContextValue {

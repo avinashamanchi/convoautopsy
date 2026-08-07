@@ -4,7 +4,7 @@ jest.mock('../src/services/reportRepositoryContext', () => ({
 }));
 jest.mock('../src/services/consentStore', () => ({ createConsentStore: jest.fn() }));
 jest.mock('../src/services/aiClient', () => ({ createAiClient: jest.fn() }));
-jest.mock('../src/billing/BillingProvider', () => ({ useBilling: () => ({ appUserId: null }) }));
+jest.mock('../src/billing/BillingProvider', () => ({ useBilling: () => ({ appUserId: '$RCAnonymousID:preview-test', identityStatus: 'ready' }) }));
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { useEffect } from 'react';

@@ -13,7 +13,7 @@ describe('customer-visible legal truth', () => {
     expect(screen.getByText(/pseudonymous app-user ID and purchase and entitlement history/)).toBeTruthy();
     expect(screen.getByText(/cache verified entitlement status for up to five minutes/)).toBeTruthy();
     expect(screen.getByText(/HMAC-derived rate and quota identifiers/)).toBeTruthy();
-    expect(screen.getByText(/bounded quota usage rows, a daily provider budget, two-minute recovery leases, and content-free operational metrics/)).toBeTruthy();
+    expect(screen.getByText(/bounded quota usage rows, a daily provider budget, two-minute recovery leases, short-lived provider-failure and circuit state, and content-free operational metrics/)).toBeTruthy();
     expect(screen.getByText(/does not cancel an App Store subscription/)).toBeTruthy();
     expect(screen.getByText(/does not immediately remove short-lived service safety and accounting records/)).toBeTruthy();
     expect(screen.queryByText(/anonymized speaker labels/i)).toBeNull();

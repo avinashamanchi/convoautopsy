@@ -8,6 +8,10 @@ jest.mock('../src/services/aiClient', () => ({
   ...jest.requireActual('../src/services/aiClient'),
   createAiClient: jest.fn(),
 }));
+jest.mock('../src/billing/BillingProvider', () => ({
+  BillingProvider: ({ children }: { children: React.ReactNode }) => children,
+  useBilling: () => ({ appUserId: '$RCAnonymousID:preview-test', identityStatus: 'ready' }),
+}));
 
 import { fireEvent, screen } from '@testing-library/react-native';
 import { renderRouter } from 'expo-router/testing-library';
@@ -285,5 +289,15 @@ it('shows a validated rate-limit retry separately while keeping the local action
   fireEvent.press(screen.getByRole('button', { name: 'Agree and continue' }));
 
   expect(await screen.findByText('AI-assisted analysis rate limit reached. Try again in 37 seconds.')).toBeOnTheScreen();
+  expect(screen.getByRole('button', { name: 'Run on-device analysis instead' })).toBeOnTheScreen();
+});
+
+it('shows the server-derived allowance reset timing for Free or Pro plan limits', async () => {
+  remoteAnalysis.mockRejectedValue(new AiClientError('PLAN_LIMIT_REACHED', 2_678_400));
+  await renderPreview();
+  await openFirstConsent();
+  fireEvent.press(screen.getByRole('button', { name: 'Agree and continue' }));
+
+  expect(await screen.findByText('AI-assisted analysis allowance reached. It resets in 31 days.')).toBeOnTheScreen();
   expect(screen.getByRole('button', { name: 'Run on-device analysis instead' })).toBeOnTheScreen();
 });

@@ -2,7 +2,7 @@ import { AdmissionDurableObject as BaseAdmissionDurableObject } from './admissio
 import type { AnalysisResult } from './contract';
 import { createApp, type AiProvider, type Env } from './index';
 
-export { RateLimitDurableObject } from './rateLimit';
+export { RateLimitDurableObject } from './fairRateLimit';
 
 type LoadFixtureEnv = Env & {
   LOAD_FIXTURE_SECRET?: string;
@@ -120,7 +120,11 @@ const worker = {
 
     const prepared = prepareFixtureApiRequest(request, env.LOAD_FIXTURE_SECRET);
     if (!prepared) return new Response(null, { status: 401 });
-    const app = createApp({ provider: createFixtureProvider(env), logger: { info: () => undefined } });
+    const app = createApp({
+      provider: createFixtureProvider(env),
+      logger: { info: () => undefined },
+      entitlementResolver: async () => ({ plan: 'pro', cache: 'bypass' }),
+    });
     return app.fetch(prepared, env);
   },
 };

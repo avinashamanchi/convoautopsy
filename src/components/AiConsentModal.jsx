@@ -31,7 +31,7 @@ export default function AiConsentModal({ onAgree, onDecline, isRunning, returnFo
     <div className="ai-consent-backdrop" role="presentation">
       <div className="ai-consent-modal" role="dialog" aria-modal="true" aria-labelledby="ai-consent-title" onKeyDown={handleKeyDown}>
         <h2 id="ai-consent-title">Before AI-assisted analysis</h2>
-        <p>Names are replaced with Person labels. Message text is sent to Groq through ConvoAutopsy&apos;s server. ConvoAutopsy does not intentionally store that text. Automated output can be wrong. On-device analysis is available without sharing.</p>
+        <p>After a separate exact-data review, message text is sent to Groq through ConvoAutopsy&apos;s server. Person labels are pseudonymous, not anonymous, so text can still identify people. ConvoAutopsy does not intentionally store that text. Automated output can be wrong. On-device analysis is available without sharing.</p>
         <div className="ai-consent-actions">
           <button ref={agreeRef} onClick={onAgree} disabled={isRunning}>{isRunning ? 'Starting AI analysis…' : 'Agree and continue'}</button>
           <button ref={declineRef} onClick={onDecline} disabled={isRunning}>Use on-device analysis</button>
