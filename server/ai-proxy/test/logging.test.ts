@@ -24,12 +24,12 @@ describe('privacy-safe logging', () => {
     const app = createApp({ provider, logger: { info: (record) => records.push(record) }, rateLimitSecret: 'test-only-rate-key' });
     const analysisResponse = await app.fetch(new Request('https://proxy.example/v1/analyses', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ schemaVersion: 1, consentVersion: '2026-08-02', installationToken: token, revenueCatAppUserId: REVENUECAT_ID_MARKER, messages: [{ sender: 'Person A', text: CONTENT_MARKER }] }),
+      body: JSON.stringify({ schemaVersion: 1, consentVersion: '2026-08-07', installationToken: token, revenueCatAppUserId: REVENUECAT_ID_MARKER, messages: [{ sender: 'Person A', text: CONTENT_MARKER }] }),
     }), env as unknown as Env);
     const responseResponse = await app.fetch(new Request('https://proxy.example/v1/responses', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        schemaVersion: 1, consentVersion: '2026-08-02', installationToken: token, sender: 'Person A', goal: 'resolve', tone: 'empathetic',
+        schemaVersion: 1, consentVersion: '2026-08-07', installationToken: token, sender: 'Person A', goal: 'resolve', tone: 'empathetic',
         analysis: { schemaVersion: 1, mode: 'ai', intensityScore: 1, conflictMode: 'Avoiding', messages: [{ sender: 'Person A', text: CONTENT_MARKER, pattern: 'Neutral', egoState: 'Adult', possibleInterpretation: 'ok' }] },
       }),
     }), env as unknown as Env);

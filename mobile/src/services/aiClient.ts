@@ -47,7 +47,7 @@ export function createAiClient({
   isProduction = true,
   timeoutMs = 20_000,
 }: AiClientDependencies) {
-  return async function analyzeRemotely(messages: ParsedMessage[], callerSignal: AbortSignal): Promise<AnalysisResult> {
+  return async function analyzeRemotely(messages: readonly Readonly<ParsedMessage>[], callerSignal: AbortSignal): Promise<AnalysisResult> {
     if (callerSignal.aborted) throw new AiClientError('CANCELLED');
     const requestController = new AbortController();
     let timedOut = false;
@@ -134,7 +134,7 @@ function analysisUrl(endpoint: string | undefined, isProduction: boolean): strin
   }
 }
 
-function toAnonymousMessages(messages: ParsedMessage[]) {
+function toAnonymousMessages(messages: readonly Readonly<ParsedMessage>[]) {
   if (messages.length === 0 || messages.some((message) => !/^Person [A-Z]$/.test(message.sender) || !message.text)) {
     throw new AiClientError('INVALID_RESPONSE');
   }

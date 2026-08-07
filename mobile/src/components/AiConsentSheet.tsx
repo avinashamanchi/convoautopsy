@@ -15,6 +15,9 @@ export function AiConsentSheet({ isRunning, onAgree, onCancel }: AiConsentSheetP
       <Text style={styles.copy}>
         Names are replaced with Person labels. Message text is sent to Groq through ConvoAutopsy&apos;s server. ConvoAutopsy does not intentionally store that text. Automated output can be wrong. On-device analysis is available without sharing.
       </Text>
+      <Text style={styles.copy}>
+        If you use a subscription, your RevenueCat app user ID may be sent to our server to verify your plan; RevenueCat does not receive your conversation text.
+      </Text>
       <PrimaryButton
         disabled={isRunning}
         label={isRunning ? 'Starting AI analysis…' : 'Agree and continue'}

@@ -70,7 +70,7 @@ it('keeps the draft available for editing from the preview', async () => {
   expect(await screen.findByText('Person B')).toBeOnTheScreen();
 });
 
-it('shows the AI-sharing disclosure before attempting AI-assisted analysis', async () => {
+it('shows the exact outgoing-data review before the AI-sharing disclosure', async () => {
   renderRouter('./app', { initialUrl: '/' });
 
   fireEvent.changeText(await screen.findByLabelText('Conversation text'), 'Alex: Hello\nJordan: Hi');
@@ -78,6 +78,12 @@ it('shows the AI-sharing disclosure before attempting AI-assisted analysis', asy
   await screen.findByText('Person A');
 
   fireEvent.press(screen.getByRole('button', { name: 'Use AI-assisted analysis' }));
+  expect(await screen.findByText(
+    'Automatic detection can miss identifying details. Review the exact text below.',
+  )).toBeOnTheScreen();
+  expect(screen.queryByText(/Message text is sent to Groq/)).toBeNull();
+
+  fireEvent.press(screen.getByRole('button', { name: 'Confirm exact text' }));
   expect(
     await screen.findByText(
       /Names are replaced with Person labels. Message text is sent to Groq through ConvoAutopsy's server./,

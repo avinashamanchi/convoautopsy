@@ -53,7 +53,7 @@ beforeEach(() => {
   mockedCreateAiClient.mockReturnValue(remoteAnalysis);
   mockedCreateConsentStore.mockReturnValue({
     getConsent: jest.fn().mockResolvedValue(null),
-    grantConsent: jest.fn().mockResolvedValue({ version: '2026-08-02', grantedAt: '2026-08-02T00:00:00.000Z', provider: 'Groq' }),
+    grantConsent: jest.fn().mockResolvedValue({ version: '2026-08-07', grantedAt: '2026-08-07T00:00:00.000Z', provider: 'Groq' }),
     revokeConsent: jest.fn(),
     getInstallationToken: jest.fn(),
     clearRemoteAnalysisData: jest.fn(), clearInstallationToken: jest.fn(),
@@ -88,6 +88,7 @@ it('keeps an AI result status when the preview route unmounts after routing', as
   await preparePreview(session);
 
   fireEvent.press(screen.getByRole('button', { name: 'Use AI-assisted analysis' }));
+  fireEvent.press(await screen.findByRole('button', { name: 'Confirm exact text' }));
   fireEvent.press(await screen.findByRole('button', { name: 'Agree and continue' }));
   await waitFor(() => expect(session?.status).toBe('result'));
 

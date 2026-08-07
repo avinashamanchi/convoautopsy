@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const CONSENT_VERSION = '2026-08-02' as const;
+export const CONSENT_VERSION = '2026-08-07' as const;
 
 function codePointString(min: number, max: number) {
   return z.string().superRefine((value, context) => {

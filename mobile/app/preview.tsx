@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { router } from 'expo-router';
 import { ScrollView, StyleSheet, Text } from 'react-native';
 import { useBilling } from '../src/billing/BillingProvider';
@@ -6,8 +6,9 @@ import { AiConsentSheet } from '../src/components/AiConsentSheet';
 import { AnalysisModePicker } from '../src/components/AnalysisModePicker';
 import { ParsedMessageList } from '../src/components/ParsedMessageList';
 import { PrimaryButton } from '../src/components/PrimaryButton';
+import { RemoteDataReview } from '../src/components/RemoteDataReview';
 import { Screen } from '../src/components/Screen';
-import type { ParseResult } from '../src/domain/analysis';
+import type { ParsedMessage, ParseResult } from '../src/domain/analysis';
 import { parserErrorMessage } from '../src/domain/parserErrors';
 import { AiClientError, createAiClient } from '../src/services/aiClient';
 import { SECURE_STORAGE_UNAVAILABLE_MESSAGE, createConsentStore } from '../src/services/consentStore';
@@ -19,11 +20,22 @@ const NO_MESSAGES_ERROR = "Couldn't find any messages. Use Name: Message on each
 const AI_FAILURE = "AI-assisted analysis couldn't be completed. Your conversation is still available.";
 
 export default function PreviewScreen() {
-  const { draft, parsed, preparePreview, runLocal, startRemote, setRemoteResult, cancel } = useAnalysisSession();
+  const {
+    draft,
+    parsed,
+    preparePreview,
+    runLocal,
+    confirmRemoteReview,
+    startRemote,
+    setRemoteResult,
+    cancel,
+  } = useAnalysisSession();
   const { preferences } = useReportRepository();
   const { appUserId } = useBilling();
   const [preview, setPreview] = useState<ParseResult | null>(null);
   const [aiNotice, setAiNotice] = useState<string | null>(null);
+  const [reviewVisible, setReviewVisible] = useState(false);
+  const [reviewConfirming, setReviewConfirming] = useState(false);
   const [consentVisible, setConsentVisible] = useState(false);
   const [aiRunning, setAiRunning] = useState(false);
   const preparedDraft = useRef<string | null>(null);
@@ -31,6 +43,8 @@ export default function PreviewScreen() {
   const remoteRunCounterRef = useRef(0);
   const consentCheckCounterRef = useRef(0);
   const consentLookupPendingRef = useRef(false);
+  const reviewConfirmingRef = useRef(false);
+  const remoteWorkflowActiveRef = useRef(false);
   const mountedRef = useRef(false);
   const cancelRef = useRef(cancel);
   cancelRef.current = cancel;
@@ -43,18 +57,31 @@ export default function PreviewScreen() {
     }),
     [appUserId, consentStore],
   );
+  const cancelPendingWork = useCallback(() => {
+    consentCheckCounterRef.current += 1;
+    consentLookupPendingRef.current = false;
+    reviewConfirmingRef.current = false;
+    remoteWorkflowActiveRef.current = false;
+    activeRemoteRunRef.current = null;
+    setAiRunning(false);
+    setReviewConfirming(false);
+    setReviewVisible(false);
+    setConsentVisible(false);
+    cancel();
+  }, [cancel]);
 
   useEffect(() => {
-    if (preparedDraft.current === draft) {
-      return;
-    }
+    if (preparedDraft.current === draft) return;
+    if (preparedDraft.current !== null && remoteWorkflowActiveRef.current) cancelPendingWork();
     preparedDraft.current = draft;
+    setReviewVisible(false);
+    setConsentVisible(false);
     try {
       setPreview(preparePreview());
     } catch (error) {
       router.replace({ pathname: '/', params: { error: parserErrorMessage(error) } });
     }
-  }, [draft, preparePreview]);
+  }, [cancelPendingWork, draft, preparePreview]);
 
   useEffect(() => {
     if (preview && preview.messages.length === 0) {
@@ -65,26 +92,32 @@ export default function PreviewScreen() {
   useEffect(() => {
     mountedRef.current = true;
     return () => {
-      const hasUnfinishedWork = activeRemoteRunRef.current !== null || consentLookupPendingRef.current;
+      const hasUnfinishedWork = remoteWorkflowActiveRef.current
+        || activeRemoteRunRef.current !== null
+        || consentLookupPendingRef.current;
       mountedRef.current = false;
       activeRemoteRunRef.current = null;
       consentCheckCounterRef.current += 1;
       consentLookupPendingRef.current = false;
+      reviewConfirmingRef.current = false;
+      remoteWorkflowActiveRef.current = false;
       if (hasUnfinishedWork) cancelRef.current();
     };
   }, []);
 
   const activePreview = preview ?? parsed;
 
-  if (!activePreview || activePreview.messages.length === 0) {
-    return null;
-  }
-  const messagesForAi = activePreview.messages;
+  if (!activePreview || activePreview.messages.length === 0) return null;
 
   function runLocalAndOpenResult() {
     cancelPendingWork();
     runLocal();
     router.replace('/result');
+  }
+
+  function editConversation() {
+    cancelPendingWork();
+    router.back();
   }
 
   function finishRemoteRun(run: number) {
@@ -98,16 +131,8 @@ export default function PreviewScreen() {
     return mountedRef.current && activeRemoteRunRef.current === run;
   }
 
-  function cancelPendingWork() {
-    const hasUnfinishedWork = activeRemoteRunRef.current !== null || consentLookupPendingRef.current;
-    consentCheckCounterRef.current += 1;
-    consentLookupPendingRef.current = false;
-    activeRemoteRunRef.current = null;
-    if (hasUnfinishedWork) cancel();
-  }
-
   async function runAiAnalysis(grantConsent: boolean) {
-    if (!mountedRef.current || activeRemoteRunRef.current !== null) return;
+    if (!mountedRef.current || activeRemoteRunRef.current !== null || !remoteWorkflowActiveRef.current) return;
     const run = ++remoteRunCounterRef.current;
     activeRemoteRunRef.current = run;
     setAiRunning(true);
@@ -117,49 +142,62 @@ export default function PreviewScreen() {
       if (grantConsent) await consentStore.grantConsent();
       if (!isCurrentRun(run)) return;
       const attempt = startRemote();
-      const result = await analyzeRemotely(messagesForAi, attempt.signal);
+      const result = await analyzeRemotely(attempt.messages, attempt.signal);
       if (attempt.signal.aborted || !isCurrentRun(run)) return;
       setRemoteResult(result, attempt.requestId);
       if (!isCurrentRun(run)) return;
       finishRemoteRun(run);
       setConsentVisible(false);
+      remoteWorkflowActiveRef.current = false;
       router.replace('/result');
     } catch (error) {
       if (!isCurrentRun(run)) return;
       cancel();
       if (!isCurrentRun(run)) return;
       setConsentVisible(false);
+      remoteWorkflowActiveRef.current = false;
       setAiNotice(aiFailureMessage(error));
     } finally {
       finishRemoteRun(run);
     }
   }
 
-  async function startConsentFlow() {
-    if (!mountedRef.current || activeRemoteRunRef.current !== null) return;
+  function startReviewFlow() {
+    if (!mountedRef.current || remoteWorkflowActiveRef.current || activeRemoteRunRef.current !== null) return;
+    cancel();
+    setAiNotice(null);
+    setConsentVisible(false);
+    setReviewVisible(true);
+    remoteWorkflowActiveRef.current = true;
+  }
+
+  async function confirmReview(messages: ParsedMessage[]) {
+    if (!mountedRef.current || !remoteWorkflowActiveRef.current || reviewConfirmingRef.current) return;
+    reviewConfirmingRef.current = true;
+    setReviewConfirming(true);
+    confirmRemoteReview(messages);
     const consentCheck = ++consentCheckCounterRef.current;
     consentLookupPendingRef.current = true;
     setAiNotice(null);
     try {
       const currentConsent = await consentStore.getConsent();
-      if (!mountedRef.current || consentCheckCounterRef.current !== consentCheck) return;
+      if (!mountedRef.current || consentCheckCounterRef.current !== consentCheck || !remoteWorkflowActiveRef.current) return;
       consentLookupPendingRef.current = false;
-      if (currentConsent) {
-        void runAiAnalysis(false);
-      } else {
-        setConsentVisible(true);
-      }
+      reviewConfirmingRef.current = false;
+      setReviewConfirming(false);
+      setReviewVisible(false);
+      if (currentConsent) void runAiAnalysis(false);
+      else setConsentVisible(true);
     } catch {
       if (!mountedRef.current || consentCheckCounterRef.current !== consentCheck) return;
       consentLookupPendingRef.current = false;
+      reviewConfirmingRef.current = false;
+      setReviewConfirming(false);
+      setReviewVisible(false);
+      remoteWorkflowActiveRef.current = false;
+      cancel();
       setAiNotice(AI_FAILURE);
     }
-  }
-
-  function cancelAiAnalysis() {
-    cancelPendingWork();
-    setAiRunning(false);
-    setConsentVisible(false);
   }
 
   return (
@@ -168,13 +206,21 @@ export default function PreviewScreen() {
         <Text accessibilityRole="header" style={styles.title}>Review your conversation</Text>
         <Text style={styles.description}>Check the parsed messages before choosing an analysis mode.</Text>
         <ParsedMessageList parsed={activePreview} />
-        <PrimaryButton label="Edit conversation" onPress={() => router.back()} />
-        <AnalysisModePicker aiNotice={aiNotice} onRunLocal={runLocalAndOpenResult} onStartAi={() => { void startConsentFlow(); }} />
+        <PrimaryButton label="Edit conversation" onPress={editConversation} />
+        <AnalysisModePicker aiNotice={aiNotice} onRunLocal={runLocalAndOpenResult} onStartAi={startReviewFlow} />
+        {reviewVisible ? (
+          <RemoteDataReview
+            isConfirming={reviewConfirming}
+            messages={activePreview.messages}
+            onCancel={cancelPendingWork}
+            onConfirm={(messages) => { void confirmReview(messages); }}
+          />
+        ) : null}
         {consentVisible ? (
           <AiConsentSheet
             isRunning={aiRunning}
             onAgree={() => { void runAiAnalysis(true); }}
-            onCancel={cancelAiAnalysis}
+            onCancel={cancelPendingWork}
           />
         ) : null}
         {aiNotice ? <PrimaryButton label="Run on-device analysis instead" onPress={runLocalAndOpenResult} /> : null}

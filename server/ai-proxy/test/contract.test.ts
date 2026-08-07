@@ -16,7 +16,7 @@ describe('request contract', () => {
   it('accepts a bounded, consented analysis request', () => {
     const result = AnalyzeRequestSchema.safeParse({
       schemaVersion: 1,
-      consentVersion: '2026-08-02',
+      consentVersion: '2026-08-07',
       installationToken: 'installation-token-which-is-long-enough',
       messages: [{ sender: 'Person A', text: 'Please listen to me.' }],
     });
@@ -24,10 +24,29 @@ describe('request contract', () => {
     expect(result.success).toBe(true);
   });
 
+  it('requires the redaction-review consent version on both Worker request schemas', () => {
+    const analysisRequest = {
+      schemaVersion: 1,
+      consentVersion: '2026-08-02',
+      installationToken: 'installation-token-which-is-long-enough',
+      messages: [{ sender: 'Person A', text: 'Please listen.' }],
+    };
+    const responseRequest = {
+      ...analysisRequest,
+      sender: 'Person A',
+      goal: 'resolve',
+      tone: 'empathetic',
+      analysis: fixture,
+    };
+
+    expect(AnalyzeRequestSchema.safeParse(analysisRequest).success).toBe(false);
+    expect(CraftResponseRequestSchema.safeParse(responseRequest).success).toBe(false);
+  });
+
   it('rejects extra fields and invalid installation tokens', () => {
     const result = AnalyzeRequestSchema.safeParse({
       schemaVersion: 1,
-      consentVersion: '2026-08-02',
+      consentVersion: '2026-08-07',
       installationToken: 'short',
       messages: [{ sender: 'Person A', text: 'Please listen to me.', injected: true }],
     });
@@ -40,13 +59,13 @@ describe('request contract', () => {
 
     expect(AnalyzeRequestSchema.safeParse({
       schemaVersion: 1,
-      consentVersion: '2026-08-02',
+      consentVersion: '2026-08-07',
       installationToken: 'installation-token-which-is-long-enough',
       messages: manyMessages,
     }).success).toBe(false);
     expect(AnalyzeRequestSchema.safeParse({
       schemaVersion: 1,
-      consentVersion: '2026-08-02',
+      consentVersion: '2026-08-07',
       installationToken: 'installation-token-which-is-long-enough',
       messages: [{ sender: 'Person A', text: 'x'.repeat(1_001) }],
     }).success).toBe(false);
@@ -55,7 +74,7 @@ describe('request contract', () => {
   it('counts Unicode code points instead of UTF-16 code units at the 1,000-character boundary', () => {
     const request = (text: string) => ({
       schemaVersion: 1,
-      consentVersion: '2026-08-02',
+      consentVersion: '2026-08-07',
       installationToken: 'installation-token-which-is-long-enough',
       messages: [{ sender: 'Person A', text }],
     });
@@ -67,7 +86,7 @@ describe('request contract', () => {
   it('accepts an optional RevenueCat identifier of at most 100 Unicode code points on both request routes', () => {
     const base = {
       schemaVersion: 1 as const,
-      consentVersion: '2026-08-02' as const,
+      consentVersion: '2026-08-07' as const,
       installationToken: 'installation-token-which-is-long-enough',
       revenueCatAppUserId: '🫠'.repeat(100),
     };
@@ -87,7 +106,7 @@ describe('request contract', () => {
   it('rejects client-asserted subscription plan fields', () => {
     const request = {
       schemaVersion: 1,
-      consentVersion: '2026-08-02',
+      consentVersion: '2026-08-07',
       installationToken: 'installation-token-which-is-long-enough',
       messages: [{ sender: 'Person A', text: 'Please listen.' }],
     };
@@ -104,7 +123,7 @@ describe('request contract', () => {
   it('enforces anonymous Person A through Person Z labels at every provider boundary', () => {
     const rawInput = {
       schemaVersion: 1,
-      consentVersion: '2026-08-02',
+      consentVersion: '2026-08-07',
       installationToken: 'installation-token-which-is-long-enough',
       messages: [{ sender: 'Alice', text: 'Please listen.' }],
     };
@@ -126,7 +145,7 @@ describe('request contract', () => {
     expect(AnalysisResultSchema.safeParse(rawNestedAnalysis).success).toBe(false);
     expect(CraftResponseRequestSchema.safeParse({
       schemaVersion: 1,
-      consentVersion: '2026-08-02',
+      consentVersion: '2026-08-07',
       installationToken: 'installation-token-which-is-long-enough',
       sender: 'Alice',
       goal: 'resolve',

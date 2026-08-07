@@ -50,7 +50,7 @@ function validProvider(): AiProvider {
 function analysisRequest(overrides: Record<string, unknown> = {}) {
   return {
     schemaVersion: 1,
-    consentVersion: '2026-08-02',
+    consentVersion: '2026-08-07',
     installationToken,
     messages: [{ sender: 'Person A', text: 'Please listen to me.' }],
     ...overrides,
@@ -301,7 +301,7 @@ describe('AI proxy routes', () => {
   it('returns a response draft from POST /v1/responses', async () => {
     const input: CraftResponseRequest = {
       schemaVersion: 1,
-      consentVersion: '2026-08-02',
+      consentVersion: '2026-08-07',
       installationToken,
       sender: 'Person A',
       goal: 'resolve',
@@ -319,7 +319,7 @@ describe('AI proxy routes', () => {
     let received: unknown;
     const input: CraftResponseRequest = {
       schemaVersion: 1,
-      consentVersion: '2026-08-02',
+      consentVersion: '2026-08-07',
       installationToken,
       sender: 'Person A',
       goal: 'resolve',
@@ -357,7 +357,7 @@ describe('AI proxy routes', () => {
     const routeToken = 'route-bucket-installation-token';
     const routeHeaders = { 'CF-Connecting-IP': '192.0.2.88' };
     const input: CraftResponseRequest = {
-      schemaVersion: 1, consentVersion: '2026-08-02', installationToken: routeToken, sender: 'Person A', goal: 'resolve', tone: 'empathetic', analysis,
+      schemaVersion: 1, consentVersion: '2026-08-07', installationToken: routeToken, sender: 'Person A', goal: 'resolve', tone: 'empathetic', analysis,
     };
     for (let index = 0; index < 3; index += 1) {
       expect((await app().fetch(request('/v1/analyses', analysisRequest({ installationToken: routeToken }), { headers: routeHeaders }), env as unknown as Env)).status).toBe(200);

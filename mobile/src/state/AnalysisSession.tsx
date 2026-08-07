@@ -1,5 +1,5 @@
 import { createContext, useContext, useRef, useState, type PropsWithChildren } from 'react';
-import type { AnalysisResult, ParseResult } from '../domain/analysis';
+import type { AnalysisResult, ParsedMessage, ParseResult } from '../domain/analysis';
 import { analyzeLocally } from '../domain/localAnalyzer';
 import { parseConversation } from '../domain/parser';
 
@@ -7,13 +7,15 @@ export type AnalysisSessionValue = {
   draft: string;
   parsed: ParseResult | null;
   activeResult: AnalysisResult | null;
+  reviewedRemoteMessages: readonly Readonly<ParsedMessage>[] | null;
   status: 'idle' | 'preview' | 'analyzing-local' | 'analyzing-ai' | 'result';
   requestId: number;
   setDraft(value: string): void;
   preparePreview(): ParseResult;
   runLocal(): AnalysisResult;
+  confirmRemoteReview(messages: ParsedMessage[]): readonly Readonly<ParsedMessage>[];
   setRemoteResult(result: AnalysisResult, requestId: number): void;
-  startRemote(): { requestId: number; signal: AbortSignal };
+  startRemote(): { requestId: number; signal: AbortSignal; messages: readonly Readonly<ParsedMessage>[] };
   cancel(): void;
   reset(): void;
 };
@@ -24,11 +26,18 @@ export function AnalysisSessionProvider({ children }: PropsWithChildren) {
   const [draft, setDraftState] = useState('');
   const [parsed, setParsed] = useState<ParseResult | null>(null);
   const [activeResult, setActiveResult] = useState<AnalysisResult | null>(null);
+  const [reviewedRemoteMessages, setReviewedRemoteMessages] = useState<readonly Readonly<ParsedMessage>[] | null>(null);
   const [status, setStatus] = useState<AnalysisSessionValue['status']>('idle');
   const [requestId, setRequestId] = useState(0);
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeRemoteRequestIdRef = useRef<number | null>(null);
   const requestIdRef = useRef(0);
+  const reviewedRemoteMessagesRef = useRef<readonly Readonly<ParsedMessage>[] | null>(null);
+
+  const clearReviewedRemoteMessages = () => {
+    reviewedRemoteMessagesRef.current = null;
+    setReviewedRemoteMessages(null);
+  };
 
   const invalidateRemoteRequest = () => {
     abortControllerRef.current?.abort();
@@ -36,12 +45,14 @@ export function AnalysisSessionProvider({ children }: PropsWithChildren) {
     activeRemoteRequestIdRef.current = null;
     requestIdRef.current += 1;
     setRequestId(requestIdRef.current);
+    clearReviewedRemoteMessages();
   };
 
   const value: AnalysisSessionValue = {
     draft,
     parsed,
     activeResult,
+    reviewedRemoteMessages,
     status,
     requestId,
     setDraft(value) {
@@ -69,6 +80,13 @@ export function AnalysisSessionProvider({ children }: PropsWithChildren) {
       setStatus('result');
       return result;
     },
+    confirmRemoteReview(messages) {
+      invalidateRemoteRequest();
+      const snapshot = Object.freeze(messages.map((message) => Object.freeze({ ...message })));
+      reviewedRemoteMessagesRef.current = snapshot;
+      setReviewedRemoteMessages(snapshot);
+      return snapshot;
+    },
     setRemoteResult(result, resultRequestId) {
       if (
         resultRequestId !== requestIdRef.current ||
@@ -84,6 +102,8 @@ export function AnalysisSessionProvider({ children }: PropsWithChildren) {
       setStatus('result');
     },
     startRemote() {
+      const messages = reviewedRemoteMessagesRef.current;
+      if (!messages) throw new Error('REMOTE_REVIEW_REQUIRED');
       abortControllerRef.current?.abort();
       const controller = new AbortController();
       abortControllerRef.current = controller;
@@ -91,7 +111,7 @@ export function AnalysisSessionProvider({ children }: PropsWithChildren) {
       activeRemoteRequestIdRef.current = requestIdRef.current;
       setRequestId(requestIdRef.current);
       setStatus('analyzing-ai');
-      return { requestId: requestIdRef.current, signal: controller.signal };
+      return { requestId: requestIdRef.current, signal: controller.signal, messages };
     },
     cancel() {
       invalidateRemoteRequest();

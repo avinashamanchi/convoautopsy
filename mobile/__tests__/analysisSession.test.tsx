@@ -5,7 +5,7 @@ import {
   type AnalysisSessionValue,
   useAnalysisSession,
 } from '../src/state/AnalysisSession';
-import type { AnalysisResult } from '../src/domain/analysis';
+import type { AnalysisResult, ParsedMessage } from '../src/domain/analysis';
 
 const remoteResult: AnalysisResult = {
   schemaVersion: 1,
@@ -22,6 +22,10 @@ const remoteResult: AnalysisResult = {
     },
   ],
 };
+
+const reviewedMessages: ParsedMessage[] = [
+  { id: 'line-1', sender: 'Person A', text: 'Email [EMAIL]', sourceLine: 1 },
+];
 
 function SessionHarness({ onReady }: { onReady: (session: AnalysisSessionValue) => void }) {
   const session = useAnalysisSession();
@@ -55,6 +59,78 @@ it('runs a prepared conversation through the local analyzer', () => {
   expect(session?.activeResult?.mode).toBe('local');
 });
 
+it('copies and freezes the confirmed reviewed array used by the remote attempt', () => {
+  let session: AnalysisSessionValue | undefined;
+  const mutableInput = reviewedMessages.map((message) => ({ ...message }));
+  render(
+    <AnalysisSessionProvider>
+      <SessionHarness onReady={(value) => { session = value; }} />
+    </AnalysisSessionProvider>,
+  );
+
+  let attempt: ReturnType<AnalysisSessionValue['startRemote']> | undefined;
+  act(() => {
+    session?.confirmRemoteReview(mutableInput);
+    mutableInput[0].text = 'mutated raw text';
+    attempt = session?.startRemote();
+  });
+
+  expect(session?.reviewedRemoteMessages?.[0].text).toBe('Email [EMAIL]');
+  expect(attempt?.messages[0].text).toBe('Email [EMAIL]');
+  expect(attempt?.messages).toBe(session?.reviewedRemoteMessages);
+  expect(Object.isFrozen(attempt?.messages)).toBe(true);
+  expect(Object.isFrozen(attempt?.messages[0])).toBe(true);
+});
+
+it('refuses to start remote analysis without a confirmed reviewed snapshot', () => {
+  let session: AnalysisSessionValue | undefined;
+  render(
+    <AnalysisSessionProvider>
+      <SessionHarness onReady={(value) => { session = value; }} />
+    </AnalysisSessionProvider>,
+  );
+
+  expect(() => session?.startRemote()).toThrow('REMOTE_REVIEW_REQUIRED');
+});
+
+it('clears reviewed remote text on draft change, preview preparation, and local analysis', () => {
+  let session: AnalysisSessionValue | undefined;
+  render(
+    <AnalysisSessionProvider>
+      <SessionHarness onReady={(value) => { session = value; }} />
+    </AnalysisSessionProvider>,
+  );
+
+  act(() => { session?.confirmRemoteReview(reviewedMessages); });
+  act(() => { session?.setDraft('Alex: First draft'); });
+  expect(session?.reviewedRemoteMessages).toBeNull();
+
+  act(() => { session?.confirmRemoteReview(reviewedMessages); });
+  act(() => { session?.preparePreview(); });
+  expect(session?.reviewedRemoteMessages).toBeNull();
+
+  act(() => { session?.confirmRemoteReview(reviewedMessages); });
+  act(() => { session?.runLocal(); });
+  expect(session?.reviewedRemoteMessages).toBeNull();
+});
+
+it('clears reviewed remote text on cancellation and reset', () => {
+  let session: AnalysisSessionValue | undefined;
+  render(
+    <AnalysisSessionProvider>
+      <SessionHarness onReady={(value) => { session = value; }} />
+    </AnalysisSessionProvider>,
+  );
+
+  act(() => { session?.confirmRemoteReview(reviewedMessages); });
+  act(() => { session?.cancel(); });
+  expect(session?.reviewedRemoteMessages).toBeNull();
+
+  act(() => { session?.confirmRemoteReview(reviewedMessages); });
+  act(() => { session?.reset(); });
+  expect(session?.reviewedRemoteMessages).toBeNull();
+});
+
 it('rejects a stale remote completion after local analysis starts', () => {
   let session: AnalysisSessionValue | undefined;
 
@@ -69,6 +145,7 @@ it('rejects a stale remote completion after local analysis starts', () => {
   });
   let remoteAttempt: ReturnType<AnalysisSessionValue['startRemote']> | undefined;
   act(() => {
+    session?.confirmRemoteReview(reviewedMessages);
     remoteAttempt = session?.startRemote();
   });
   act(() => {
@@ -98,6 +175,7 @@ it('rejects a stale remote completion after preparing a new preview', () => {
   });
   let remoteAttempt: ReturnType<AnalysisSessionValue['startRemote']> | undefined;
   act(() => {
+    session?.confirmRemoteReview(reviewedMessages);
     remoteAttempt = session?.startRemote();
   });
   act(() => {
@@ -125,6 +203,7 @@ it('rejects a remote completion after cancellation', () => {
 
   let remoteAttempt: ReturnType<AnalysisSessionValue['startRemote']> | undefined;
   act(() => {
+    session?.confirmRemoteReview(reviewedMessages);
     remoteAttempt = session?.startRemote();
   });
   act(() => {
@@ -153,6 +232,7 @@ it('rejects the older completion after a remote attempt is superseded', () => {
   let firstAttempt: ReturnType<AnalysisSessionValue['startRemote']> | undefined;
   let secondAttempt: ReturnType<AnalysisSessionValue['startRemote']> | undefined;
   act(() => {
+    session?.confirmRemoteReview(reviewedMessages);
     firstAttempt = session?.startRemote();
   });
   act(() => {

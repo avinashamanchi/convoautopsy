@@ -4,8 +4,8 @@ import { parseConversation } from '../src/domain/parser';
 import { SECURE_STORAGE_UNAVAILABLE_MESSAGE, SecureStorageUnavailableError, type ConsentRecord } from '../src/services/consentStore';
 
 const consent: ConsentRecord = {
-  version: '2026-08-02',
-  grantedAt: '2026-08-02T12:00:00.000Z',
+  version: '2026-08-07',
+  grantedAt: '2026-08-07T12:00:00.000Z',
   provider: 'Groq',
 };
 
@@ -64,7 +64,7 @@ it('sends only anonymous parsed Person labels with consent and a device token', 
   const requestBody = JSON.parse(String(fetchImpl.mock.calls[0][1]?.body));
   expect(requestBody).toEqual({
     schemaVersion: 1,
-    consentVersion: '2026-08-02',
+    consentVersion: '2026-08-07',
     installationToken: '4b479c21-5169-41b5-ba54-3d0c5bdb82ba',
     revenueCatAppUserId: '$RCAnonymousID:mobile-test',
     messages: [

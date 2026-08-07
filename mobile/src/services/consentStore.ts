@@ -2,7 +2,7 @@ import * as SecureStore from 'expo-secure-store';
 import type { PreferenceStore } from './reportRepository';
 import { createNativeUuid } from './uuid';
 
-export const CONSENT_VERSION = '2026-08-02' as const;
+export const CONSENT_VERSION = '2026-08-07' as const;
 export const SECURE_STORAGE_UNAVAILABLE_MESSAGE = 'Secure device storage is unavailable. On-device analysis still works.';
 
 const CONSENT_KEY = 'convoautopsy.ai-consent.v1';
