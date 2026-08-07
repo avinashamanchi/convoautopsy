@@ -113,3 +113,11 @@ it('separates RevenueCat plan verification metadata from the Groq conversation d
     'If you use a subscription, your RevenueCat app user ID may be sent to our server to verify your plan; RevenueCat does not receive your conversation text.',
   )).toBeOnTheScreen();
 });
+
+it('uses response-specific consent copy for a reviewed AI draft', () => {
+  render(<AiConsentSheet feature="response-draft" isRunning={false} onAgree={() => {}} onCancel={() => {}} />);
+
+  expect(screen.getByText('Before AI-assisted response drafting')).toBeOnTheScreen();
+  expect(screen.getByText(/The reviewed message text is sent to Groq/)).toBeOnTheScreen();
+  expect(screen.getByText(/On-device response drafts are available without sharing/)).toBeOnTheScreen();
+});

@@ -1,4 +1,11 @@
-import { AnalysisResultSchema, type AnalysisResult, type ParsedMessage } from '../domain/analysis';
+import {
+  AnalysisResultSchema,
+  ResponseDraftSchema,
+  type AnalysisResult,
+  type ParsedMessage,
+  type ResponseDraft,
+} from '../domain/analysis';
+import type { ResponseGoal, ResponseTone } from '../domain/responseCrafter';
 import { CONSENT_VERSION, SecureStorageUnavailableError, type ConsentRecord } from './consentStore';
 
 export type AiClientErrorCode =
@@ -6,6 +13,9 @@ export type AiClientErrorCode =
   | 'CANCELLED'
   | 'TIMEOUT'
   | 'RATE_LIMITED'
+  | 'PLAN_LIMIT_REACHED'
+  | 'SERVICE_BUSY'
+  | 'DAILY_BUDGET_REACHED'
   | 'SERVICE_UNAVAILABLE'
   | 'INVALID_RESPONSE'
   | 'NOT_CONFIGURED';
@@ -37,6 +47,13 @@ type AiClientDependencies = {
 type PublicErrorEnvelope = {
   error: { code: string; requestId: string; retryAfterSeconds?: number };
 };
+
+export type AiResponseRequest = Readonly<{
+  sender: string;
+  goal: ResponseGoal;
+  tone: ResponseTone;
+  analysis: AnalysisResult;
+}>;
 
 export function createAiClient({
   endpoint = process.env.EXPO_PUBLIC_AI_PROXY_URL,
@@ -122,16 +139,128 @@ export function createAiClient({
   };
 }
 
+export function createResponseClient({
+  endpoint = process.env.EXPO_PUBLIC_AI_PROXY_URL,
+  fetch: fetchPort = globalThis.fetch,
+  getConsent,
+  getInstallationToken,
+  getRevenueCatAppUserId,
+  isProduction = true,
+  timeoutMs = 20_000,
+}: AiClientDependencies) {
+  return async function craftReviewedResponse(input: AiResponseRequest, callerSignal: AbortSignal): Promise<ResponseDraft> {
+    if (callerSignal.aborted) throw new AiClientError('CANCELLED');
+    const requestController = new AbortController();
+    let timedOut = false;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    let rejectCancellation!: (reason: AiClientError) => void;
+    const abortFromCaller = () => {
+      requestController.abort();
+      rejectCancellation(new AiClientError('CANCELLED'));
+    };
+    const cancellation = new Promise<never>((_resolve, reject) => {
+      rejectCancellation = reject;
+      callerSignal.addEventListener('abort', abortFromCaller, { once: true });
+    });
+    const deadline = new Promise<never>((_resolve, reject) => {
+      timeout = setTimeout(() => {
+        timedOut = true;
+        requestController.abort();
+        reject(new AiClientError('TIMEOUT'));
+      }, timeoutMs);
+    });
+    const ensureActive = () => {
+      if (callerSignal.aborted) throw new AiClientError('CANCELLED');
+      if (timedOut || requestController.signal.aborted) throw new AiClientError('TIMEOUT');
+    };
+
+    const operation = async (): Promise<ResponseDraft> => {
+      ensureActive();
+      const reviewedInput = toReviewedResponseInput(input);
+      const consent = await getConsent();
+      ensureActive();
+      if (!consent || consent.version !== CONSENT_VERSION || consent.provider !== 'Groq') {
+        throw new AiClientError('NOT_CONFIGURED');
+      }
+      const installationToken = await getInstallationToken();
+      ensureActive();
+      const url = routeUrl(endpoint, '/v1/responses', isProduction);
+      if (!url || !fetchPort) throw new AiClientError('NOT_CONFIGURED');
+      const revenueCatAppUserId = await getRevenueCatAppUserId().catch(() => null);
+      ensureActive();
+      const response = await fetchPort(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          consentVersion: consent.version,
+          installationToken,
+          ...(revenueCatAppUserId === null ? {} : { revenueCatAppUserId }),
+          ...reviewedInput,
+        }),
+        signal: requestController.signal,
+      });
+      ensureActive();
+      const body = await readBoundedJson(response, requestController.signal);
+      ensureActive();
+      if (!response.ok) throw publicError(response, body);
+      return validResponseDraft(response, body);
+    };
+
+    try {
+      return await Promise.race([operation(), cancellation, deadline]);
+    } catch (error) {
+      if (error instanceof AiClientError) throw error;
+      if (error instanceof SecureStorageUnavailableError) throw error;
+      if (timedOut) throw new AiClientError('TIMEOUT');
+      if (callerSignal.aborted || isAbortError(error)) throw new AiClientError('CANCELLED');
+      throw new AiClientError('OFFLINE');
+    } finally {
+      if (timeout !== null) clearTimeout(timeout);
+      callerSignal.removeEventListener('abort', abortFromCaller);
+    }
+  };
+}
+
 function analysisUrl(endpoint: string | undefined, isProduction: boolean): string | null {
+  return routeUrl(endpoint, '/v1/analyses', isProduction);
+}
+
+function routeUrl(endpoint: string | undefined, path: '/v1/analyses' | '/v1/responses', isProduction: boolean): string | null {
   if (!endpoint) return null;
   try {
     const url = new URL(endpoint);
     if (isProduction && url.protocol !== 'https:') return null;
     if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
-    return new URL('/v1/analyses', url).toString();
+    return new URL(path, url).toString();
   } catch {
     return null;
   }
+}
+
+function toReviewedResponseInput(input: AiResponseRequest): AiResponseRequest {
+  if (!/^Person [A-Z]$/.test(input.sender)
+    || !['resolve', 'boundary', 'feelings', 'understand', 'apologize', 'request'].includes(input.goal)
+    || !['empathetic', 'assertive', 'deescalating', 'direct', 'diplomatic'].includes(input.tone)) {
+    throw new AiClientError('INVALID_RESPONSE');
+  }
+  const analysis = AnalysisResultSchema.safeParse({
+    schemaVersion: input.analysis.schemaVersion,
+    mode: input.analysis.mode,
+    intensityScore: input.analysis.intensityScore,
+    conflictMode: input.analysis.conflictMode,
+    messages: input.analysis.messages.map((message) => ({
+      sender: message.sender,
+      text: message.text,
+      pattern: message.pattern,
+      egoState: message.egoState,
+      possibleInterpretation: message.possibleInterpretation,
+    })),
+  });
+  if (!analysis.success || !analysis.data.messages.some(({ sender }) => sender === input.sender)) {
+    throw new AiClientError('INVALID_RESPONSE');
+  }
+  return { sender: input.sender, goal: input.goal, tone: input.tone, analysis: analysis.data };
 }
 
 function toAnonymousMessages(messages: readonly Readonly<ParsedMessage>[]) {
@@ -149,6 +278,69 @@ async function readJson(response: Response): Promise<unknown> {
   }
 }
 
+async function readBoundedJson(response: Response, signal: AbortSignal): Promise<unknown> {
+  const maximumBytes = 32_768;
+  const contentType = response.headers.get('content-type');
+  if (!contentType?.toLowerCase().startsWith('application/json')) throw new AiClientError('INVALID_RESPONSE');
+  const declaredHeader = response.headers.get('content-length');
+  if (declaredHeader !== null) {
+    const declaredLength = Number(declaredHeader);
+    if (!Number.isSafeInteger(declaredLength) || declaredLength < 0 || declaredLength > maximumBytes) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new AiClientError('INVALID_RESPONSE');
+    }
+  }
+  try {
+    const body = response.body;
+    if (body && typeof body.getReader === 'function') {
+      const reader = body.getReader();
+      const chunks: Uint8Array[] = [];
+      let totalBytes = 0;
+      const cancelReader = () => { void reader.cancel().catch(() => undefined); };
+      signal.addEventListener('abort', cancelReader, { once: true });
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (!(value instanceof Uint8Array)) throw new AiClientError('INVALID_RESPONSE');
+          totalBytes += value.byteLength;
+          if (totalBytes > maximumBytes) {
+            await reader.cancel().catch(() => undefined);
+            throw new AiClientError('INVALID_RESPONSE');
+          }
+          chunks.push(value);
+        }
+      } finally {
+        signal.removeEventListener('abort', cancelReader);
+        reader.releaseLock?.();
+      }
+      const bytes = new Uint8Array(totalBytes);
+      let offset = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown;
+    }
+
+    const text = await response.text();
+    if (utf8ByteLength(text) > maximumBytes) throw new AiClientError('INVALID_RESPONSE');
+    return JSON.parse(text) as unknown;
+  } catch (error) {
+    if (error instanceof AiClientError) throw error;
+    throw new AiClientError('INVALID_RESPONSE');
+  }
+}
+
+function utf8ByteLength(value: string): number {
+  let bytes = 0;
+  for (const character of value) {
+    const point = character.codePointAt(0)!;
+    bytes += point <= 0x7f ? 1 : point <= 0x7ff ? 2 : point <= 0xffff ? 3 : 4;
+  }
+  return bytes;
+}
+
 function validAnalysis(response: Response, body: unknown): AnalysisResult {
   if (!isRecord(body) || !hasOnlyKeys(body, ['analysis', 'requestId']) || !isRequestId(body.requestId) || !requestIdMatchesHeader(response, body.requestId)) {
     throw new AiClientError('INVALID_RESPONSE');
@@ -158,21 +350,32 @@ function validAnalysis(response: Response, body: unknown): AnalysisResult {
   return parsed.data;
 }
 
+function validResponseDraft(response: Response, body: unknown): ResponseDraft {
+  if (!isRecord(body) || !hasOnlyKeys(body, ['response', 'requestId']) || !isRequestId(body.requestId) || !requestIdMatchesHeader(response, body.requestId)) {
+    throw new AiClientError('INVALID_RESPONSE');
+  }
+  const parsed = ResponseDraftSchema.safeParse(body.response);
+  if (!parsed.success) throw new AiClientError('INVALID_RESPONSE');
+  return parsed.data;
+}
+
 function publicError(response: Response, body: unknown): AiClientError {
   if (!isPublicErrorEnvelope(body) || !requestIdMatchesHeader(response, body.error.requestId)) {
     return new AiClientError('INVALID_RESPONSE');
   }
-  if (response.status === 429 && body.error.code === 'RATE_LIMITED') {
-    const bodyRetry = validRetryAfter(body.error.retryAfterSeconds);
-    const headerRetry = validRetryAfter(Number(response.headers.get('retry-after')));
-    if (bodyRetry !== undefined && headerRetry !== undefined && bodyRetry !== headerRetry) {
-      return new AiClientError('INVALID_RESPONSE');
-    }
-    return new AiClientError('RATE_LIMITED', bodyRetry ?? headerRetry);
-  }
-  if (response.status === 503 && body.error.code === 'PROVIDER_UNAVAILABLE') {
-    return new AiClientError('SERVICE_UNAVAILABLE');
-  }
+  const publicCodeHeader = response.headers.get('x-public-error-code');
+  if (publicCodeHeader !== null && publicCodeHeader !== body.error.code) return new AiClientError('INVALID_RESPONSE');
+  const bodyRetry = validRetryAfter(body.error.retryAfterSeconds);
+  const retryHeaderValue = response.headers.get('retry-after');
+  const headerRetry = retryHeaderValue === null ? undefined : validRetryAfter(Number(retryHeaderValue));
+  if (retryHeaderValue !== null && headerRetry === undefined) return new AiClientError('INVALID_RESPONSE');
+  if (bodyRetry !== undefined && headerRetry !== undefined && bodyRetry !== headerRetry) return new AiClientError('INVALID_RESPONSE');
+  const retryAfterSeconds = bodyRetry ?? headerRetry;
+  if (response.status === 429 && body.error.code === 'RATE_LIMITED') return new AiClientError('RATE_LIMITED', retryAfterSeconds);
+  if (response.status === 429 && body.error.code === 'PLAN_LIMIT_REACHED') return new AiClientError('PLAN_LIMIT_REACHED', retryAfterSeconds);
+  if (response.status === 503 && body.error.code === 'SERVICE_BUSY') return new AiClientError('SERVICE_BUSY', retryAfterSeconds);
+  if (response.status === 503 && body.error.code === 'DAILY_BUDGET_REACHED') return new AiClientError('DAILY_BUDGET_REACHED', retryAfterSeconds);
+  if (response.status === 503 && body.error.code === 'PROVIDER_UNAVAILABLE') return new AiClientError('SERVICE_UNAVAILABLE', retryAfterSeconds);
   return new AiClientError('INVALID_RESPONSE');
 }
 
@@ -192,11 +395,11 @@ function requestIdMatchesHeader(response: Response, requestId: string): boolean 
 }
 
 function validRetryAfter(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined;
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 && value <= 31_536_000 ? value : undefined;
 }
 
 function isRequestId(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0 && value.length <= 200;
+  return typeof value === 'string' && /^[A-Za-z0-9._:-]{1,200}$/.test(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

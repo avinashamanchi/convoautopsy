@@ -1,4 +1,4 @@
-import { AiClientError, createAiClient } from '../src/services/aiClient';
+import { AiClientError, createAiClient, createResponseClient } from '../src/services/aiClient';
 import type { AnalysisResult, ParsedMessage } from '../src/domain/analysis';
 import { parseConversation } from '../src/domain/parser';
 import { SECURE_STORAGE_UNAVAILABLE_MESSAGE, SecureStorageUnavailableError, type ConsentRecord } from '../src/services/consentStore';
@@ -25,8 +25,15 @@ const aiResult: AnalysisResult = {
   ],
 };
 
+const responseDraft = {
+  id: 'reviewed-draft-1',
+  text: 'Could we pause and return to this calmly?',
+  hint: 'Review and edit before sending.',
+};
+
 function response(body: unknown, init: ResponseInit = {}) {
-  return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json', ...init.headers }, ...init });
+  const { headers, ...rest } = init;
+  return new Response(JSON.stringify(body), { status: 200, ...rest, headers: { 'content-type': 'application/json', ...headers } });
 }
 
 type FetchMock = jest.Mock<Promise<Response>, [RequestInfo | URL, RequestInit?]>;
@@ -286,4 +293,198 @@ it('requires a configured HTTPS endpoint for production', async () => {
 
   await expectCode(missing(anonymousMessages, new AbortController().signal), 'NOT_CONFIGURED');
   await expectCode(insecure(anonymousMessages, new AbortController().signal), 'NOT_CONFIGURED');
+});
+
+describe('reviewed AI response client', () => {
+  const input = {
+    sender: 'Person A',
+    goal: 'resolve' as const,
+    tone: 'direct' as const,
+    analysis: { ...aiResult, mode: 'local' as const },
+  };
+
+  function responseClient(fetchImpl: FetchMock, overrides: Partial<Parameters<typeof createResponseClient>[0]> = {}) {
+    return createResponseClient({
+      endpoint: 'https://ai.example.test',
+      fetch: fetchImpl,
+      getConsent: async () => consent,
+      getInstallationToken: async () => '4b479c21-5169-41b5-ba54-3d0c5bdb82ba',
+      getRevenueCatAppUserId: async () => '$RCAnonymousID:mobile-test',
+      ...overrides,
+    });
+  }
+
+  it('sends only the reviewed response DTO and validates the matching request ID', async () => {
+    const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockResolvedValue(response(
+      { response: responseDraft, requestId: 'req-response-1' },
+      { headers: { 'x-request-id': 'req-response-1' } },
+    ));
+
+    await expect(responseClient(fetchImpl)(input, new AbortController().signal)).resolves.toEqual(responseDraft);
+
+    expect(String(fetchImpl.mock.calls[0][0])).toBe('https://ai.example.test/v1/responses');
+    expect(JSON.parse(String(fetchImpl.mock.calls[0][1]?.body))).toEqual({
+      schemaVersion: 1,
+      consentVersion: '2026-08-07',
+      installationToken: '4b479c21-5169-41b5-ba54-3d0c5bdb82ba',
+      revenueCatAppUserId: '$RCAnonymousID:mobile-test',
+      sender: 'Person A',
+      goal: 'resolve',
+      tone: 'direct',
+      analysis: input.analysis,
+    });
+  });
+
+  it('checks current consent before any response request', async () => {
+    const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>();
+    const craft = responseClient(fetchImpl, { getConsent: async () => null });
+
+    await expectCode(craft(input, new AbortController().signal), 'NOT_CONFIGURED');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('fails closed for mismatched request IDs, extra envelope data, and unbounded drafts', async () => {
+    const cases = [
+      response({ response: responseDraft, requestId: 'req-body' }, { headers: { 'x-request-id': 'req-header' } }),
+      response({ response: responseDraft, requestId: 'req-extra', debug: 'private' }, { headers: { 'x-request-id': 'req-extra' } }),
+      response({ response: { ...responseDraft, text: 'x'.repeat(1_001) }, requestId: 'req-large' }, { headers: { 'x-request-id': 'req-large' } }),
+      new Response('{not-json', { status: 200, headers: { 'content-type': 'application/json', 'x-request-id': 'req-json' } }),
+    ];
+
+    for (const item of cases) {
+      const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockResolvedValue(item);
+      await expectCode(responseClient(fetchImpl)(input, new AbortController().signal), 'INVALID_RESPONSE');
+    }
+  });
+
+  it('stops reading and cancels a chunked response as soon as the byte cap is exceeded', async () => {
+    const cancel = jest.fn().mockResolvedValue(undefined);
+    const read = jest.fn()
+      .mockResolvedValueOnce({ done: false, value: new Uint8Array(20_000) })
+      .mockResolvedValueOnce({ done: false, value: new Uint8Array(20_000) });
+    const text = jest.fn();
+    const oversizedResponse = {
+      body: { getReader: () => ({ read, cancel }) },
+      headers: new Headers({ 'content-type': 'application/json' }),
+      ok: true,
+      status: 200,
+      text,
+    } as unknown as Response;
+    const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockResolvedValue(oversizedResponse);
+
+    await expectCode(responseClient(fetchImpl)(input, new AbortController().signal), 'INVALID_RESPONSE');
+
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(text).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [429, 'RATE_LIMITED', 'RATE_LIMITED'],
+    [429, 'PLAN_LIMIT_REACHED', 'PLAN_LIMIT_REACHED'],
+    [503, 'SERVICE_BUSY', 'SERVICE_BUSY'],
+    [503, 'DAILY_BUDGET_REACHED', 'DAILY_BUDGET_REACHED'],
+    [503, 'PROVIDER_UNAVAILABLE', 'SERVICE_UNAVAILABLE'],
+  ] as const)('maps content-free public response failure %s/%s', async (status, serverCode, expectedCode) => {
+    const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockResolvedValue(response(
+      { error: { code: serverCode, requestId: `req-${serverCode}`, retryAfterSeconds: 31 } },
+      {
+        status,
+        headers: {
+          'retry-after': '31',
+          'x-public-error-code': serverCode,
+          'x-request-id': `req-${serverCode}`,
+        },
+      },
+    ));
+
+    await expect(responseClient(fetchImpl)(input, new AbortController().signal)).rejects.toEqual(
+      expect.objectContaining({ code: expectedCode, retryAfterSeconds: 31, message: expectedCode }),
+    );
+  });
+
+  it('uses one deadline across consent lookup and never starts a late request', async () => {
+    jest.useFakeTimers();
+    const consentLookup = deferred<ConsentRecord | null>();
+    const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>();
+    const request = responseClient(fetchImpl, { getConsent: () => consentLookup.promise, timeoutMs: 25 })(input, new AbortController().signal);
+    const expectation = expectCode(request, 'TIMEOUT');
+
+    await jest.advanceTimersByTimeAsync(25);
+    consentLookup.resolve(consent);
+    await expectation;
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(jest.getTimerCount()).toBe(0);
+    jest.useRealTimers();
+  });
+
+  it('keeps TIMEOUT semantics while canceling a stalled streamed response body', async () => {
+    jest.useFakeTimers();
+    let rejectRead!: (reason?: unknown) => void;
+    const read = jest.fn(() => new Promise<ReadableStreamReadResult<Uint8Array>>((_resolve, reject) => { rejectRead = reject; }));
+    const cancel = jest.fn().mockImplementation(() => {
+      rejectRead(new DOMException('aborted', 'AbortError'));
+      return Promise.resolve();
+    });
+    const stalledResponse = {
+      body: { getReader: () => ({ read, cancel }) },
+      headers: new Headers({ 'content-type': 'application/json' }),
+      ok: true,
+      status: 200,
+      text: jest.fn(),
+    } as unknown as Response;
+    const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockResolvedValue(stalledResponse);
+    const request = responseClient(fetchImpl, { timeoutMs: 25 })(input, new AbortController().signal);
+    const expectation = expectCode(request, 'TIMEOUT');
+
+    await jest.advanceTimersByTimeAsync(25);
+    await expectation;
+
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(0);
+    jest.useRealTimers();
+  });
+
+  it('keeps CANCELLED semantics while canceling a stalled streamed response body', async () => {
+    let rejectRead!: (reason?: unknown) => void;
+    const readStarted = deferred<void>();
+    const read = jest.fn(() => {
+      readStarted.resolve();
+      return new Promise<ReadableStreamReadResult<Uint8Array>>((_resolve, reject) => { rejectRead = reject; });
+    });
+    const cancel = jest.fn().mockImplementation(() => {
+      rejectRead(new DOMException('aborted', 'AbortError'));
+      return Promise.resolve();
+    });
+    const stalledResponse = {
+      body: { getReader: () => ({ read, cancel }) },
+      headers: new Headers({ 'content-type': 'application/json' }),
+      ok: true,
+      status: 200,
+      text: jest.fn(),
+    } as unknown as Response;
+    const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>().mockResolvedValue(stalledResponse);
+    const controller = new AbortController();
+    const request = responseClient(fetchImpl)(input, controller.signal);
+    await readStarted.promise;
+
+    controller.abort();
+
+    await expectCode(request, 'CANCELLED');
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels the whole response operation before a pending lookup can dispatch', async () => {
+    const tokenLookup = deferred<string>();
+    const fetchImpl = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>();
+    const controller = new AbortController();
+    const request = responseClient(fetchImpl, { getInstallationToken: () => tokenLookup.promise })(input, controller.signal);
+
+    controller.abort();
+    tokenLookup.resolve('4b479c21-5169-41b5-ba54-3d0c5bdb82ba');
+
+    await expectCode(request, 'CANCELLED');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
 });
