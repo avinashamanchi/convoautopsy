@@ -10,9 +10,36 @@ export type SavedReport = {
   responseDrafts: ResponseDraft[];
 };
 
+export type SavedReportListItem = Pick<SavedReport, 'id' | 'title' | 'createdAt' | 'updatedAt'>;
+
+export type ReportCursor = Readonly<{
+  updatedAt: string;
+  id: string;
+}>;
+
+export type ReportPageRequest = Readonly<{
+  query?: string;
+  cursor?: ReportCursor;
+  limit?: number;
+}>;
+
+export type ReportPage = Readonly<{
+  items: readonly SavedReportListItem[];
+  nextCursor: ReportCursor | null;
+}>;
+
+export type TrendSummary = Readonly<{
+  reportCount: number;
+  averageIntensity: number | null;
+  conflictModes: Readonly<Partial<Record<AnalysisResult['conflictMode'], number>>>;
+  patterns: Readonly<Partial<Record<AnalysisResult['messages'][number]['pattern'], number>>>;
+}>;
+
 export interface ReportRepository {
   initialize(): Promise<void>;
-  list(query?: string): Promise<SavedReport[]>;
+  listPage(request?: ReportPageRequest): Promise<ReportPage>;
+  count(): Promise<number>;
+  getTrendSummary(fromInclusive: string, toExclusive: string): Promise<TrendSummary>;
   get(id: string): Promise<SavedReport | null>;
   save(report: SavedReport): Promise<void>;
   delete(id: string): Promise<void>;

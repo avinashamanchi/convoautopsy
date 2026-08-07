@@ -61,16 +61,22 @@ class MemoryReportRepository implements ReportRepository {
       throw new Error('storage unavailable');
     }
   }
-  async list(query?: string) {
+  async listPage({ query, cursor, limit = 50 }: Parameters<ReportRepository['listPage']>[0] = {}) {
     if (this.listFailures > 0) {
       this.listFailures -= 1;
       throw new Error('list unavailable');
     }
     const needle = query?.toLocaleLowerCase() ?? '';
-    return this.reports
+    const matching = this.reports
       .filter((report) => report.title.toLocaleLowerCase().includes(needle))
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || right.id.localeCompare(left.id));
+    const start = cursor ? matching.findIndex((report) => report.id === cursor.id) + 1 : 0;
+    const items = matching.slice(start, start + Math.min(50, limit)).map(({ id, title, createdAt, updatedAt }) => ({ id, title, createdAt, updatedAt }));
+    const last = items.at(-1);
+    return { items, nextCursor: start + items.length < matching.length && last ? { id: last.id, updatedAt: last.updatedAt } : null };
   }
+  async count() { return this.reports.length; }
+  async getTrendSummary() { return { reportCount: 0, averageIntensity: null, conflictModes: {}, patterns: {} }; }
   async get(id: string) { return this.reports.find((report) => report.id === id) ?? null; }
   async save(report: SavedReport) {
     if (this.saveError) throw this.saveError;
@@ -144,7 +150,7 @@ it('shows a useful empty history state', async () => {
   expect(view.UNSAFE_getByType(FlatList).props.testID).toBe('history-list');
 });
 
-it('virtualizes a large report history instead of mounting every row in a plain view', async () => {
+it('loads only the first bounded page of a large report history', async () => {
   const reports = Array.from({ length: 200 }, (_, index) => savedReport({ id: `report-${index}`, title: `Report ${index}` }));
   const view = renderHistory(new MemoryReportRepository(reports));
 
@@ -153,7 +159,7 @@ it('virtualizes a large report history instead of mounting every row in a plain 
     await Promise.resolve();
     await Promise.resolve();
   });
-  expect(view.UNSAFE_getByType(FlatList).props.data).toHaveLength(200);
+  expect(view.UNSAFE_getByType(FlatList).props.data).toHaveLength(50);
   expect(view.UNSAFE_getByType(FlatList).props.keyboardShouldPersistTaps).toBe('handled');
   act(() => {
     view.unmount();

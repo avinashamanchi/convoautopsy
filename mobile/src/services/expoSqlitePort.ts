@@ -3,7 +3,7 @@ import type { SqlitePort, SqliteValue } from './sqliteReportRepository';
 
 type NativeSqliteConnection = {
   runAsync(sql: string, params: readonly SqliteValue[]): Promise<unknown>;
-  getAllAsync<T>(sql: string, params: readonly string[]): Promise<T[]>;
+  getAllAsync<T>(sql: string, params: readonly SqliteValue[]): Promise<T[]>;
   withExclusiveTransactionAsync(
     action: (transaction: NativeSqliteConnection) => Promise<void>,
   ): Promise<void>;
@@ -12,12 +12,16 @@ type NativeSqliteConnection = {
 function adapt(connection: NativeSqliteConnection): SqlitePort {
   return {
     async transaction(action) {
-      await connection.withExclusiveTransactionAsync(async (transaction) => action(adapt(transaction)));
+      let result: Awaited<ReturnType<typeof action>>;
+      await connection.withExclusiveTransactionAsync(async (transaction) => {
+        result = await action(adapt(transaction));
+      });
+      return result!;
     },
     async execute(sql: string, params: readonly SqliteValue[] = []) {
       await connection.runAsync(sql, params);
     },
-    async query<T>(sql: string, params: readonly string[] = []) {
+    async query<T>(sql: string, params: readonly SqliteValue[] = []) {
       return connection.getAllAsync<T>(sql, params);
     },
   };

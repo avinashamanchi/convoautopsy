@@ -1,5 +1,5 @@
 import type { AnalysisResult } from '../src/domain/analysis';
-import type { ReportRepository, SavedReport } from '../src/services/reportRepository';
+import type { ReportPage, ReportRepository, SavedReport } from '../src/services/reportRepository';
 import {
   RepositoryInvalidatedError,
   createInvalidatingReportRepository,
@@ -21,6 +21,12 @@ const report: SavedReport = {
   updatedAt: '2026-08-02T00:00:00.000Z', sourceText: 'Alex: retained source', result, responseDrafts: [],
 };
 
+const emptyTrends = async () => ({ reportCount: 0, averageIntensity: null, conflictModes: {}, patterns: {} });
+const page = (reports: readonly SavedReport[]): ReportPage => ({
+  items: reports.map(({ id, title, createdAt, updatedAt }) => ({ id, title, createdAt, updatedAt })),
+  nextCursor: null,
+});
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (error: unknown) => void;
@@ -32,10 +38,12 @@ function deferred<T>() {
 }
 
 it('rejects an in-flight read completed after the delete boundary', async () => {
-  const pendingList = deferred<SavedReport[]>();
+  const pendingList = deferred<ReportPage>();
   const repository: ReportRepository = {
     initialize: async () => {},
-    list: async () => pendingList.promise,
+    listPage: async () => pendingList.promise,
+    count: async () => 0,
+    getTrendSummary: emptyTrends,
     get: async () => null,
     save: async () => {},
     delete: async () => {},
@@ -43,9 +51,9 @@ it('rejects an in-flight read completed after the delete boundary', async () => 
   };
   const coordinated = createInvalidatingReportRepository(repository);
 
-  const staleRead = coordinated.list();
+  const staleRead = coordinated.listPage();
   await coordinated.deleteAll();
-  pendingList.resolve([report]);
+  pendingList.resolve(page([report]));
 
   await expect(staleRead).rejects.toBeInstanceOf(RepositoryInvalidatedError);
 });
@@ -56,7 +64,9 @@ it('serializes delete after an already-started save so retained source cannot re
   let saveStarted = false;
   const repository: ReportRepository = {
     initialize: async () => {},
-    list: async () => [...reports],
+    listPage: async () => page(reports),
+    count: async () => reports.length,
+    getTrendSummary: emptyTrends,
     get: async (id) => reports.find((item) => item.id === id) ?? null,
     async save(next) {
       saveStarted = true;
@@ -76,13 +86,13 @@ it('serializes delete after an already-started save so retained source cannot re
 
   await expect(staleSave).rejects.toBeInstanceOf(RepositoryInvalidatedError);
   await deletion;
-  await expect(coordinated.list()).resolves.toEqual([]);
+  await expect(coordinated.listPage()).resolves.toEqual(page([]));
   expect(reports.some((item) => item.sourceText?.includes('retained source'))).toBe(false);
 });
 
 it('publishes revisions for successful save, delete, and delete-all transitions', async () => {
   const repository: ReportRepository = {
-    initialize: async () => {}, list: async () => [], get: async () => null,
+    initialize: async () => {}, listPage: async () => page([]), count: async () => 0, getTrendSummary: emptyTrends, get: async () => null,
     save: async () => {}, delete: async () => {}, deleteAll: async () => {},
   };
   const coordinated = createInvalidatingReportRepository(repository);
@@ -105,7 +115,9 @@ it('accepts only one concurrent free save at the ten-report boundary without del
   const reports = Array.from({ length: 9 }, (_, index) => ({ ...report, id: `existing-${index}` }));
   const repository: ReportRepository = {
     initialize: async () => {},
-    list: async () => [...reports],
+    listPage: async () => { throw new Error('save gate must not enumerate reports'); },
+    count: async () => reports.length,
+    getTrendSummary: emptyTrends,
     get: async (id) => reports.find((item) => item.id === id) ?? null,
     async save(next) { reports.push(next); },
     async delete() {},
@@ -129,7 +141,7 @@ it('accepts only one concurrent free save at the ten-report boundary without del
 it('does not limit Pro saves', async () => {
   const reports = Array.from({ length: 10 }, (_, index) => ({ ...report, id: `existing-${index}` }));
   const repository: ReportRepository = {
-    initialize: async () => {}, list: async () => [...reports], get: async () => null,
+    initialize: async () => {}, listPage: async () => page(reports), count: async () => { throw new Error('Pro save must not count history'); }, getTrendSummary: emptyTrends, get: async () => null,
     async save(next) { reports.push(next); }, delete: async () => {}, deleteAll: async () => {},
   };
 

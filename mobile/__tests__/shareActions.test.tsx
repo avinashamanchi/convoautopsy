@@ -59,7 +59,11 @@ const result: AnalysisResult = {
 class MemoryRepository implements ReportRepository {
   constructor(private readonly report: SavedReport | null) {}
   async initialize() {}
-  async list() { return this.report ? [this.report] : []; }
+  async listPage() {
+    return { items: this.report ? [{ id: this.report.id, title: this.report.title, createdAt: this.report.createdAt, updatedAt: this.report.updatedAt }] : [], nextCursor: null };
+  }
+  async count() { return this.report ? 1 : 0; }
+  async getTrendSummary() { return { reportCount: 0, averageIntensity: null, conflictModes: {}, patterns: {} }; }
   async get() { return this.report; }
   async save() {}
   async delete() {}

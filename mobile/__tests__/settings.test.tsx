@@ -16,7 +16,8 @@ jest.mock('../src/state/AnalysisSession', () => ({
 }));
 
 const repository: ReportRepository = {
-  initialize: async () => {}, list: async () => [], get: async () => null,
+  initialize: async () => {}, listPage: async () => ({ items: [], nextCursor: null }), count: async () => 0,
+  getTrendSummary: async () => ({ reportCount: 0, averageIntensity: null, conflictModes: {}, patterns: {} }), get: async () => null,
   save: async () => {}, delete: async () => {}, deleteAll: async () => {},
 };
 const preferences: PreferenceStore = {

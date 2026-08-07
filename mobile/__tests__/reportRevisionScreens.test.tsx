@@ -29,7 +29,9 @@ class MemoryRepository implements ReportRepository {
   deleteGate: Promise<void> | null = null;
   releaseDelete: (() => void) | null = null;
   async initialize() {}
-  async list() { return [...this.reports]; }
+  async listPage() { return { items: this.reports.map(({ id, title, createdAt, updatedAt }) => ({ id, title, createdAt, updatedAt })), nextCursor: null }; }
+  async count() { return this.reports.length; }
+  async getTrendSummary() { return { reportCount: 0, averageIntensity: null, conflictModes: {}, patterns: {} }; }
   async get(id: string) { return this.reports.find((item) => item.id === id) ?? null; }
   async save(next: SavedReport) { this.reports = [next]; }
   async delete(id: string) { this.reports = this.reports.filter((item) => item.id !== id); }

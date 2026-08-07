@@ -58,11 +58,13 @@ export function createInvalidatingReportRepository(repository: ReportRepository)
 
   return {
     initialize: () => repository.initialize(),
-    list: (query) => read(() => repository.list(query)),
+    listPage: (request) => read(() => repository.listPage(request)),
+    count: () => read(() => repository.count()),
+    getTrendSummary: (fromInclusive, toExclusive) => read(() => repository.getTrendSummary(fromInclusive, toExclusive)),
     get: (id) => read(() => repository.get(id)),
     save: (report: SavedReport) => mutate(() => repository.save(report)),
     saveIfAllowed: (report: SavedReport, pro: boolean) => mutate(async () => {
-      const gate = canSaveReport((await repository.list()).length, pro);
+      const gate = pro ? canSaveReport(0, true) : canSaveReport(await repository.count(), false);
       if (!gate.allowed) return gate;
       await repository.save(report);
       return gate;

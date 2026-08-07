@@ -1,9 +1,9 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import type { SavedReport } from '../services/reportRepository';
+import type { SavedReportListItem } from '../services/reportRepository';
 import { tokens } from '../theme/tokens';
 
 type ReportListItemProps = {
-  report: SavedReport;
+  report: SavedReportListItem;
   onDelete(): void;
   onOpen(): void;
   testID?: string;

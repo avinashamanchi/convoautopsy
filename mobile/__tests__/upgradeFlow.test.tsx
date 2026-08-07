@@ -73,7 +73,9 @@ class MemoryRepository implements ReportRepository {
 
   constructor(reports: SavedReport[]) { this.reports = reports; }
   async initialize() {}
-  async list() { return [...this.reports]; }
+  async listPage() { return { items: this.reports.map(({ id, title, createdAt, updatedAt }) => ({ id, title, createdAt, updatedAt })), nextCursor: null }; }
+  async count() { return this.reports.length; }
+  async getTrendSummary() { return { reportCount: 0, averageIntensity: null, conflictModes: {}, patterns: {} }; }
   async get(id: string) { return this.reports.find((report) => report.id === id) ?? null; }
   async delete(id: string) { this.reports = this.reports.filter((report) => report.id !== id); }
   async deleteAll() { this.reports = []; }
