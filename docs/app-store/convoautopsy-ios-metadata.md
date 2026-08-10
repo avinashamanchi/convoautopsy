@@ -1,14 +1,23 @@
 # ConvoAutopsy iOS metadata
 
-Initial fields, reviewed 2026-08-07 (revise only if App Store Connect rejects a length or category):
+Initial fields, reviewed 2026-08-09 against Apple's current metadata limits (revise if App Store Connect rejects a field or category):
 
 - Name: `ConvoAutopsy`
 - Subtitle: `See conversation patterns`
 - Primary category: `Lifestyle`
-- Keywords: `communication,conflict,reflection,relationships,clarity,response,dialogue,tone`
+- Keywords: `communication,conflict,reflection,relationships,clarity,response,dialogue,tone,messages,insight` (95 UTF-8 bytes; no spaces)
 - Support URL: `https://avinashamanchi.github.io/convoautopsy/support.html`
 - Privacy URL: `https://avinashamanchi.github.io/convoautopsy/privacy.html`
 - Terms of Use URL: `https://avinashamanchi.github.io/convoautopsy/terms.html`
+
+App Store record draft:
+
+- Primary language: `English (U.S.)`
+- SKU: `convoautopsy-ios`
+- Copyright year: `2026` (confirm the legal seller/rights-holder name in the authorized account)
+- Content rights: confirm the final answer in App Store Connect against imported user-provided conversations and the Terms; do not infer it from source code
+- Digital Services Act status: account-holder decision required; do not infer trader/non-trader status
+- Availability: begin with the storefronts the account holder can legally support; do not select China mainland or other documentation-gated regions by default
 
 Description opening: `Reflect on difficult conversations with on-device pattern estimates, optional AI-assisted feedback, private local history, and response drafts you control.`
 
@@ -33,4 +42,4 @@ ConvoAutopsy has an on-device mode that works without an account or purchase. Be
 
 ## Truthful release status
 
-This metadata is code-prepared only. The proxy and legal-page changes are not deployed, the Swift OCR module has not been compiled in an iOS development build, and Expo Go has a documented OCR fallback. On 2026-08-07 the public Privacy, Terms, and Support URLs returned HTTP 404. Apple/RevenueCat/Cloudflare/EAS configuration, signed purchase and restore tests, TestFlight, screenshots, App Store Connect forms, upload, review, acceptance, publication, and post-publication URL checks are not complete. Historical proxy-token revocation/purge remains a release blocker until a deployed proxy’s retention and deletion behavior is verified.
+This metadata is code-prepared only. The proxy and legal-page changes are not deployed, the Swift OCR module has not been compiled in an iOS development build, and Expo Go has a documented OCR fallback. On 2026-08-09 the public Privacy, Terms, and Support URLs still returned HTTP 404. Apple/RevenueCat/Cloudflare/EAS configuration, signed purchase and restore tests, TestFlight, screenshots, App Store Connect forms, upload, review, acceptance, publication, and post-publication URL checks are not complete. Historical proxy-token revocation/purge remains a release blocker until a deployed proxy’s retention and deletion behavior is verified.

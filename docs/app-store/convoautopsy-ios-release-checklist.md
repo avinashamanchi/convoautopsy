@@ -2,6 +2,8 @@
 
 This checklist separates repository state from credentialed and externally observed state. A checked code item is not evidence of a signed build, TestFlight result, App Store acceptance, or publication.
 
+Current audit date: 2026-08-09.
+
 ## Code-complete repository gates
 
 - [x] Bundle and Maestro app ID are `com.avinashamanchi.convoautopsy`; the app is iPhone-only and declares `ios.usesAppleSignIn: false` because it offers no account or Apple sign-in.
@@ -27,11 +29,11 @@ This checklist separates repository state from credentialed and externally obser
 
 Do not reuse an earlier commit’s results for a later candidate. Record fresh evidence here only after all commands complete.
 
-- [x] Full root: 12 test files / 55 tests, zero-warning source lint, and production build passed locally under Node 22. The documented large-chunk warning remains visible.
-- [x] Full mobile: 38 suites / 358 tests, TypeScript, declared lint, Expo Doctor 18/18, and iOS Expo export passed locally under Node 22.
-- [x] Full Worker: 10 files / 126 tests, TypeScript, zero-warning lint, production dry build, and local-fixture dry build passed locally under Node 22.
+- [x] Full root: 15 test files / 119 tests, zero-warning source lint, and production build passed locally under Node 22. The documented large-chunk warning remains visible.
+- [x] Full mobile: 38 suites / 410 tests, TypeScript, declared lint, Expo Doctor 18/18 in the release checkout, and iOS Expo export passed locally under Node 22. The exact staged-snapshot typecheck also passed without relying on ignored generated declarations.
+- [x] Full Worker: 11 files / 193 tests, TypeScript, zero-warning lint, production dry build, and local-fixture dry build passed locally under Node 22.
 - [x] Redacted scan of tracked files plus web, mobile, production Worker, and fixture Worker outputs passed.
-- [x] Production dependency audits with `--omit=dev --audit-level=high` returned 0 vulnerabilities for all three lockfiles.
+- [x] Root and Worker production dependency audits with `--omit=dev --audit-level=high` returned 0 vulnerabilities at the current audit. The mobile audit now reports the two high-severity `image-size` parser advisories through Expo/Metro (12 transitive findings); npm offers only a forced breaking Expo downgrade, so the candidate records the risk instead of applying that unsafe remediation.
 - [x] Missing and sanitized-example production Expo configs exited nonzero; a synthetic valid config passed with the authoritative bundle ID and neither public value in `extra`.
 - [x] The first exact short local fixture run stopped at `LOAD_GATE_CAPACITY` after 65 successful scheduled samples. Four identical subsequent runs passed 100/101 with zero leaks. The independent controller then ran three more consecutive identical 100/101 gates successfully, and the review-fix candidate added another successful 100/101 run. The original anomaly remains preserved verbatim in the Task 8B report rather than being erased.
 - [x] Workflow/publication tests, YAML structure checks, `git diff --check`, and explicit exclusion checks are part of the final candidate verification. The ignored report preserves commands and results.
@@ -57,7 +59,7 @@ Historical note: commit `d2a02edbced8d3984058ebc0814b97612824ac22` had a separat
 - [ ] Enter `GROQ_API_KEY`, `REVENUECAT_SECRET_API_KEY`, and `RATE_LIMIT_HMAC_SECRET` only in the Cloudflare secret store; deploy and verify the production Worker.
 - [ ] Revoke any historical exposed provider/GitHub token and complete an authorized history purge if required. Scanner output must remain redacted.
 - [ ] Configure the EAS project and production environment variables, log in, and create a signed development/production build with the required current Xcode/iOS SDK toolchain.
-- [ ] Publish the Privacy, Terms, and Support pages and confirm anonymous HTTP 200 responses at the exact metadata URLs. The 2026-08-07 pre-publication check returned HTTP 404 for all three.
+- [ ] Publish the Privacy, Terms, and Support pages and confirm anonymous HTTP 200 responses at the exact metadata URLs. Fresh anonymous checks on 2026-08-09 returned HTTP 404 for all three.
 
 ## Signed device and TestFlight pending — all unchecked
 
@@ -72,14 +74,15 @@ Historical note: commit `d2a02edbced8d3984058ebc0814b97612824ac22` had a separat
 
 - [ ] Reconcile App Privacy answers with the exact release binary, RevenueCat/Apple SDK privacy manifests, server behavior, and Apple’s current definitions.
 - [ ] Complete age rating, export compliance, subscription review details, localization, screenshots, support/privacy/terms URLs, and review notes.
+- [ ] Complete primary language, SKU, seller/copyright, categories, content-rights declaration, availability, and Digital Services Act status in the authorized App Store Connect account.
 - [ ] Upload the exact verified signed build and confirm processing in App Store Connect.
 - [ ] Submit for review and observe Apple’s actual review outcome.
 - [ ] If accepted, release according to the chosen schedule and verify the live listing, legal links, products, purchase, and restore.
 
 ## Current environment limitations
 
-- [ ] The local machine has only Command Line Tools selected, with no usable full Xcode/CocoaPods archive proof.
-- [ ] EAS was observed as `Not logged in` on 2026-08-07; no EAS build or submission is inferred.
+- [ ] The local machine has only Command Line Tools selected and no usable full Xcode archive proof. CocoaPods 1.17.0 is now installed, but CocoaPods alone cannot compile or sign the candidate.
+- [ ] EAS was observed as `Not logged in` again on 2026-08-09; no EAS build or submission is inferred.
 - [ ] The AI proxy is not deployed and no Cloudflare, Groq, RevenueCat secret, Expo, Apple, or signing credential has been entered into this repository.
 
 No App Store acceptance, publication, legal-URL availability, external configuration, or signed-device result is claimed by this checklist.

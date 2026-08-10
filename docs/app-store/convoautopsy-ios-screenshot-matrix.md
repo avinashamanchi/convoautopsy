@@ -1,6 +1,6 @@
 # ConvoAutopsy iOS screenshot matrix
 
-Official Apple screenshot specifications rechecked 2026-08-07. App Store Connect accepts one to ten screenshots per device size in PNG/JPEG without alpha.
+Official Apple screenshot specifications rechecked 2026-08-09. App Store Connect accepts one to ten screenshots per device size in PNG/JPEG without alpha.
 
 `supportsTablet` is false, so the current release needs an iPhone set and does not claim iPad support.
 
