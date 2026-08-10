@@ -1,6 +1,6 @@
 # ConvoAutopsy iOS metadata
 
-Initial fields, reviewed 2026-08-09 against Apple's current metadata limits (revise if App Store Connect rejects a field or category):
+Initial fields, reviewed 2026-08-10 against Apple's current metadata limits (revise if App Store Connect rejects a field or category). The complete policy decision record is `apple-review-guideline-applicability.md`:
 
 - Name: `ConvoAutopsy`
 - Subtitle: `See conversation patterns`
@@ -38,7 +38,9 @@ Propose 13+ because users may enter mature relationship language. Accept the rat
 
 ## Review note
 
-ConvoAutopsy has an on-device mode that works without an account or purchase. Before optional AI-assisted analysis or one AI-assisted draft, the app shows the exact reviewed text and discloses that it is sent through Cloudflare to Groq only after confirmation and consent; users can choose local analysis and local drafts instead. The app never sends messages automatically. To test the local path, use **Analyze → Review → Run on-device analysis**. Purchases and restore require a signed development, TestFlight, or App Store build; Expo Go is preview-only for billing.
+No credentials are required. ConvoAutopsy has an on-device mode that works without an account or purchase. To test it, use **Analyze → paste synthetic text → Review → Run on-device analysis**, save a private report, inspect free Private Trends, create a local response draft, then use Settings → Delete All. Before optional AI-assisted analysis or one AI-assisted draft, the app shows the exact reviewed data and discloses that it is sent through Cloudflare to Groq only after confirmation and consent; users can choose local analysis and local drafts instead. The app never sends messages automatically. The Convo Pro screen provides Continue Free, Restore Purchases, direct Apple subscription management, Apple's purchase/refund help, Privacy, and Terms. Purchases and restore require a signed development, TestFlight, or App Store build; Expo Go is preview-only for billing.
+
+Exact products are `com.avinashamanchi.convoautopsy.pro.monthly` and `com.avinashamanchi.convoautopsy.pro.annual` in one `Convo Pro` subscription group. Offer codes, win-back offers, promoted IAP, Family Sharing, and external digital payments are disabled for v1. Apple determines refund eligibility.
 
 ## Truthful release status
 

@@ -11,6 +11,7 @@ import type { BillingService, BillingSnapshot } from '../src/billing/contracts';
 import { ReportRepositoryProvider } from '../src/services/reportRepositoryContext';
 import type { AnalysisResult } from '../src/domain/analysis';
 import type { PreferenceStore, ReportRepository, SavedReport } from '../src/services/reportRepository';
+import { legalLinks } from '../src/legal/links';
 
 jest.mock('expo-router', () => ({ router: { back: jest.fn(), push: jest.fn(), replace: jest.fn() } }));
 jest.mock('../src/state/AnalysisSession', () => ({
@@ -126,6 +127,7 @@ it('states the exact Free and Pro local, storage, and remote fair-use allowances
 });
 
 it('discloses renewal, cancellation, restore, uninstall, and App Store account behavior', async () => {
+  const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
   renderUpgrade(createBillingService(ready));
 
   expect(await screen.findByText(/Apple ID is charged when you confirm a purchase/)).toBeTruthy();
@@ -134,6 +136,11 @@ it('discloses renewal, cancellation, restore, uninstall, and App Store account b
   expect(screen.getByText(/Manage or cancel in your App Store account settings/)).toBeTruthy();
   expect(screen.getByText(/Uninstalling ConvoAutopsy or deleting app data does not cancel/)).toBeTruthy();
   expect(screen.getByText(/Restore Purchases checks this App Store account/)).toBeTruthy();
+  fireEvent.press(screen.getByRole('link', { name: 'Manage Apple subscription' }));
+  fireEvent.press(screen.getByRole('link', { name: 'Apple purchase and refund help' }));
+  expect(openURL).toHaveBeenNthCalledWith(1, legalLinks.manageSubscriptions);
+  expect(openURL).toHaveBeenNthCalledWith(2, legalLinks.purchaseSupport);
+  openURL.mockRestore();
 });
 
 it('describes Expo Go as preview-only and names the native purchase test builds', async () => {

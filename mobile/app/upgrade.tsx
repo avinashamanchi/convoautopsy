@@ -1,9 +1,10 @@
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useBilling } from '../src/billing/BillingProvider';
 import { PrimaryButton } from '../src/components/PrimaryButton';
 import { Screen } from '../src/components/Screen';
+import { legalLinks } from '../src/legal/links';
 import { tokens } from '../src/theme/tokens';
 
 type PurchaseOutcome = 'idle' | 'purchasing' | 'finishing' | 'cancelled' | 'success' | 'failed';
@@ -102,6 +103,12 @@ export default function UpgradeScreen() {
         <PrimaryButton label="Continue Free" onPress={() => router.back()} />
         <Text style={styles.legalCopy}>Your Apple ID is charged when you confirm a purchase. A monthly or annual subscription automatically renews unless canceled at least 24 hours before the current billing period ends. Your Apple ID may be charged for renewal within 24 hours before the current period ends. Manage or cancel in your App Store account settings.</Text>
         <Text style={styles.legalCopy}>Uninstalling ConvoAutopsy or deleting app data does not cancel a subscription. Restore Purchases checks this App Store account for an eligible Convo Pro purchase.</Text>
+        <Pressable accessibilityRole="link" onPress={() => { void Linking.openURL(legalLinks.manageSubscriptions); }} style={styles.externalLink}>
+          <Text style={styles.externalLinkText}>Manage Apple subscription</Text>
+        </Pressable>
+        <Pressable accessibilityRole="link" onPress={() => { void Linking.openURL(legalLinks.purchaseSupport); }} style={styles.externalLink}>
+          <Text style={styles.externalLinkText}>Apple purchase and refund help</Text>
+        </Pressable>
         <View style={styles.legal}>
           <PrimaryButton label="Privacy" onPress={() => router.push('/privacy')} />
           <PrimaryButton label="Terms of Use" onPress={() => router.push('/terms')} />
@@ -123,6 +130,8 @@ const styles = StyleSheet.create({
   notice: { color: tokens.colors.textSecondary, fontSize: 15, lineHeight: 22 },
   success: { color: tokens.colors.success, fontSize: 15, lineHeight: 22 },
   error: { color: tokens.colors.error, fontSize: 15, lineHeight: 22 },
+  externalLink: { justifyContent: 'center', minHeight: tokens.minTouchTarget },
+  externalLinkText: { color: tokens.colors.accent, fontSize: 15, fontWeight: '700' },
   legalCopy: { color: tokens.colors.textSecondary, fontSize: 13, lineHeight: 19 },
   legal: { gap: tokens.spacing.sm },
 });

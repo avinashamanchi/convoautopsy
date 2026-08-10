@@ -5,6 +5,9 @@ import { resolve } from 'node:path';
 
 type Environment = Readonly<Record<string, string | undefined>>;
 type ConfigFactory = (environment: Environment) => typeof appConfig;
+const { stripDevelopmentNetworkKeys } = require('../plugins/withReleaseNetworkPolicy.cjs') as {
+  stripDevelopmentNetworkKeys: (value: Record<string, unknown>) => Record<string, unknown>;
+};
 
 const createAppConfig = (environment: Environment) => {
   const factory = (appConfigModule as unknown as { createAppConfig?: ConfigFactory }).createAppConfig;
@@ -26,6 +29,21 @@ describe('App Store release configuration', () => {
     });
     expect(appConfig.extra).not.toHaveProperty('aiProxyUrl');
     expect(appConfig.extra).not.toHaveProperty('revenueCatIosApiKey');
+    expect(appConfig.plugins).toContain('./plugins/withReleaseNetworkPolicy.cjs');
+  });
+
+  it('enforces HTTPS-only transport and removes development discovery from production plists', () => {
+    expect(stripDevelopmentNetworkKeys({
+      NSBonjourServices: ['_expo._tcp'],
+      NSLocalNetworkUsageDescription: 'Development server discovery',
+      NSAppTransportSecurity: {
+        NSAllowsArbitraryLoads: true,
+        NSAllowsArbitraryLoadsForMedia: true,
+        NSAllowsArbitraryLoadsInWebContent: true,
+        NSAllowsLocalNetworking: true,
+        NSExceptionDomains: { localhost: { NSExceptionAllowsInsecureHTTPLoads: true } },
+      },
+    })).toEqual({ NSAppTransportSecurity: { NSAllowsArbitraryLoads: false } });
   });
 
   it.each([

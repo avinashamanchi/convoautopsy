@@ -26,7 +26,7 @@ Private Trends is not a subscription benefit. The paid value proposition is unli
 - `mobile/eas.json`: credential-free store build profile with remote versioning and automatic build-number increment.
 - `mobile/src/billing/contracts.ts`: entitlement and product IDs plus billing periods.
 - `mobile/src/billing/revenueCatService.ts`: current-offering lookup, purchase, restore, and entitlement listener.
-- `mobile/app/upgrade.tsx`: localized offer presentation, allowances, renewal/cancellation disclosure, restore, and Continue Free.
+- `mobile/app/upgrade.tsx`: localized offer presentation, allowances, renewal/cancellation disclosure, restore, direct Apple subscription/purchase help, and Continue Free.
 - `mobile/app/trends.tsx`: free, on-device summaries with no entitlement gate or upgrade route.
 - `server/ai-proxy/src/entitlements.ts`: server-side `convo_pro` verification and five-minute content-free entitlement cache.
 - `server/ai-proxy/wrangler.jsonc`: production bindings and content-free daily provider budget; it contains no credentials.
@@ -38,6 +38,8 @@ Private Trends is not a subscription benefit. The paid value proposition is unli
 3. Create one subscription group named `Convo Pro` and the exact monthly and annual products above. Set durations, availability, localized display names/descriptions, and prices in App Store Connect.
 4. Complete subscription review information, App Privacy, age rating, export compliance, and all required agreements. Do not copy the draft privacy answers without checking the exact candidate and Apple’s current definitions.
 5. Build with production EAS variables, upload a signed candidate, and test buy, cancel, restore, renewal, expiration, billing retry, refund/revocation, offline launch, and account/device transfer in Sandbox/TestFlight.
+
+Keep offer codes, win-back offers, promoted IAP, Family Sharing, alternative digital payments, and custom product pages disabled for v1. They are optional growth tools, not submission requirements, and require separate configuration, disclosure, and signed testing before use. Apple's purchase-help page handles charge/refund requests; Apple determines refund eligibility.
 
 ## RevenueCat setup — external and pending
 

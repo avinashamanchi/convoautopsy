@@ -99,7 +99,7 @@ export function createAppConfig(environment: Environment = process.env): ExpoCon
         NSPhotoLibraryUsageDescription: 'Choose a conversation screenshot for private on-device text extraction.'
       }
     },
-    plugins: ['expo-router', 'expo-sqlite', ['expo-secure-store', { faceIDPermission: false }], 'expo-document-picker', ['expo-image-picker', { cameraPermission: false, microphonePermission: false }]],
+    plugins: ['expo-router', 'expo-sqlite', ['expo-secure-store', { faceIDPermission: false }], 'expo-document-picker', ['expo-image-picker', { cameraPermission: false, microphonePermission: false }], './plugins/withReleaseNetworkPolicy.cjs'],
     experiments: { typedRoutes: true },
     extra: {
       privacyPolicyUrl: 'https://avinashamanchi.github.io/convoautopsy/privacy.html',
