@@ -83,7 +83,7 @@ npm run typecheck
 npm run lint
 npm run expo:doctor
 npm run export:ios
-npm audit --audit-level=high
+node ../scripts/check-mobile-audit.mjs
 ```
 
 For a bounded Expo Go smoke test on the same network, run `npx expo start --lan --clear`, scan the generated QR code with Expo Go, and stop the server when finished. Expo Go does not compile the local Swift Vision OCR module; its screenshot import fallback is expected there. Physical-device navigation, input, history, accessibility, offline, and share observations remain a user-run release checkpoint.
@@ -110,7 +110,7 @@ Value: https://your-proxy.example
 
 The browser never receives provider credentials. Before AI use, the site asks for consent and provides an exact-data review. An AI analysis request sends to ConvoAutopsy's Cloudflare service: schema version, consent version, an installation token, and each reviewed message sender and message text. The service forwards only the reviewed message sender and message text to Groq. An AI response-drafting request sends the service schema version, consent version, the installation token, the chosen response sender, goal, and tone, the analysis mode, intensity score, and conflict mode, and—for each message—the message sender, edited message text, pattern, ego state, and edited possible interpretation. The service forwards the content and drafting fields to Groq; it does not forward schema version, consent version, the installation token, or analysis mode to Groq. Technical identifier values are not displayed in the review.
 
-Person labels are pseudonymous, not anonymous, and message text may still contain emails, phone numbers, third-party names, and context unless it is reviewed and redacted first. On-device analysis and drafts remain available without sharing. Separately, in the native app, Free verification can send a pseudonymous RevenueCat app-user ID even without a subscription; purchase and entitlement checks can send that ID and purchase information to RevenueCat.
+Person labels are pseudonymous, not anonymous, and message text may still contain emails, phone numbers, third-party names, and context unless it is reviewed and redacted first. On-device analysis and drafts remain available without sharing. Separately, in the native app, Free verification can send a RevenueCat-generated anonymous app-user ID even without a subscription; purchase and entitlement checks can send that ID and purchase information to RevenueCat for app functionality and subscription analytics.
 
 ---
 

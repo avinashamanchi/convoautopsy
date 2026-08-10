@@ -73,8 +73,7 @@ jobs:
         working-directory: mobile
 
       - name: Audit mobile
-        run: npm audit --omit=dev --audit-level=high
-        working-directory: mobile
+        run: node scripts/check-mobile-audit.mjs
 
       - name: Install Worker dependencies
         run: npm ci

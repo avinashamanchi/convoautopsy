@@ -9,10 +9,10 @@ describe('customer-visible legal truth', () => {
     render(<PrivacyScreen />);
 
     expect(screen.getByText(/reviewed message text is sent through Cloudflare to Groq only after you confirm it and consent/)).toBeTruthy();
-    expect(screen.getByText(/schema and consent versions.*installation token.*RevenueCat app-user ID.*ConvoAutopsy's Cloudflare service/)).toBeTruthy();
+    expect(screen.getByText(/schema and consent versions.*installation token.*RevenueCat-generated anonymous app-user ID.*ConvoAutopsy's Cloudflare service/)).toBeTruthy();
     expect(screen.getByText(/Neither raw technical identifier is forwarded to Groq/)).toBeTruthy();
     expect(screen.getByText(/may be included in device or iCloud backups/)).toBeTruthy();
-    expect(screen.getByText(/pseudonymous app-user ID and purchase and entitlement history/)).toBeTruthy();
+    expect(screen.getByText(/RevenueCat-generated anonymous app-user ID.*purchase and entitlement history.*subscription analytics/)).toBeTruthy();
     expect(screen.getByText(/cache verified entitlement status for up to five minutes/)).toBeTruthy();
     expect(screen.getByText(/HMAC-derived rate and quota identifiers/)).toBeTruthy();
     expect(screen.getByText(/bounded quota usage rows, a daily provider budget, two-minute recovery leases, short-lived provider-failure and circuit state, and content-free operational metrics/)).toBeTruthy();

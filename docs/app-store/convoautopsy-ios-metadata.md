@@ -27,9 +27,9 @@ In-app purchase summary: Free includes unlimited on-device analyses and response
 
 ## App Privacy answers
 
-- Proposed declarations, to be rechecked against Apple’s current questionnaire and the exact release binary: User Content for App Functionality; Purchase History for App Functionality; a pseudonymous Device ID for App Functionality and Fraud Prevention; and content-free Product Interaction/Diagnostics used for App Functionality and reliability.
-- Mark these declarations as not used for tracking. Do not claim data is linked to a named identity: there is no ConvoAutopsy account, but installation and RevenueCat app-user identifiers are pseudonymous rather than anonymous.
-- Reviewed text is transmitted through Cloudflare to Groq only after confirmation and consent. RevenueCat processes a pseudonymous app-user ID and purchase/entitlement history. HMAC-derived rate/quota keys, bounded usage rows, daily budget state, two-minute recovery leases, and content-free metrics support fair-use and operations.
+- Proposed declarations, to be rechecked against Apple’s current questionnaire and the exact release binary: User Content for App Functionality; Purchase History for Analytics and App Functionality, not linked to the user; a separate pseudonymous Device ID for App Functionality and Fraud Prevention; and content-free Product Interaction/Diagnostics used for App Functionality and reliability.
+- Mark every declaration as not used for tracking. ConvoAutopsy has no account and passes no custom account identifier to RevenueCat; RevenueCat generates the anonymous app-user ID. Do not treat that RevenueCat-generated identifier as a separately collected User ID or Device ID. The app's own random installation token remains the separate Device ID disclosure.
+- Reviewed text is transmitted through Cloudflare to Groq only after confirmation and consent. RevenueCat processes its generated anonymous app-user ID and purchase/entitlement history for subscription analytics and app functionality. HMAC-derived rate/quota keys, bounded usage rows, daily budget state, two-minute recovery leases, and content-free metrics support fair-use and operations.
 - Confirm Apple and RevenueCat SDK privacy manifests and current App Store Connect definitions before submitting; this draft is not a completed questionnaire.
 
 ## Age rating

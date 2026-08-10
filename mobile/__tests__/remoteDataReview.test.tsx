@@ -221,6 +221,6 @@ it('enumerates every analysis and response-draft field plus pseudonymous request
   expect(screen.getByText(/AI-assisted analysis sends each reviewed message sender label and text/)).toBeOnTheScreen();
   expect(screen.getByText(/response sender, goal, tone, analysis intensity and conflict/)).toBeOnTheScreen();
   expect(screen.getByText(/each message sender, reviewed text, pattern, ego state, and reviewed possible interpretation/)).toBeOnTheScreen();
-  expect(screen.getByText(/random installation token and a pseudonymous RevenueCat app-user ID/)).toBeOnTheScreen();
+  expect(screen.getByText(/random installation token and a RevenueCat-generated anonymous app-user ID/)).toBeOnTheScreen();
   expect(screen.queryByText(/\$RCAnonymousID:/)).toBeNull();
 });

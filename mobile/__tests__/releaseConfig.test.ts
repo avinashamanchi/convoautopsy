@@ -1,5 +1,7 @@
 import appConfig, * as appConfigModule from '../app.config';
 import easConfig from '../eas.json';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 type Environment = Readonly<Record<string, string | undefined>>;
 type ConfigFactory = (environment: Environment) => typeof appConfig;
@@ -110,5 +112,20 @@ describe('App Store release configuration', () => {
     });
     expect(easConfig).not.toHaveProperty('submit');
     expect(JSON.stringify(easConfig)).not.toMatch(/appleId|ascApiKey|password/i);
+  });
+
+  it('fails closed on new high-severity mobile advisories in every release workflow', () => {
+    const root = resolve(__dirname, '../..');
+    const auditGate = readFileSync(resolve(root, 'scripts/check-mobile-audit.mjs'), 'utf8');
+    expect(auditGate).toContain('1138808');
+    expect(auditGate).toContain('1138809');
+    expect(auditGate).toContain('--audit-level=high');
+    expect(auditGate).toContain('unproven-chain');
+    expect(auditGate).toContain('report.error');
+
+    for (const workflow of ['ios-ci.yml', 'deploy.yml', 'release-readiness.yml']) {
+      expect(readFileSync(resolve(root, '.github/workflows', workflow), 'utf8'))
+        .toContain('check-mobile-audit.mjs');
+    }
   });
 });

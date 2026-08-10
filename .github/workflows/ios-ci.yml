@@ -29,8 +29,7 @@ jobs:
         working-directory: mobile
       - run: node scripts/scan-secrets.mjs --tracked --paths mobile/dist
         working-directory: .
-      - run: npm audit --omit=dev --audit-level=high
-        working-directory: mobile
+      - run: node scripts/check-mobile-audit.mjs
 
   worker:
     runs-on: ubuntu-latest
