@@ -73,7 +73,11 @@ Historical note: commit `d2a02edbced8d3984058ebc0814b97612824ac22` had a separat
 ## App Store forms, review, and publication pending — all unchecked
 
 - [ ] Reconcile App Privacy answers with the exact release binary, RevenueCat/Apple SDK privacy manifests, server behavior, and Apple’s current definitions.
-- [ ] Complete age rating, export compliance, subscription review details, localization, screenshots, support/privacy/terms URLs, and review notes.
+- [ ] Complete Apple's updated age-rating questionnaire, export compliance, subscription review details, localization, screenshots, support/privacy/terms URLs, and review notes.
+- [ ] Complete the Accessibility Nutrition Label from signed-device VoiceOver, Voice Control, Larger Text, contrast, and Reduce Motion evidence; do not claim unverified support.
+- [ ] Complete the product page name, icon, subtitle, description, promotional text, keywords, and 1–10 screenshots with accurate reviewed wording, no placeholders, and no private conversation data.
+- [ ] Verify required device capabilities and every generated Info.plist usage description against the exact archive on a current iOS 26 device.
+- [ ] Explicitly disable Mac with Apple silicon and Apple Vision Pro availability for v1 unless the exact signed iPhone build, picker, local OCR, and privacy behavior are separately tested and supported there.
 - [ ] Complete primary language, SKU, seller/copyright, categories, content-rights declaration, availability, and Digital Services Act status in the authorized App Store Connect account.
 - [ ] Upload the exact verified signed build and confirm processing in App Store Connect.
 - [ ] Submit for review and observe Apple’s actual review outcome.
