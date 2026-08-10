@@ -36,7 +36,9 @@ describe('publication gate', () => {
     expect(workerPackage.scripts.build).toMatch(/wrangler deploy --dry-run --outdir dist/)
     const rootPackage = JSON.parse(await fromRoot('package.json'))
     expect(rootPackage.scripts['scan:secrets']).toContain('server/ai-proxy/dist server/ai-proxy/dist-load')
-    expect(workflow.match(/npm audit --omit=dev --audit-level=high/g)).toHaveLength(3)
+    expect(workflow.match(/npm audit --omit=dev --audit-level=high/g)).toHaveLength(2)
+    expect(workflow).toContain('node scripts/check-mobile-audit.mjs')
+    expect(workflow.indexOf('node scripts/check-mobile-audit.mjs')).toBeLessThan(upload)
   })
 
   it('ignores local secret files while retaining sanitized examples', async () => {
@@ -79,7 +81,8 @@ describe('publication gate', () => {
     }
     expect(workflow).toContain('npm run test:load:ci')
     expect(workflow).toContain('wrangler.load.jsonc')
-    expect(workflow.match(/npm audit --omit=dev --audit-level=high/g)).toHaveLength(3)
+    expect(workflow.match(/npm audit --omit=dev --audit-level=high/g)).toHaveLength(2)
+    expect(workflow).toContain('node scripts/check-mobile-audit.mjs')
   })
 
   it('runs the full local provider-stub profile in manual readiness without deployment or submission', async () => {
@@ -87,7 +90,8 @@ describe('publication gate', () => {
     expect(workflow).toContain('npm run test:load -- --sustained-seconds 3600 --burst-seconds 300')
     expect(workflow).toContain('wrangler.load.jsonc')
     expect(workflow).toContain('timeout-minutes: 90')
-    expect(workflow.match(/npm audit --omit=dev --audit-level=high/g)).toHaveLength(3)
+    expect(workflow.match(/npm audit --omit=dev --audit-level=high/g)).toHaveLength(2)
+    expect(workflow).toContain('node ../scripts/check-mobile-audit.mjs')
     expect(workflow).toContain('deployed=false')
     expect(workflow).toContain('submitted=false')
     expect(workflow).not.toMatch(/\beas(?:-cli)?\b[^\n]*submit|\bwrangler\b[^\n]*deploy(?! --dry-run)/i)
