@@ -2,7 +2,7 @@
 
 This checklist separates repository state from credentialed and externally observed state. A checked code item is not evidence of a signed build, TestFlight result, App Store acceptance, or publication.
 
-Current audit date: 2026-08-09.
+Current audit date: 2026-08-10.
 
 ## Code-complete repository gates
 
@@ -59,7 +59,7 @@ Historical note: commit `d2a02edbced8d3984058ebc0814b97612824ac22` had a separat
 - [ ] Enter `GROQ_API_KEY`, `REVENUECAT_SECRET_API_KEY`, and `RATE_LIMIT_HMAC_SECRET` only in the Cloudflare secret store; deploy and verify the production Worker.
 - [ ] Revoke any historical exposed provider/GitHub token and complete an authorized history purge if required. Scanner output must remain redacted.
 - [ ] Configure the EAS project and production environment variables, log in, and create a signed development/production build with the required current Xcode/iOS SDK toolchain.
-- [ ] Publish the Privacy, Terms, and Support pages and confirm anonymous HTTP 200 responses at the exact metadata URLs. Fresh anonymous checks on 2026-08-09 returned HTTP 404 for all three.
+- [ ] Publish the Privacy, Terms, and Support pages and confirm anonymous HTTP 200 responses at the exact metadata URLs. Fresh anonymous checks on 2026-08-10 returned HTTP 404 for all three.
 
 ## Signed device and TestFlight pending — all unchecked
 
