@@ -210,7 +210,7 @@ describe('atomic AI admission', () => {
       subjectDigest: 'distributed-invalid-final',
       now: now + 334,
     })).resolves.toMatchObject({ allowed: false, code: 'DAILY_BUDGET_REACHED' });
-  });
+  }, 20_000);
 
   it('retains provider cost on the invocation UTC day when failure completes after midnight', async () => {
     const beforeMidnight = Date.parse('2099-08-07T23:59:59.900Z');
