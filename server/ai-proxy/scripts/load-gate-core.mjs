@@ -126,6 +126,31 @@ export function createFixedWorkloadCohort(totalRequests) {
   });
 }
 
+export function createCapacityCohort(simultaneousClients, maxInFlight) {
+  if (!Number.isSafeInteger(simultaneousClients) || simultaneousClients <= 0 || simultaneousClients > 10_000
+    || !Number.isSafeInteger(maxInFlight) || maxInFlight <= 0 || maxInFlight >= simultaneousClients) {
+    throw new Error('Invalid capacity cohort');
+  }
+  return Object.freeze({
+    simultaneousClients,
+    admittedInstallations: maxInFlight,
+    overloadInstallations: simultaneousClients - maxInFlight,
+  });
+}
+
+export function createCapacityIdentity(runId, index, simultaneousClients) {
+  if (!/^[A-Za-z0-9_-]{8,80}$/.test(runId)
+    || !Number.isSafeInteger(simultaneousClients) || simultaneousClients <= 0 || simultaneousClients > 10_000
+    || !Number.isSafeInteger(index) || index < 0 || index >= simultaneousClients) {
+    throw new Error('Invalid capacity identity input');
+  }
+  return Object.freeze({
+    installationToken: `load_${runId}_capacity_${String(index).padStart(5, '0')}`,
+    syntheticIp: '198.18.0.1',
+    route: routeForRequestIndex(index),
+  });
+}
+
 export function createQuotaSafeWorkloadPlan(totalRequests) {
   if (!Number.isSafeInteger(totalRequests) || totalRequests <= 0 || totalRequests % 10 !== 0) {
     throw new Error('Quota-safe workload count must be a positive multiple of ten');

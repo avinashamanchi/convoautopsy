@@ -61,6 +61,20 @@ export function createFixedWorkloadCohort(totalRequests: number): Readonly<{
   installationPoolSize: number;
   exercisedInstallations: number;
 }>;
+export function createCapacityCohort(simultaneousClients: number, maxInFlight: number): Readonly<{
+  simultaneousClients: number;
+  admittedInstallations: number;
+  overloadInstallations: number;
+}>;
+export function createCapacityIdentity(
+  runId: string,
+  index: number,
+  simultaneousClients: number,
+): Readonly<{
+  installationToken: string;
+  syntheticIp: string;
+  route: '/v1/analyses' | '/v1/responses';
+}>;
 export type QuotaSafeWorkloadPlan = Readonly<{
   totalRequests: number;
   analysisRequests: number;

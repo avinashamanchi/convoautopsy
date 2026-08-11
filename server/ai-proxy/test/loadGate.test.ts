@@ -85,6 +85,27 @@ const createFixedWorkloadCohort = (loadGateCore as unknown as {
     exercisedInstallations: number;
   }>;
 }).createFixedWorkloadCohort!;
+const createCapacityCohort = (loadGateCore as unknown as {
+  createCapacityCohort?: (
+    simultaneousClients: number,
+    maxInFlight: number,
+  ) => Readonly<{
+    simultaneousClients: number;
+    admittedInstallations: number;
+    overloadInstallations: number;
+  }>;
+}).createCapacityCohort!;
+const createCapacityIdentity = (loadGateCore as unknown as {
+  createCapacityIdentity?: (
+    runId: string,
+    index: number,
+    simultaneousClients: number,
+  ) => Readonly<{
+    installationToken: string;
+    syntheticIp: string;
+    route: '/v1/analyses' | '/v1/responses';
+  }>;
+}).createCapacityIdentity!;
 const pollDiagnosticValue = (loadGateCore as unknown as {
   pollDiagnosticValue?: (
     read: () => Promise<number>,
@@ -131,6 +152,27 @@ describe('load gate runner contract', () => {
       exercisedInstallations: new Set(identities.map(({ installationToken }) => installationToken)).size,
     });
     expect(new Set(identities.map(({ installationToken }) => installationToken)).size).toBe(70);
+  });
+
+  it('models 1,000 simultaneous clients as 100 admitted and 900 bounded overloads', () => {
+    const cohort = createCapacityCohort(1_000, 100);
+    const identities = Array.from({ length: cohort.simultaneousClients }, (_, index) => (
+      createCapacityIdentity('capacity-proof-run', index, cohort.simultaneousClients)
+    ));
+
+    expect(cohort).toEqual({
+      simultaneousClients: 1_000,
+      admittedInstallations: 100,
+      overloadInstallations: 900,
+    });
+    expect(new Set(identities.map(({ installationToken }) => installationToken)).size).toBe(1_000);
+    expect(exactRouteMix(
+      Object.fromEntries(['/v1/analyses', '/v1/responses'].map((route) => [
+        route,
+        identities.filter((identity) => identity.route === route).length,
+      ])),
+      1_000,
+    )).toBe(true);
   });
 
   it('requires separate provider authorization and synthetic-content acknowledgement for non-loopback targets', () => {

@@ -11,6 +11,8 @@ import {
   abusiveRateLimitObserved,
   createFatalSummary,
   createFixedWorkloadCohort,
+  createCapacityCohort,
+  createCapacityIdentity,
   createPlannedWorkload,
   createQuotaSafeWorkloadIdentity,
   createQuotaSafeWorkloadPlan,
@@ -58,11 +60,12 @@ const plannedWorkload = createPlannedWorkload(options);
 const workloadRequestCount = plannedWorkload.totalRequests;
 const fixedShortCohort = workloadRequestCount <= 100;
 const quotaSafeWorkloadPlan = fixedShortCohort ? undefined : createQuotaSafeWorkloadPlan(workloadRequestCount);
+const capacityCohort = createCapacityCohort(1_000, 100);
 const cohorts = Object.freeze({
   workload: fixedShortCohort
     ? createFixedWorkloadCohort(workloadRequestCount)
     : Object.freeze({ strategy: 'quota-safe', ...quotaSafeWorkloadPlan }),
-  capacityInstallations: 100,
+  capacity: capacityCohort,
   tokenAbuseInstallations: 1,
 });
 const timers = new Set();
@@ -208,32 +211,57 @@ async function runRouteMixPaddingPhase(target) {
 
 async function runCapacityPhase(target) {
   const failures = [];
+  currentStage = 'CAPACITY_HOLD';
   await fixtureControl(target, 'hold');
-  const pending = Array.from({ length: 100 }, (_, index) => sendApiRequest(target, capacityIdentity(index), true));
-  let busySample;
+  const pending = Array.from(
+    { length: capacityCohort.admittedInstallations },
+    (_, index) => sendApiRequest(target, capacityIdentity(index), true),
+  );
+  let overload = [];
   let activeReservations = 0;
   let peakReservations = 0;
   try {
-    const heldDiagnostic = await pollDiagnostics(target, (value) => value === 100, options.clientMs);
+    currentStage = 'CAPACITY_WAIT';
+    const heldDiagnostic = await pollDiagnostics(
+      target,
+      (value) => value === capacityCohort.admittedInstallations,
+      options.clientMs,
+    );
     peakReservations = heldDiagnostic.peak;
     if (!heldDiagnostic.matched) failures.push('CAPACITY_DIAGNOSTICS');
     else {
-      const responseIdentity = createRequestIdentity(`${runId}_capacity`, 99);
-      busySample = await sendApiRequest(target, Object.freeze({ ...responseIdentity, route: '/v1/responses' }), true);
-      if (busySample.status !== 503 || busySample.code !== 'SERVICE_BUSY') failures.push('CAPACITY_101');
+      currentStage = 'CAPACITY_OVERLOAD';
+      const overflowOperations = Array.from(
+        { length: capacityCohort.overloadInstallations },
+        (_, offset) => sendApiRequest(
+          target,
+          capacityIdentity(capacityCohort.admittedInstallations + offset),
+          true,
+        ),
+      );
+      overload = settledSamples(await Promise.allSettled(overflowOperations));
+      if (overload.length !== capacityCohort.overloadInstallations
+        || overload.some((sample) => sample.status !== 503 || sample.code !== 'SERVICE_BUSY')) {
+        failures.push('CAPACITY_OVERLOAD');
+      }
     }
   } finally {
+    currentStage = 'CAPACITY_RELEASE';
     await fixtureControl(target, 'release');
   }
 
+  currentStage = 'CAPACITY_DRAIN';
   const held = settledSamples(await Promise.allSettled(pending));
-  if (held.length !== 100 || held.some((sample) => sample.status < 200 || sample.status >= 300)) failures.push('CAPACITY_100');
+  if (held.length !== capacityCohort.admittedInstallations
+    || held.some((sample) => sample.status < 200 || sample.status >= 300)) {
+    failures.push('CAPACITY_ADMITTED');
+  }
   const releasedDiagnostic = await pollDiagnostics(target, (value) => value === 0, options.clientMs);
   peakReservations = Math.max(peakReservations, releasedDiagnostic.peak);
   activeReservations = releasedDiagnostic.value;
   if (!releasedDiagnostic.matched) failures.push('CAPACITY_RELEASE_DIAGNOSTICS');
   return {
-    samples: busySample ? [...held, busySample] : held,
+    samples: [...held, ...overload],
     activeReservations,
     peakReservations,
     failures,
@@ -321,7 +349,7 @@ async function fixtureControl(target, action) {
     method: 'POST',
     headers: { authorization: `Bearer ${fixtureSecret}` },
   }, {
-    timeoutMs: options.diagnosticsMs,
+    timeoutMs: action === 'release' ? options.clientMs : options.diagnosticsMs,
     maxBytes: 1_024,
     parentSignal: outstanding.signal,
   });
@@ -358,10 +386,7 @@ function nextIdentity() {
 }
 
 function capacityIdentity(index) {
-  return Object.freeze({
-    ...createRequestIdentity(`${runId}_capacity`, index),
-    route: routeForRequestIndex(index),
-  });
+  return createCapacityIdentity(runId, index, capacityCohort.simultaneousClients);
 }
 
 function settledSamples(results) {
