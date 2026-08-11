@@ -7,6 +7,16 @@ const root = fileURLToPath(new URL('../..', import.meta.url))
 const fromRoot = (path) => readFile(new URL(`../../${path}`, import.meta.url), 'utf8')
 
 describe('single iOS release identity', () => {
+  it('keeps repository metadata valid for checkout cleanup', () => {
+    const result = spawnSync('git', ['submodule', 'foreach', '--recursive', 'true'], {
+      cwd: root,
+      encoding: 'utf8',
+    })
+
+    expect(result.status).toBe(0)
+    expect(result.stderr).toBe('')
+  })
+
   it('hard-disables every legacy Capacitor release command with one deterministic guard', async () => {
     const packageJson = JSON.parse(await fromRoot('package.json'))
     for (const script of ['ios', 'sync', 'build:app']) {
