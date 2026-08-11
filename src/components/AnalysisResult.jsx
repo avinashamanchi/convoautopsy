@@ -72,6 +72,7 @@ export default function AnalysisResult({ result, timestamp, onBack }) {
 
   const score = result.overall_tension_score
   const scoreColor = SCORE_COLOR(score)
+  const analysisMode = result.analysis_mode === 'ai' ? 'AI-assisted estimate' : 'On-device estimate'
 
   return (
     <div className="ar-wrap" ref={panelRef}>
@@ -92,11 +93,11 @@ export default function AnalysisResult({ result, timestamp, onBack }) {
 
       {/* Visible analysis UI */}
       <div className="ar-header">
-        <div className="ar-label">autopsy report</div>
+        <div className="ar-label">educational estimate</div>
         <div className="ar-scores">
           <div className="ar-score-card">
             <div className="ar-score-num" ref={scoreRef} style={{ color: scoreColor }}>0</div>
-            <div className="ar-score-subline">tension score</div>
+            <div className="ar-score-subline">intensity estimate</div>
             <div className="ar-score-bar">
               <div className="ar-score-fill" style={{ width: `${score}%`, background: `linear-gradient(90deg, ${scoreColor}99, ${scoreColor})` }} />
             </div>
@@ -127,7 +128,7 @@ export default function AnalysisResult({ result, timestamp, onBack }) {
                   <span className="ar-ego" style={{ color: EGO_COLORS[msg.ego_state] || '#9ca3af' }}>{msg.ego_state} state</span>
                 </div>
                 <div className="ar-hidden">
-                  <span className="ar-hidden-label">hidden meaning</span>
+                  <span className="ar-hidden-label">possible interpretation</span>
                   <span className="ar-hidden-text">{msg.hidden_meaning}</span>
                 </div>
               </div>
@@ -137,7 +138,7 @@ export default function AnalysisResult({ result, timestamp, onBack }) {
       </div>
 
       <div className="ar-footer">
-        <span className="ar-powered">analyzed with gottman · tki · transactional analysis</span>
+        <span className="ar-powered">educational pattern lenses · may be incomplete or wrong</span>
       </div>
 
       {/* Off-screen receipt for html2canvas export — 9:16 portrait card */}
@@ -161,7 +162,7 @@ export default function AnalysisResult({ result, timestamp, onBack }) {
       >
         {/* Receipt header */}
         <div style={{ fontSize: '11px', letterSpacing: '0.18em', textTransform: 'uppercase', color: 'rgba(167,139,250,0.6)', marginBottom: '8px' }}>
-          autopsy report
+          educational estimate
         </div>
         <div style={{ fontFamily: "'Instrument Serif', Georgia, serif", fontSize: '28px', color: '#f0eff4', marginBottom: '4px', letterSpacing: '-0.02em' }}>
           Convo<span style={{ color: '#a78bfa', fontStyle: 'italic' }}>Autopsy</span>
@@ -171,6 +172,12 @@ export default function AnalysisResult({ result, timestamp, onBack }) {
             {formatDate(timestamp)}
           </div>
         )}
+        <div style={{ fontSize: '12px', color: 'rgba(167,139,250,0.78)', marginBottom: '6px' }}>
+          {analysisMode}
+        </div>
+        <div style={{ fontSize: '10px', lineHeight: 1.4, color: 'rgba(240,239,244,0.38)', marginBottom: '24px' }}>
+          Automated communication estimate; not a clinical diagnosis or factual finding.
+        </div>
 
         {/* Score block */}
         <div style={{
@@ -183,7 +190,7 @@ export default function AnalysisResult({ result, timestamp, onBack }) {
           <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: '12px' }}>
             <div>
               <div style={{ fontSize: '11px', color: 'rgba(240,239,244,0.35)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '4px' }}>
-                tension score
+                intensity estimate
               </div>
               <div style={{ fontFamily: "'Instrument Serif', Georgia, serif", fontSize: '72px', color: scoreColor, lineHeight: 1, fontWeight: 400 }}>
                 {score}

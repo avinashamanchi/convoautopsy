@@ -1,7 +1,6 @@
 import { useRef, useMemo } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Text, RoundedBox } from '@react-three/drei'
-import * as THREE from 'three'
 
 const BUBBLES = [
   { text: 'Whatever, do what you want.', sender: 'A', tag: 'Stonewalling', tagColor: '#f87171', pos: [-2.8, 1.8, -1],   side: 'left'  },

@@ -25,18 +25,20 @@ function PhoneShard({ seed, explodeDir, scrollProgressRef }) {
   const matRef = useRef()
   const geo = useMemo(() => createShardGeo(seed), [seed])
 
-  const rng = useMemo(() => {
-    let s = seed + 99
-    return () => { s = (s * 1664525 + 1013904223) & 0xffffffff; return (s >>> 0) / 0xffffffff }
+  const shardValues = useMemo(() => {
+    return Array.from({ length: 9 }, (_, index) => {
+      const value = Math.sin((seed + 99) * (index + 1) * 12.9898) * 43758.5453
+      return value - Math.floor(value)
+    })
   }, [seed])
 
-  const startPos = useMemo(() => new THREE.Vector3((rng() - 0.5) * 1.8, (rng() - 0.5) * 3.4, (rng() - 0.5) * 0.2), [])
+  const startPos = useMemo(() => new THREE.Vector3((shardValues[0] - 0.5) * 1.8, (shardValues[1] - 0.5) * 3.4, (shardValues[2] - 0.5) * 0.2), [shardValues])
   const explodeVec = useMemo(() => new THREE.Vector3(
-    explodeDir.x + (rng() - 0.5) * 3.5,
-    explodeDir.y + (rng() - 0.5) * 3.5,
-    (rng() - 0.5) * 5 + 2
-  ), [explodeDir])
-  const rotSpeed = useMemo(() => new THREE.Vector3((rng() - 0.5) * 5, (rng() - 0.5) * 5, (rng() - 0.5) * 5), [])
+    explodeDir.x + (shardValues[3] - 0.5) * 3.5,
+    explodeDir.y + (shardValues[4] - 0.5) * 3.5,
+    (shardValues[5] - 0.5) * 5 + 2
+  ), [explodeDir, shardValues])
+  const rotSpeed = useMemo(() => new THREE.Vector3((shardValues[6] - 0.5) * 5, (shardValues[7] - 0.5) * 5, (shardValues[8] - 0.5) * 5), [shardValues])
 
   useFrame(() => {
     const mesh = meshRef.current
@@ -313,7 +315,7 @@ export default function PhoneScene({ scrollProgressRef }) {
       return { x: Math.cos(angle) * 1.6, y: Math.sin(angle) * 1.6 }
     }), [])
 
-  useFrame((state) => {
+  useFrame(() => {
     if (!groupRef.current) return
     groupRef.current.rotation.y = (scrollProgressRef.current || 0) * Math.PI * 0.08
   })

@@ -1,0 +1,76 @@
+name: ConvoAutopsy CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  mobile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci
+        working-directory: mobile
+      - run: npm test
+        working-directory: mobile
+      - run: npm run typecheck
+        working-directory: mobile
+      - run: npm run lint
+        working-directory: mobile
+      - run: npm run expo:doctor
+        working-directory: mobile
+      - run: npm run export:ios
+        working-directory: mobile
+      - run: node scripts/scan-secrets.mjs --tracked --paths mobile/dist
+        working-directory: .
+      - run: node scripts/check-mobile-audit.mjs
+
+  worker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/ai-proxy/package-lock.json
+      - run: npm ci
+        working-directory: server/ai-proxy
+      - run: npm test
+        working-directory: server/ai-proxy
+      - run: npm run typecheck
+        working-directory: server/ai-proxy
+      - run: npm run lint
+        working-directory: server/ai-proxy
+      - run: npm run build
+        working-directory: server/ai-proxy
+      - run: npx wrangler deploy --dry-run --config wrangler.load.jsonc --outdir dist-load
+        working-directory: server/ai-proxy
+      - run: npm run test:load:ci
+        working-directory: server/ai-proxy
+      - run: node scripts/scan-secrets.mjs --tracked --paths server/ai-proxy/dist server/ai-proxy/dist-load
+        working-directory: .
+      - run: npm audit --omit=dev --audit-level=high
+        working-directory: server/ai-proxy
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run lint
+      - run: npm run build
+      - run: node scripts/scan-secrets.mjs --tracked --paths dist
+        working-directory: .
+      - run: npm audit --omit=dev --audit-level=high

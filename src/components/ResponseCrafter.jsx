@@ -1,5 +1,7 @@
-import { useState } from 'react'
-import { craftResponse, GOAL_OPTIONS, TONE_OPTIONS, getPersonSenders } from '../utils/craftResponse'
+import { useEffect, useRef, useState } from 'react'
+import { craftResponse, GOAL_OPTIONS, TONE_OPTIONS, getPersonSenders, prepareResponseReview } from '../utils/craftResponse'
+import { getAiConsent } from '../utils/aiConsent'
+import RemoteDataReview from './RemoteDataReview'
 
 export default function ResponseCrafter({ result, conversationText }) {
   const [step, setStep] = useState(1)
@@ -10,38 +12,162 @@ export default function ResponseCrafter({ result, conversationText }) {
   const [loading, setLoading] = useState(false)
   const [copied, setCopied] = useState(null)
   const [error, setError] = useState('')
+  const [responseSource, setResponseSource] = useState(null)
+  const [reviewSnapshot, setReviewSnapshot] = useState(null)
+  const [pendingConsent, setPendingConsent] = useState(null)
+  const requestRef = useRef(null)
+  const requestGeneration = useRef(0)
+  const copyGeneration = useRef(0)
+  const copyTimer = useRef(null)
+
+  useEffect(() => {
+    requestGeneration.current += 1
+    const generation = requestGeneration.current
+    requestRef.current?.abort()
+    requestRef.current = null
+    copyGeneration.current += 1
+    clearTimeout(copyTimer.current)
+    queueMicrotask(() => {
+      if (generation !== requestGeneration.current) return
+      setStep(1)
+      setSender('')
+      setGoal('')
+      setTone('')
+      setResponses(null)
+      setResponseSource(null)
+      setReviewSnapshot(null)
+      setPendingConsent(null)
+      setCopied(null)
+      setError('')
+      setLoading(false)
+    })
+    return () => {
+      requestGeneration.current += 1
+      requestRef.current?.abort()
+      copyGeneration.current += 1
+      clearTimeout(copyTimer.current)
+    }
+  }, [result, conversationText])
 
   const senders = getPersonSenders(result)
 
-  const generate = async (selectedTone) => {
+  const generate = async (selectedTone, consent, reviewedSnapshot = null) => {
+    requestGeneration.current += 1
+    requestRef.current?.abort()
+    const controller = new AbortController()
+    requestRef.current = controller
+    const generation = requestGeneration.current
     setLoading(true)
     setError('')
     setStep(4)
     try {
-      const r = await craftResponse({ sender, goal, tone: selectedTone, result, conversationText })
-      setResponses(r)
-    } catch {
+      const r = await craftResponse(
+        { sender, goal, tone: selectedTone, result, conversationText },
+        consent
+          ? { allowRemote: true, consentVersion: consent.version, installationToken: consent.installationToken, reviewedSnapshot, signal: controller.signal }
+          : { allowRemote: false, signal: controller.signal },
+      )
+      if (generation !== requestGeneration.current || controller.signal.aborted) return
+      setResponses(r.drafts)
+      setResponseSource(r)
+    } catch (error) {
+      if (generation !== requestGeneration.current || controller.signal.aborted || error?.name === 'AbortError') return
       setError('Failed to generate responses. Try again.')
     }
+    if (generation === requestGeneration.current) {
+      requestRef.current = null
+      setLoading(false)
+    }
+  }
+
+  const chooseTone = async (selectedTone) => {
+    setTone(selectedTone)
+    const consent = getAiConsent()
+    if (!consent) {
+      await generate(selectedTone, null)
+      return
+    }
+    const snapshot = prepareResponseReview({ sender, goal, tone: selectedTone, result, conversationText })
+    setStep(4)
+    if (!snapshot) {
+      setError('Could not prepare an exact-data review. No remote request was sent.')
+      return
+    }
+    setPendingConsent(consent)
+    setReviewSnapshot(snapshot)
+  }
+
+  const confirmReview = async (reviewedSnapshot) => {
+    if (!pendingConsent) return
+    const consent = pendingConsent
+    setReviewSnapshot(null)
+    setPendingConsent(null)
+    await generate(tone, consent, reviewedSnapshot)
+  }
+
+  const cancelReview = () => {
+    requestGeneration.current += 1
+    requestRef.current?.abort()
+    requestRef.current = null
+    setReviewSnapshot(null)
+    setPendingConsent(null)
     setLoading(false)
+    setError('Remote request canceled. No conversation text was sent.')
+    setStep(3)
   }
 
-  const handleCopy = (id, text) => {
-    navigator.clipboard.writeText(text).catch(() => {})
-    setCopied(id)
-    setTimeout(() => setCopied(null), 2200)
+  const handleCopy = async (id, text) => {
+    const generation = ++copyGeneration.current
+    clearTimeout(copyTimer.current)
+    setCopied(null)
+    setError('')
+    try {
+      await navigator.clipboard.writeText(text)
+      if (generation !== copyGeneration.current) return
+      setCopied(id)
+      copyTimer.current = setTimeout(() => {
+        if (generation === copyGeneration.current) setCopied(null)
+      }, 2200)
+    } catch {
+      if (generation === copyGeneration.current) setError('Copy failed. Select and copy the draft manually.')
+    }
   }
 
-  const reset = () => { setStep(1); setSender(''); setGoal(''); setTone(''); setResponses(null); setError('') }
+  const reset = () => {
+    requestGeneration.current += 1
+    requestRef.current?.abort()
+    requestRef.current = null
+    copyGeneration.current += 1
+    clearTimeout(copyTimer.current)
+    setLoading(false)
+    setCopied(null)
+    setStep(1)
+    setSender('')
+    setGoal('')
+    setTone('')
+    setResponses(null)
+    setResponseSource(null)
+    setReviewSnapshot(null)
+    setPendingConsent(null)
+    setError('')
+  }
 
   const STEP_LABELS = ['Who', 'Goal', 'Tone', 'Responses']
 
   return (
     <div className="rc-root">
+      {reviewSnapshot && (
+        <RemoteDataReview
+          snapshot={reviewSnapshot}
+          isConfirming={loading}
+          onConfirm={confirmReview}
+          onCancel={cancelReview}
+        />
+      )}
       <div className="rc-header">
         <div className="rc-title-row">
           <span className="rc-title">Craft Your Response</span>
-          <span className="rc-subtitle">Get AI-tailored ideas based on the analysis</span>
+          <span className="rc-subtitle">Get tailored ideas based on the analysis</span>
         </div>
         <div className="rc-progress">
           {STEP_LABELS.map((label, i) => (
@@ -93,7 +219,7 @@ export default function ResponseCrafter({ result, conversationText }) {
             <div className="rc-grid-5">
               {TONE_OPTIONS.map(t => (
                 <button key={t.id} className={`rc-option-tile ${tone === t.id ? 'selected' : ''}`}
-                  onClick={() => { setTone(t.id); generate(t.id) }}>
+                  onClick={() => { void chooseTone(t.id) }}>
                   <span className="rc-tile-icon">{t.icon}</span>
                   <span className="rc-tile-label">{t.label}</span>
                 </button>
@@ -114,7 +240,16 @@ export default function ResponseCrafter({ result, conversationText }) {
             {error && <div className="rc-error">{error}</div>}
             {!loading && responses && (
               <>
-                <div className="rc-question">3 options for {sender}</div>
+                <div className="rc-question">{responses.length} {responses.length === 1 ? 'option' : 'options'} for {sender}</div>
+                <div className={`rc-source rc-source-${responseSource?.source || 'local'}`}>
+                  {responseSource?.source === 'ai'
+                    ? 'AI-assisted draft'
+                    : responseSource?.fallbackReason === 'REMOTE_UNAVAILABLE'
+                      ? 'AI service unavailable—showing on-device drafts.'
+                      : responseSource?.fallbackReason === 'REMOTE_INPUT_LIMIT'
+                        ? 'Remote AI accepts up to 10 messages, 280 characters per message, and 150 characters per possible interpretation—showing on-device drafts.'
+                      : 'On-device drafts'}
+                </div>
                 <div className="rc-responses-list">
                   {responses.map(r => (
                     <div key={r.id} className="rc-response-card">

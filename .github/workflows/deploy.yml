@@ -25,14 +25,90 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            mobile/package-lock.json
+            server/ai-proxy/package-lock.json
 
-      - name: Install dependencies
-        run: npm install
+      - name: Install web dependencies
+        run: npm ci
 
-      - name: Build
+      - name: Test web
+        run: npm test
+
+      - name: Lint web
+        run: npm run lint
+
+      - name: Audit web
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Build web
         env:
-          VITE_GROQ_API_KEY: ${{ secrets.VITE_GROQ_API_KEY }}
+          VITE_AI_PROXY_URL: ${{ vars.VITE_AI_PROXY_URL }}
         run: npm run build
+
+      - name: Install mobile dependencies
+        run: npm ci
+        working-directory: mobile
+
+      - name: Test mobile
+        run: npm test
+        working-directory: mobile
+
+      - name: Typecheck mobile
+        run: npm run typecheck
+        working-directory: mobile
+
+      - name: Lint mobile
+        run: npm run lint
+        working-directory: mobile
+
+      - name: Check Expo project health
+        run: npm run expo:doctor
+        working-directory: mobile
+
+      - name: Export iOS bundle
+        run: npm run export:ios
+        working-directory: mobile
+
+      - name: Audit mobile
+        run: node scripts/check-mobile-audit.mjs
+
+      - name: Install Worker dependencies
+        run: npm ci
+        working-directory: server/ai-proxy
+
+      - name: Test Worker
+        run: npm test
+        working-directory: server/ai-proxy
+
+      - name: Typecheck Worker
+        run: npm run typecheck
+        working-directory: server/ai-proxy
+
+      - name: Lint Worker
+        run: npm run lint
+        working-directory: server/ai-proxy
+
+      - name: Build Worker bundle
+        run: npm run build
+        working-directory: server/ai-proxy
+
+      - name: Build Worker load fixture
+        run: npx wrangler deploy --dry-run --config wrangler.load.jsonc --outdir dist-load
+        working-directory: server/ai-proxy
+
+      - name: Run short Worker load gate
+        run: npm run test:load:ci
+        working-directory: server/ai-proxy
+
+      - name: Audit Worker
+        run: npm audit --omit=dev --audit-level=high
+        working-directory: server/ai-proxy
+
+      - name: Scan tracked tree and built bundles for secrets
+        run: npm run scan:secrets
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

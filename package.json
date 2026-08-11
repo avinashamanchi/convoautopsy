@@ -6,18 +6,21 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "build:app": "VITE_CAPACITOR=true vite build",
-    "lint": "eslint .",
+    "build:app": "node scripts/require-expo-ios-release.mjs",
+    "lint": "eslint src eslint.config.js vite.config.js vitest.config.js --max-warnings=0",
+    "scan:secrets": "node scripts/scan-secrets.mjs --tracked --paths dist mobile/dist server/ai-proxy/dist server/ai-proxy/dist-load",
+    "test": "vitest run",
     "preview": "vite preview",
-    "ios": "npm run build:app && npx cap sync ios && npx cap open ios",
-    "sync": "npm run build:app && npx cap sync"
+    "ios": "node scripts/require-expo-ios-release.mjs",
+    "sync": "node scripts/require-expo-ios-release.mjs"
+  },
+  "engines": {
+    "node": "22.x"
   },
   "dependencies": {
     "@capacitor/app": "^8.1.0",
-    "@capacitor/cli": "^8.3.0",
     "@capacitor/core": "^8.3.0",
     "@capacitor/haptics": "^8.0.2",
-    "@capacitor/ios": "^8.3.0",
     "@capacitor/keyboard": "^8.0.2",
     "@capacitor/status-bar": "^8.0.2",
     "@react-three/drei": "^10.7.7",
@@ -30,16 +33,21 @@
     "three": "^0.183.2"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.3.0",
+    "@capacitor/ios": "^8.3.0",
     "@eslint/js": "^9.39.4",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
     "eslint": "^9.39.4",
+    "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "gh-pages": "^6.3.0",
     "globals": "^17.4.0",
+    "jsdom": "^26.1.0",
     "typescript": "^6.0.2",
-    "vite": "^8.0.1"
+    "vite": "^8.0.1",
+    "vitest": "^4.0.18"
   }
 }

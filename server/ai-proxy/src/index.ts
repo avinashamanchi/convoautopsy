@@ -1,0 +1,467 @@
+import {
+  AnalyzeRequestSchema,
+  CONSENT_VERSION,
+  CraftResponseRequestSchema,
+  RemoteAnalysisResultSchema,
+  ResponseDraftSchema,
+  type AnalyzeRequest,
+  type CraftResponseRequest,
+} from './contract';
+import {
+  asPublicError,
+  ProviderConfigurationError,
+  ProviderInvalidResponseError,
+  ProviderRequestRejectedError,
+  ProviderUnavailableError,
+  PublicError,
+  type PublicErrorCode,
+} from './errors';
+import { resolveEntitlement, type EntitlementResolution } from './entitlements';
+import { createGroqProvider, type AiProvider, type ProviderCraftInput } from './provider';
+import { checkRateLimits, deriveRateLimitKeys } from './fairRateLimit';
+import { completeAdmission, deriveAdmissionSubjectDigest, reserveAdmission } from './admission';
+import {
+  createSafeMetric,
+  type EntitlementCacheMetric,
+  type BudgetWarningMetric,
+  type MetricPlan,
+  type MetricRoute,
+  type SafeMetric,
+} from './metrics';
+
+export type { AiProvider } from './provider';
+export { RateLimitDurableObject } from './fairRateLimit';
+export { AdmissionDurableObject } from './admission';
+
+export interface Env {
+  RATE_LIMITER: DurableObjectNamespace;
+  AI_ADMISSION: DurableObjectNamespace;
+  GROQ_API_KEY: string;
+  RATE_LIMIT_HMAC_SECRET: string;
+  MAX_GLOBAL_IN_FLIGHT?: string;
+  MAX_DAILY_PROVIDER_UNITS: string;
+  REVENUECAT_SECRET_API_KEY?: string;
+  ENTITLEMENT_CACHE?: KVNamespace;
+}
+
+type OperationalContext = {
+  plan: MetricPlan;
+  bodyBytes: number | undefined;
+  providerUnits: number | undefined;
+  inFlight: number | undefined;
+  entitlementCache: EntitlementCacheMetric;
+  budgetWarning: BudgetWarningMetric;
+};
+
+type Logger = { info(metric: SafeMetric, requestId: string): void | Promise<void> };
+type EntitlementResolver = (appUserId: string | undefined, env: Env, now: number) => Promise<EntitlementResolution>;
+type AppOptions = {
+  provider?: AiProvider;
+  logger?: Logger;
+  rateLimitSecret?: string;
+  entitlementResolver?: EntitlementResolver;
+  bodyReadTimeoutMs?: number;
+};
+type BodyByteObserver = (bodyBytes: number) => void;
+const MAX_BODY_BYTES = 128 * 1024;
+const DEFAULT_BODY_READ_TIMEOUT_MS = 5_000;
+
+export function createApp(options: AppOptions = {}) {
+  return {
+    fetch: async (request: Request, env: Env): Promise<Response> => {
+      const started = Date.now();
+      const requestId = crypto.randomUUID();
+      const route = toRoute(request.url);
+      const operational: OperationalContext = {
+        plan: 'unknown',
+        bodyBytes: undefined,
+        providerUnits: undefined,
+        inFlight: undefined,
+        entitlementCache: 'unknown',
+        budgetWarning: 'unknown',
+      };
+      let status = 500;
+      let code: PublicErrorCode | undefined;
+      try {
+        const response = await handle(request, env, route, requestId, options, operational);
+        status = response.status;
+        code = response.headers.get('x-public-error-code') as PublicErrorCode | null ?? undefined;
+        response.headers.delete('x-public-error-code');
+        return response;
+      } catch (error) {
+        const publicError = asPublicError(error);
+        status = publicError.status;
+        code = publicError.code;
+        return errorResponse(publicError, requestId, route === 'unknown' ? null : request.headers.get('origin'));
+      } finally {
+        const metric = createSafeMetric({
+          route,
+          plan: operational.plan,
+          status,
+          latencyMs: Date.now() - started,
+          bodyBytes: operational.bodyBytes,
+          providerUnits: operational.providerUnits,
+          inFlight: operational.inFlight,
+          entitlementCache: operational.entitlementCache,
+          budgetWarning: operational.budgetWarning,
+          outcome: code ?? 'allowed',
+        });
+        try {
+          const logging = (options.logger ?? consoleLogger).info(metric, requestId);
+          if (logging !== undefined) void Promise.resolve(logging).catch(() => undefined);
+        } catch {
+          // Operational telemetry must never replace or delay the request result.
+        }
+      }
+    },
+  };
+}
+
+async function handle(
+  request: Request,
+  env: Env,
+  route: MetricRoute,
+  requestId: string,
+  options: AppOptions,
+  operational: OperationalContext,
+): Promise<Response> {
+  const origin = request.headers.get('origin');
+  if (route === 'unknown') throw new PublicError('INVALID_REQUEST', 404);
+  if (request.method === 'OPTIONS') return corsResponse(origin);
+  if (request.method !== 'POST') throw new PublicError('INVALID_REQUEST', 405);
+
+  const boundedBody = await readBoundedJson(
+    request,
+    (bodyBytes) => {
+      operational.bodyBytes = bodyBytes;
+    },
+    validBodyReadTimeout(options.bodyReadTimeoutMs),
+  );
+  const body = boundedBody.value;
+  if (hasConsentMismatch(body)) throw new PublicError('CONSENT_REQUIRED', 403);
+  const schema = route === '/v1/analyses' ? AnalyzeRequestSchema : CraftResponseRequestSchema;
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) throw new PublicError('INVALID_REQUEST', 400);
+
+  const secret = options.rateLimitSecret ?? env.RATE_LIMIT_HMAC_SECRET;
+  if (!secret) throw new PublicError('INTERNAL_ERROR', 500);
+  const keys = await deriveRateLimitKeys(
+    parsed.data.installationToken,
+    request.headers.get('CF-Connecting-IP') ?? '0.0.0.0',
+    secret,
+    route,
+  );
+  const rate = await checkRateLimits(env.RATE_LIMITER, keys, route);
+  if (!rate.allowed) throw new PublicError('RATE_LIMITED', 429, rate.retryAfterSeconds);
+
+  const now = Date.now();
+  const entitlement = await (options.entitlementResolver ?? resolveEntitlement)(parsed.data.revenueCatAppUserId, env, now);
+  operational.entitlementCache = entitlement.cache;
+  if (entitlement.plan === 'unknown') {
+    operational.plan = 'unknown';
+    throw new PublicError('ENTITLEMENT_UNAVAILABLE', 503, 5);
+  }
+  const verifiedPlan = entitlement.plan;
+  operational.plan = verifiedPlan;
+  const verifiedCustomerId = parsed.data.revenueCatAppUserId;
+  const subjectDigest = await deriveAdmissionSubjectDigest(
+    verifiedCustomerId ?? parsed.data.installationToken,
+    verifiedCustomerId === undefined ? 'installation' : 'customer',
+    secret,
+  );
+  const reservation = await reserveAdmission(env.AI_ADMISSION, {
+    plan: verifiedPlan,
+    subjectDigest,
+    route,
+    now,
+  }, {
+    maxGlobalInFlight: env.MAX_GLOBAL_IN_FLIGHT,
+    maxDailyProviderUnits: env.MAX_DAILY_PROVIDER_UNITS,
+  });
+  if (!reservation.allowed) {
+    const status = reservation.code === 'PLAN_LIMIT_REACHED' ? 429 : 503;
+    throw new PublicError(reservation.code, status, reservation.retryAfterSeconds);
+  }
+  operational.inFlight = reservation.inFlight;
+  operational.providerUnits = route === '/v1/analyses' ? 3 : 1;
+  operational.budgetWarning = reservation.budgetWarning;
+
+  if (request.signal.aborted) {
+    await completeAdmission(env.AI_ADMISSION, reservation.leaseId, 'pre_provider_abort', Date.now());
+    throw new PublicError('INTERNAL_ERROR', 503, 1);
+  }
+
+  const provider = options.provider ?? createGroqProvider(env.GROQ_API_KEY);
+  if (route === '/v1/analyses') {
+    let analysis;
+    try {
+      const reviewedMessages = (parsed.data as AnalyzeRequest).messages;
+      analysis = RemoteAnalysisResultSchema.parse(await provider.analyze(reviewedMessages));
+      if (!matchesReviewedMessages(analysis.messages, reviewedMessages)) throw new ProviderInvalidResponseError();
+    } catch (error) {
+      const normalized = normalizeProviderError(error);
+      await recordProviderFailure(env.AI_ADMISSION, reservation.leaseId, normalized);
+      throw normalized;
+    }
+    if (request.signal.aborted) await recordInvokedCallerAbort(env.AI_ADMISSION, reservation.leaseId);
+    await recordProviderSuccess(env.AI_ADMISSION, reservation.leaseId);
+    if (request.signal.aborted) await recordInvokedCallerAbort(env.AI_ADMISSION, reservation.leaseId);
+    return addBudgetWarning(json({ analysis, requestId }, 200, origin, requestId), reservation.budgetWarning);
+  }
+
+  let response;
+  try {
+    const input = parsed.data as CraftResponseRequest;
+    const providerInput: ProviderCraftInput = {
+      sender: input.sender,
+      goal: input.goal,
+      tone: input.tone,
+      analysis: {
+        intensityScore: input.analysis.intensityScore,
+        conflictMode: input.analysis.conflictMode,
+        messages: input.analysis.messages,
+      },
+    };
+    response = ResponseDraftSchema.parse(await provider.craftResponse(providerInput));
+  } catch (error) {
+    const normalized = normalizeProviderError(error);
+    await recordProviderFailure(env.AI_ADMISSION, reservation.leaseId, normalized);
+    throw normalized;
+  }
+  if (request.signal.aborted) await recordInvokedCallerAbort(env.AI_ADMISSION, reservation.leaseId);
+  await recordProviderSuccess(env.AI_ADMISSION, reservation.leaseId);
+  if (request.signal.aborted) await recordInvokedCallerAbort(env.AI_ADMISSION, reservation.leaseId);
+  return addBudgetWarning(json({ response, requestId }, 200, origin, requestId), reservation.budgetWarning);
+}
+
+async function recordInvokedCallerAbort(
+  namespace: DurableObjectNamespace,
+  leaseId: string,
+): Promise<void> {
+  await completeAdmission(namespace, leaseId, 'caller_error', Date.now());
+  throw new PublicError('INVALID_REQUEST', 408);
+}
+
+function matchesReviewedMessages(
+  output: readonly Readonly<{ sender: string; text: string }>[],
+  reviewed: readonly Readonly<{ sender: string; text: string }>[],
+): boolean {
+  return output.length === reviewed.length
+    && output.every((message, index) => (
+      message.sender === reviewed[index]?.sender && message.text === reviewed[index]?.text
+    ));
+}
+
+async function recordProviderFailure(namespace: DurableObjectNamespace, leaseId: string, error: unknown): Promise<void> {
+  const outcome = error instanceof ProviderUnavailableError || (error instanceof DOMException && error.name === 'TimeoutError')
+    ? 'provider_failure'
+    : error instanceof ProviderRequestRejectedError
+      ? 'caller_error'
+      : error instanceof ProviderConfigurationError
+        ? 'configuration_failure'
+        : 'invalid_output';
+  await completeAdmission(namespace, leaseId, outcome, Date.now());
+}
+
+async function recordProviderSuccess(namespace: DurableObjectNamespace, leaseId: string): Promise<void> {
+  try {
+    await completeAdmission(namespace, leaseId, 'success', Date.now());
+  } catch (error) {
+    try {
+      await completeAdmission(namespace, leaseId, 'caller_error', Date.now());
+    } catch {
+      // The original bounded accounting failure remains authoritative. If the
+      // compensation request committed but its response was lost, completion
+      // idempotency still leaves the user allowance refunded.
+    }
+    throw error;
+  }
+}
+
+function normalizeProviderError(error: unknown): unknown {
+  if (error instanceof DOMException && error.name === 'TimeoutError') return error;
+  if (error instanceof ProviderInvalidResponseError
+    || error instanceof ProviderUnavailableError
+    || error instanceof ProviderRequestRejectedError
+    || error instanceof ProviderConfigurationError
+    || error instanceof PublicError) return error;
+  if (isProviderFailureKind(error, 'caller')) return new ProviderRequestRejectedError();
+  if (isProviderFailureKind(error, 'configuration')) return new ProviderConfigurationError();
+  if (isProviderFailureKind(error, 'availability')) return new ProviderUnavailableError();
+  if (error instanceof Error) return new ProviderInvalidResponseError();
+  return error;
+}
+
+function isProviderFailureKind(error: unknown, kind: 'caller' | 'configuration' | 'availability'): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'providerFailureKind' in error
+    && error.providerFailureKind === kind;
+}
+
+function addBudgetWarning(response: Response, warning: 'under-80' | 'at-least-80'): Response {
+  if (warning === 'at-least-80') {
+    try {
+      response.headers.set('x-provider-budget-warning', warning);
+    } catch {
+      // Headers created by this Worker are mutable; this is defensive for alternate runtimes.
+    }
+  }
+  return response;
+}
+
+async function readBoundedJson(
+  request: Request,
+  observeBodyBytes: BodyByteObserver,
+  timeoutMs: number,
+): Promise<{ value: unknown; bodyBytes: number }> {
+  const declaredHeader = request.headers.get('content-length');
+  if (declaredHeader !== null) {
+    const declaredLength = Number(declaredHeader);
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
+      observeBodyBytes(MAX_BODY_BYTES + 1);
+      throw new PublicError('PAYLOAD_TOO_LARGE', 413);
+    }
+  }
+  if (!request.body) {
+    observeBodyBytes(0);
+    throw new PublicError('INVALID_REQUEST', 400);
+  }
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  const deadline = performance.now() + timeoutMs;
+  try {
+    while (true) {
+      const { done, value } = await readBodyChunk(reader, request.signal, deadline);
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_BODY_BYTES) {
+        observeBodyBytes(MAX_BODY_BYTES + 1);
+        throw new PublicError('PAYLOAD_TOO_LARGE', 413);
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    if (!(error instanceof PublicError) || error.code !== 'PAYLOAD_TOO_LARGE') observeBodyBytes(total);
+    cancelBodyReader(reader);
+    if (error instanceof PublicError) throw error;
+    throw new PublicError('INVALID_REQUEST', 400);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  observeBodyBytes(total);
+  try {
+    return { value: JSON.parse(new TextDecoder().decode(bytes)), bodyBytes: total };
+  } catch {
+    throw new PublicError('INVALID_REQUEST', 400);
+  }
+}
+
+function validBodyReadTimeout(configured: number | undefined): number {
+  return Number.isFinite(configured) && configured !== undefined && configured >= 1 && configured <= 30_000
+    ? Math.floor(configured)
+    : DEFAULT_BODY_READ_TIMEOUT_MS;
+}
+
+function readBodyChunk(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  signal: AbortSignal,
+  deadline: number,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  if (signal.aborted || performance.now() >= deadline) {
+    return Promise.reject(new PublicError('INVALID_REQUEST', 408));
+  }
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (operation: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
+      operation();
+    };
+    const onAbort = () => finish(() => reject(new PublicError('INVALID_REQUEST', 408)));
+    const timer = setTimeout(
+      () => finish(() => reject(new PublicError('INVALID_REQUEST', 408))),
+      Math.max(1, deadline - performance.now()),
+    );
+    signal.addEventListener('abort', onAbort, { once: true });
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    reader.read().then(
+      (result) => finish(() => resolve(result)),
+      () => finish(() => reject(new PublicError('INVALID_REQUEST', 400))),
+    );
+  });
+}
+
+function cancelBodyReader(reader: ReadableStreamDefaultReader<Uint8Array>): void {
+  try {
+    void reader.cancel().catch(() => undefined);
+  } catch {
+    // Cancellation is best effort and must not delay the public response.
+  }
+}
+
+function hasConsentMismatch(body: unknown): boolean {
+  return typeof body === 'object' && body !== null && !Array.isArray(body)
+    && 'consentVersion' in body && (body as { consentVersion?: unknown }).consentVersion !== CONSENT_VERSION;
+}
+
+function toRoute(url: string): MetricRoute {
+  const pathname = new URL(url).pathname;
+  return pathname === '/v1/analyses' || pathname === '/v1/responses' ? pathname : 'unknown';
+}
+
+function json(value: unknown, status: number, origin: string | null, requestId: string): Response {
+  const headers = corsHeaders(origin);
+  headers.set('content-type', 'application/json; charset=utf-8');
+  headers.set('x-request-id', requestId);
+  return new Response(JSON.stringify(value), { status, headers });
+}
+
+function errorResponse(error: PublicError, requestId: string, origin: string | null): Response {
+  const headers = corsHeaders(origin);
+  headers.set('content-type', 'application/json; charset=utf-8');
+  headers.set('x-public-error-code', error.code);
+  headers.set('x-request-id', requestId);
+  if (error.retryAfterSeconds) headers.set('Retry-After', String(error.retryAfterSeconds));
+  return new Response(JSON.stringify({ error: { code: error.code, requestId, ...(error.retryAfterSeconds ? { retryAfterSeconds: error.retryAfterSeconds } : {}) } }), { status: error.status, headers });
+}
+
+function corsResponse(origin: string | null): Response {
+  const headers = corsHeaders(origin);
+  if (isAllowedOrigin(origin)) {
+    headers.set('access-control-allow-methods', 'POST, OPTIONS');
+    headers.set('access-control-allow-headers', 'content-type');
+    headers.set('access-control-max-age', '86400');
+  }
+  return new Response(null, { status: 204, headers });
+}
+
+function corsHeaders(origin: string | null): Headers {
+  const headers = new Headers({ Vary: 'Origin' });
+  if (isAllowedOrigin(origin) && origin) {
+    headers.set('access-control-allow-origin', origin);
+    headers.set('access-control-expose-headers', 'x-request-id, retry-after, x-provider-budget-warning');
+  }
+  return headers;
+}
+
+function isAllowedOrigin(origin: string | null): boolean {
+  return origin === null || origin === 'https://avinashamanchi.github.io'
+    || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+}
+
+const consoleLogger: Logger = {
+  info: (metric, requestId) => console.log(JSON.stringify({ requestId, metric })),
+};
+
+export default createApp();

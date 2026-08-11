@@ -1,6 +1,6 @@
 # ConvoAutopsy
 
-**AI-powered conversation diagnostics.** Paste any argument, text thread, or chat — get a clinical breakdown of who escalated it, why it broke down, and exactly what to say next.
+**Private conversation reflection tools.** Paste a conversation to review on-device pattern estimates, optionally request AI-assisted feedback after consent, and draft responses you can edit before sending.
 
 Live site → **[avinashamanchi.github.io/convoautopsy](https://avinashamanchi.github.io/convoautopsy/)**
 
@@ -8,14 +8,13 @@ Live site → **[avinashamanchi.github.io/convoautopsy](https://avinashamanchi.g
 
 ## What it does
 
-- **Tension Score** — 0–100 score showing how hostile the conversation was
-- **Gottman's Four Horsemen** — flags every message as Criticism, Contempt, Defensiveness, Stonewalling, or Neutral
-- **Thomas-Kilmann Conflict Mode** — identifies overall conflict style (Competing, Avoiding, Collaborating, etc.)
-- **Transactional Analysis** — tags each message's ego state (Parent, Adult, Child) and its hidden meaning
-- **Response Crafter** — 4-step wizard: pick who you are → set your goal → choose a tone → get 3 tailored responses
+- **Tension Score** — a 0–100 on-device estimate from text patterns, not a factual conclusion about people
+- **Conversation patterns** — educational labels inspired by Gottman, Thomas-Kilmann, and Transactional Analysis; they do not infer intent, diagnosis, or hidden meaning
+- **Response Crafter** — choose a sender, goal, and tone to generate three editable local drafts for human review
 - **Receipt Export** — download a shareable 9:16 PNG of your analysis (Instagram/TikTok ready)
 - **File Upload** — drag-and-drop .txt chat exports (WhatsApp, Discord, etc.)
-- **Saved History** — every analysis saved per user account via localStorage
+- **Saved History** — analyses are stored locally and can be deleted by the user; legacy multi-profile reports stay in a separate versioned recovery file instead of appearing in the current history
+- **Guest-first web app** — the browser-local guest profile has no ConvoAutopsy account or backend account credentials
 
 ---
 
@@ -25,11 +24,11 @@ Live site → **[avinashamanchi.github.io/convoautopsy](https://avinashamanchi.g
 |---|---|
 | Frontend | React 19 + Vite 8 |
 | 3D / Animation | Three.js · React Three Fiber · GSAP ScrollTrigger |
-| AI Analysis | Groq API (llama-3.3-70b-versatile) with local regex fallback |
-| Frameworks | Gottman Method · Thomas-Kilmann · Transactional Analysis |
-| Auth / Storage | localStorage (no backend required) |
+| AI Analysis | Optional consented ConvoAutopsy AI proxy (when deployed); on-device estimates remain available |
+| Frameworks | Educational heuristic inspirations: Gottman · Thomas-Kilmann · Transactional Analysis |
+| Profile / Storage | Browser-local guest profile in localStorage; optional AI proxy for consented assistance |
 | Receipt Export | html2canvas |
-| Mobile | Expo (React Native WebView) · Capacitor iOS |
+| Mobile | Expo / React Native app in `mobile/`; it does not load the website in a WebView |
 | Deployment | GitHub Pages via GitHub Actions |
 
 ---
@@ -37,24 +36,24 @@ Live site → **[avinashamanchi.github.io/convoautopsy](https://avinashamanchi.g
 ## Running Locally
 
 ### Prerequisites
-- Node.js 18+
-- A Groq API key (free at [console.groq.com](https://console.groq.com)) — the app works without one via local fallback
+- Node.js 22+
+- Optional `VITE_AI_PROXY_URL` pointing at the ConvoAutopsy AI proxy — the app works without it via on-device fallback
 
 ### 1. Clone and install
 
 ```bash
 git clone https://github.com/avinashamanchi/convoautopsy.git
 cd convoautopsy
-npm install
+npm ci
 ```
 
-### 2. Add your API key (optional but recommended)
+### 2. Configure the public proxy endpoint (optional)
 
 ```bash
-echo "VITE_GROQ_API_KEY=your_key_here" > .env
+echo "VITE_AI_PROXY_URL=https://your-proxy.example" > .env
 ```
 
-Without this the app uses a built-in local analysis engine — still fully functional.
+`VITE_AI_PROXY_URL` is a public endpoint configuration, not a secret. Provider credentials remain on the server. Without this the app uses its on-device analysis and response templates.
 
 ### 3. Start the dev server
 
@@ -68,72 +67,50 @@ Open [http://localhost:5173/convoautopsy/](http://localhost:5173/convoautopsy/)
 
 ```bash
 npm run build        # GitHub Pages build (base: /convoautopsy/)
-npm run build:app    # Mobile/Capacitor build (base: ./)
 ```
 
 ---
 
-## Mobile Development (Expo — live preview on your phone)
+## Mobile Development (Expo)
 
-See the app live on your phone with instant hot reload while you develop.
-
-### Setup
+The current native app is in `mobile/` and requires Node 22.
 
 ```bash
-cd native
-npm install
+cd mobile
+npm ci
+npm test
+npm run typecheck
+npm run lint
+npm run expo:doctor
+npm run export:ios
+node ../scripts/check-mobile-audit.mjs
 ```
 
-### Run
+For a bounded Expo Go smoke test on the same network, run `npx expo start --lan --clear`, scan the generated QR code with Expo Go, and stop the server when finished. Expo Go does not compile the local Swift Vision OCR module; its screenshot import fallback is expected there. Physical-device navigation, input, history, accessibility, offline, and share observations remain a user-run release checkpoint.
 
-In two terminals:
-
-**Terminal 1 — web dev server (exposed to network):**
-```bash
-npm run dev -- --host 0.0.0.0
-```
-
-**Terminal 2 — Expo:**
-```bash
-cd native
-npx expo start --lan
-```
-
-Scan the QR code with **Expo Go** (free on the App Store). Your phone must be on the same WiFi as your Mac.
-
-> **Note:** Update the IP address in `native/App.js` if your local IP changes (`ipconfig getifaddr en0` to check).
+The repeatable Maestro flow is [`mobile/e2e/analyze-flow.yaml`](mobile/e2e/analyze-flow.yaml). It uses production-control semantic IDs and, after the user presses Share, asserts the stock iOS **Copy** control. That exact assertion requires an English-locale iOS share sheet and proves only that the system sheet opened; it never treats an external share as completed.
 
 ---
 
-## iOS App Store Submission (Capacitor)
+## iOS Release Path (Expo/EAS)
 
-The `ios/` directory contains a complete Xcode project.
+The only supported iOS release target is `mobile/` through Expo/EAS. The legacy Capacitor target is historical and its root `ios`, `sync`, and `build:app` scripts now fail deterministically instead of producing a second candidate. App Store uploads currently require Xcode 26 or later using the iOS 26 SDK or later. Apple Developer membership, Expo login, EAS initialization, development-build OCR verification, production build, TestFlight, App Store Connect record, review, and publication are not complete.
 
-### Requirements
-- **Xcode** — download free from the Mac App Store (~12GB)
-- **Apple Developer Account** — $99/year at [developer.apple.com](https://developer.apple.com/programs)
+After the user has personally completed the Apple and Expo credential steps, the user-owned release process uses EAS from `mobile/` to create a development build, verify native OCR on a physical iPhone, and only then create a production build and submit it. Do not treat an Expo Go export or a submission as App Store publication.
 
-### Steps
+### GitHub Pages proxy configuration
 
-```bash
-# 1. Build and sync
-npm run ios   # builds, syncs, and opens Xcode automatically
+For the deployed site to use AI assistance, set a repository **variable** (not a secret):
 
-# 2. In Xcode:
-#    - Select your team under Signing & Capabilities
-#    - Product → Archive
-#    - Distribute App → App Store Connect
+**Settings → Secrets and variables → Actions → Variables → New repository variable**
+```
+Name:  VITE_AI_PROXY_URL
+Value: https://your-proxy.example
 ```
 
-### GitHub Actions Secret
+The browser never receives provider credentials. Before AI use, the site asks for consent and provides an exact-data review. An AI analysis request sends to ConvoAutopsy's Cloudflare service: schema version, consent version, an installation token, and each reviewed message sender and message text. The service forwards only the reviewed message sender and message text to Groq. An AI response-drafting request sends the service schema version, consent version, the installation token, the chosen response sender, goal, and tone, the analysis mode, intensity score, and conflict mode, and—for each message—the message sender, edited message text, pattern, ego state, and edited possible interpretation. The service forwards the content and drafting fields to Groq; it does not forward schema version, consent version, the installation token, or analysis mode to Groq. Technical identifier values are not displayed in the review.
 
-For the deployed site to use real AI (not just the local fallback), add this secret to your GitHub repo:
-
-**Settings → Secrets → Actions → New repository secret**
-```
-Name:  VITE_GROQ_API_KEY
-Value: your_groq_api_key
-```
+Person labels are pseudonymous, not anonymous, and message text may still contain emails, phone numbers, third-party names, and context unless it is reviewed and redacted first. On-device analysis and drafts remain available without sharing. Separately, in the native app, Free verification can send a pseudonymous RevenueCat app-user ID even without a subscription; purchase and entitlement checks can send that ID and purchase information to RevenueCat for app functionality and subscription analytics.
 
 ---
 
@@ -145,8 +122,7 @@ convoautopsy/
 │   ├── pages/
 │   │   ├── LandingPage.jsx     # Marketing site with 3D phone + all sections
 │   │   ├── LandingPage.css     # Landing page styles
-│   │   ├── Dashboard.jsx       # Main app (input, history, analysis)
-│   │   └── AuthPage.jsx        # Login / signup
+│   │   └── Dashboard.jsx       # Browser-local guest workspace (input, history, analysis)
 │   ├── components/
 │   │   ├── PhoneScene.jsx      # 3D Apple iPhone (React Three Fiber)
 │   │   ├── ChatBubbles.jsx     # Floating chat bubbles in 3D scene
@@ -154,17 +130,21 @@ convoautopsy/
 │   │   ├── ResponseCrafter.jsx # 4-step response wizard
 │   │   └── Onboarding.jsx      # First-run walkthrough modal
 │   ├── utils/
-│   │   ├── analyzeConversation.js  # Groq API + local regex fallback
-│   │   ├── craftResponse.js        # Response generation (30 template sets)
-│   │   └── storage.js              # localStorage auth + conversation history
+│   │   ├── analyzeConversation.js  # Proxy client + local regex fallback
+│   │   ├── craftResponse.js        # Proxy client + local response templates
+│   │   └── storage.js              # Guest-profile migration + local report history
 │   └── index.css               # Global styles + all component styles
-├── native/                     # Expo app (live phone preview)
-│   └── App.js                  # WebView pointing to Vite dev server
-├── ios/                        # Capacitor iOS Xcode project
+├── mobile/                     # Expo / React Native iOS app
+│   ├── app/                    # Expo Router screens
+│   ├── src/                    # Local analysis, persistence, consent, exports
+│   ├── modules/convo-ocr/      # Native Apple Vision module (development build required)
+│   └── e2e/                    # Maestro release flow
+├── server/ai-proxy/            # Cloudflare Worker and Durable Object limiter
 ├── .github/workflows/
-│   └── deploy.yml              # GitHub Actions → GitHub Pages
-├── capacitor.config.ts         # Capacitor / iOS configuration
-└── vite.config.js              # Vite config (base path switches for mobile)
+│   ├── deploy.yml              # GitHub Actions → GitHub Pages
+│   ├── ios-ci.yml              # Node 22 web, mobile, and Worker gates
+│   └── release-readiness.yml   # Manual local gates; never deploys or submits
+└── vite.config.js              # Vite config for the web application
 ```
 
 ---
@@ -180,7 +160,9 @@ Alex: That's not what I said. Stop twisting my words.
 Jordan: Whatever. I'm done with this conversation.
 ```
 
-Names are automatically anonymized to Person A / Person B before any AI processing.
+Participant labels are pseudonymous Person A / Person B labels, not proof of anonymity. Parsed and saved message text may still contain emails, phone numbers, third-party names, and context unless it is reviewed and redacted before analysis. Turning off original-source retention does not remove the parsed message text stored inside a saved analysis.
+
+The guest-first web migration never reads retired local credentials. It migrates only the previously selected legacy profile into current history and preserves every legacy report bucket, including other-profile and logged-out buckets, in a schema-validated `convoautopsy.web.legacy-recovery.v1` envelope. The dashboard shows only counts until the user explicitly exports the private recovery file; export leaves the browser recovery copy intact, and Delete All removes it with the other app-owned browser data when deletion succeeds.
 
 ---
 

@@ -1,0 +1,7 @@
+{
+  "platforms": ["apple"],
+  "apple": {
+    "modules": ["ConvoOcrModule"],
+    "podspecPath": "./ios/ConvoOcr.podspec"
+  }
+}

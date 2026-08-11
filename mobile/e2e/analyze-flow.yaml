@@ -1,0 +1,39 @@
+appId: com.avinashamanchi.convoautopsy
+---
+- launchApp:
+    clearState: true
+- tapOn:
+    id: analyze-input
+- inputText: "Alex: Hello\\nJordan: Hi"
+- tapOn:
+    id: review-conversation
+- assertVisible: "Person A"
+- assertVisible: "Person B"
+- tapOn:
+    id: run-local-analysis
+- assertVisible: "On-device estimate"
+- tapOn:
+    id: save-report
+- tapOn:
+    id: save-without-source
+- tapOn:
+    id: open-history
+- tapOn:
+    id: report-row-0
+- assertVisible: "On-device estimate"
+- tapOn:
+    id: open-responses
+- tapOn:
+    id: response-report-row-0
+- tapOn:
+    id: sender-person-a
+- tapOn:
+    id: goal-resolve
+- tapOn:
+    id: tone-deescalating
+- tapOn:
+    id: generate-responses
+- assertVisible: "Draft—review before sending"
+- tapOn:
+    id: share-response-0
+- assertVisible: "Copy"
