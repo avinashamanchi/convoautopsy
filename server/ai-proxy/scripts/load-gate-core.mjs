@@ -1,6 +1,15 @@
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 const INSTALLATION_COHORT_SIZE = 100;
 
+export function scrubProviderSecrets(environment) {
+  if (!environment || typeof environment !== 'object' || Array.isArray(environment)) {
+    throw new Error('Invalid process environment');
+  }
+  return Object.fromEntries(Object.entries(environment).filter(([key]) => (
+    !/GROQ|REVENUECAT|LOAD_FIXTURE|RATE_LIMIT_HMAC/i.test(key)
+  )));
+}
+
 export function parseLoadOptions(args) {
   const values = [...args];
   let ci = false;
