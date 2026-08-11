@@ -73,6 +73,6 @@ Keep offer codes, win-back offers, promoted IAP, Family Sharing, alternative dig
 
 - **Code-complete:** repository behavior, copy, scanner, workflows, and packet are implemented and reviewed.
 - **Locally verified:** automated tests, type/lint, exports, dry builds, scans, audits, and the short fixture gate pass for the exact candidate.
-- **External configuration pending:** Apple, RevenueCat, Cloudflare, Groq, EAS, legal URL, and account configuration are not inferred from repository files.
+- **External configuration pending:** Apple, RevenueCat, Cloudflare, Groq, EAS, and account configuration are not inferred from repository files. Privacy, Terms, and Support were independently verified after deployment on 2026-08-11 and must be rechecked immediately before submission.
 - **Signed device/TestFlight pending:** native purchases, restore, OCR, account transitions, accessibility, and screenshots require a signed build and device evidence.
 - **App Store review/publication pending:** upload, forms, review outcome, listing, and public availability require direct App Store Connect evidence.
