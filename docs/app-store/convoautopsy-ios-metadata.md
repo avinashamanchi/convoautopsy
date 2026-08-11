@@ -1,6 +1,6 @@
 # ConvoAutopsy iOS metadata
 
-Initial fields, reviewed 2026-08-10 against Apple's current metadata limits (revise if App Store Connect rejects a field or category). The complete policy decision record is `apple-review-guideline-applicability.md`:
+Initial fields, reviewed 2026-08-11 against Apple's current metadata limits (revise if App Store Connect rejects a field or category). The complete policy decision record is `apple-review-guideline-applicability.md`:
 
 - Name: `ConvoAutopsy`
 - Subtitle: `See conversation patterns`
@@ -44,4 +44,4 @@ Exact products are `com.avinashamanchi.convoautopsy.pro.monthly` and `com.avinas
 
 ## Truthful release status
 
-This metadata is code-prepared only. The proxy and legal-page changes are not deployed, the Swift OCR module has not been compiled in an iOS development build, and Expo Go has a documented OCR fallback. On 2026-08-09 the public Privacy, Terms, and Support URLs still returned HTTP 404. Apple/RevenueCat/Cloudflare/EAS configuration, signed purchase and restore tests, TestFlight, screenshots, App Store Connect forms, upload, review, acceptance, publication, and post-publication URL checks are not complete. Historical proxy-token revocation/purge remains a release blocker until a deployed proxy’s retention and deletion behavior is verified.
+This metadata and the public legal site are code-prepared only. On 2026-08-11 the public Privacy, Terms, and Support URLs each returned HTTPS 200 and matched the tracked release files byte for byte. The proxy is not deployed, the Swift OCR module has not been compiled in an iOS development build, and Expo Go has a documented OCR fallback. Apple/RevenueCat/Cloudflare/EAS configuration, signed purchase and restore tests, TestFlight, screenshots, App Store Connect forms, upload, review, acceptance, publication, and post-publication URL checks are not complete. Historical proxy-token revocation/purge remains a release blocker until a deployed proxy’s retention and deletion behavior is verified.
