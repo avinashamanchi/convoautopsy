@@ -67,7 +67,11 @@ const cohorts = Object.freeze({
   workload: fixedShortCohort
     ? createFixedWorkloadCohort(workloadRequestCount)
     : Object.freeze({ strategy: 'quota-safe', ...quotaSafeWorkloadPlan }),
-  capacity: Object.freeze({ ...capacityCohort, transportConcurrency: capacityTransportConcurrency }),
+  capacity: Object.freeze({
+    ...capacityCohort,
+    transportConcurrency: capacityTransportConcurrency,
+    holdDeadlineMs: options.capacityHoldMs,
+  }),
   tokenAbuseInstallations: 1,
 });
 const timers = new Set();
@@ -217,7 +221,7 @@ async function runCapacityPhase(target) {
   await fixtureControl(target, 'hold');
   const pending = Array.from(
     { length: capacityCohort.admittedInstallations },
-    (_, index) => sendApiRequest(target, capacityIdentity(index), true),
+    (_, index) => sendApiRequest(target, capacityIdentity(index), true, options.capacityHoldMs),
   );
   let overload = [];
   let activeReservations = 0;
@@ -279,7 +283,7 @@ async function runAbusiveTokenPhase(target) {
   return samples;
 }
 
-async function sendApiRequest(target, identity, injected) {
+async function sendApiRequest(target, identity, injected, timeoutMs = options.clientMs) {
   const started = performance.now();
   const route = identity.route;
   const headers = { 'content-type': 'application/json' };
@@ -293,7 +297,7 @@ async function sendApiRequest(target, identity, injected) {
       headers,
       body: JSON.stringify(createApiPayload(route, identity.installationToken)),
     }, {
-      timeoutMs: options.clientMs,
+      timeoutMs,
       maxBytes: 16 * 1_024,
       parentSignal: outstanding.signal,
     });

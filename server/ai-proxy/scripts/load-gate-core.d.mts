@@ -11,6 +11,7 @@ export type LoadOptions = Readonly<{
   readinessMs: 30_000;
   diagnosticsMs: 2_000;
   clientMs: 25_000;
+  capacityHoldMs: 90_000;
 }>;
 
 export type LoadSample = Readonly<{

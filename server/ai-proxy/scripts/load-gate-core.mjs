@@ -54,6 +54,7 @@ export function parseLoadOptions(args) {
     readinessMs: 30_000,
     diagnosticsMs: 2_000,
     clientMs: 25_000,
+    capacityHoldMs: 90_000,
   });
 }
 

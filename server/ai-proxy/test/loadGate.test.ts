@@ -136,6 +136,7 @@ describe('load gate runner contract', () => {
       readinessMs: 30_000,
       diagnosticsMs: 2_000,
       clientMs: 25_000,
+      capacityHoldMs: 90_000,
     });
     expect(parseLoadOptions(['--ci'])).toMatchObject({ sustainedSeconds: 5, burstSeconds: 2 });
     expect(createPlannedWorkload(parseLoadOptions([]))).toEqual({
