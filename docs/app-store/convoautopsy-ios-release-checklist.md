@@ -33,9 +33,10 @@ Do not reuse an earlier commit’s results for a later candidate. Record fresh e
 
 - [x] Full root: 15 test files / 119 tests, zero-warning source lint, and production build passed locally under Node 22. The documented large-chunk warning remains visible.
 - [x] Full mobile: 38 suites / 412 tests, TypeScript, declared lint, Expo Doctor 18/18 in the release checkout, and iOS Expo export passed locally under Node 22. The exact staged-snapshot typecheck also passed without relying on ignored generated declarations.
-- [x] Full Worker: 11 files / 197 tests, TypeScript, zero-warning lint, production dry build, and local-fixture dry build passed locally under Node 22.
+- [x] Full Worker: 11 files / 198 tests, TypeScript, zero-warning lint, production dry build, and local-fixture dry build passed locally under Node 22.
 - [x] Redacted scan of tracked files plus web, mobile, production Worker, and fixture Worker outputs passed.
 - [x] Root and Worker production dependency audits with `--omit=dev --audit-level=high` returned 0 vulnerabilities at the current audit. Mobile CI now fails closed on any high/critical advisory except the two explicitly reviewed `image-size` parser advisories (GitHub sources `1138808` and `1138809`) through Expo/Metro; the current report has 12 transitive findings, and npm offers only a forced breaking Expo downgrade.
+- [x] GitHub Dependabot alerts and automated security fixes are enabled. CodeQL default setup uses the extended query suite for Actions and JavaScript/TypeScript, the current PR scan passed, workflow actions are pinned to immutable commit SHAs, and the historical phase-one package lock now audits at zero vulnerabilities.
 - [x] Missing and sanitized-example production Expo configs exited nonzero; a synthetic valid config passed with the authoritative bundle ID and neither public value in `extra`.
 - [x] The first exact short local fixture run stopped at `LOAD_GATE_CAPACITY` after 65 successful scheduled samples. Four identical subsequent runs passed 100/101 with zero leaks. The independent controller then ran three more consecutive identical 100/101 gates successfully, and the review-fix candidate added another successful 100/101 run. The original anomaly remains preserved verbatim in the Task 8B report rather than being erased.
 - [x] Workflow/publication tests, YAML structure checks, `git diff --check`, and explicit exclusion checks are part of the final candidate verification. The ignored report preserves commands and results.
@@ -92,5 +93,6 @@ Historical note: commit `d2a02edbced8d3984058ebc0814b97612824ac22` had a separat
 - [ ] The local machine has only Command Line Tools selected and no usable full Xcode archive proof. CocoaPods 1.17.0 is now installed, but CocoaPods alone cannot compile or sign the candidate.
 - [ ] EAS was observed as `Not logged in` again on 2026-08-11; no EAS build or submission is inferred.
 - [ ] The AI proxy is not deployed and no Cloudflare, Groq, RevenueCat secret, Expo, Apple, or signing credential has been entered into this repository.
+- [ ] GitHub secret-scanning alert 1 records a historical GitHub OAuth token with unknown validity. Authorized revocation and provider-side confirmation remain required; no token value is reproduced in this checklist.
 
 No App Store acceptance, publication, external provider configuration, or signed-device result is claimed by this checklist. Legal-page availability is independently verified above.
