@@ -85,6 +85,18 @@ const createFixedWorkloadCohort = (loadGateCore as unknown as {
     exercisedInstallations: number;
   }>;
 }).createFixedWorkloadCohort!;
+const pollDiagnosticValue = (loadGateCore as unknown as {
+  pollDiagnosticValue?: (
+    read: () => Promise<number>,
+    predicate: (value: number) => boolean,
+    options: Readonly<{
+      timeoutMs: number;
+      intervalMs: number;
+      now: () => number;
+      wait: (milliseconds: number) => Promise<void>;
+    }>,
+  ) => Promise<Readonly<{ matched: boolean; value: number; peak: number }>>;
+}).pollDiagnosticValue!;
 
 describe('load gate runner contract', () => {
   it('uses the exact full and CI phase durations and bounded deadlines', () => {
@@ -325,6 +337,24 @@ describe('load gate runner contract', () => {
       { stage: 'capacity', activeReservations: 0 },
       { stage: 'token-abuse', activeReservations: 0 },
     ], 'token-abuse')).toBe(0);
+  });
+
+  it('retries transient diagnostics failures until the bounded poll observes capacity', async () => {
+    let attempts = 0;
+    let elapsed = 0;
+    const result = await pollDiagnosticValue(async () => {
+      attempts += 1;
+      if (attempts < 3) throw new Error('transient fixture contention');
+      return 100;
+    }, (value) => value === 100, {
+      timeoutMs: 100,
+      intervalMs: 10,
+      now: () => elapsed,
+      wait: async (milliseconds) => { elapsed += milliseconds; },
+    });
+
+    expect(result).toEqual({ matched: true, value: 100, peak: 100 });
+    expect(attempts).toBe(3);
   });
 
   it.each([

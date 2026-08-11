@@ -20,6 +20,7 @@ import {
   fetchApiResponseWithDeadline,
   fetchBoundedJsonWithDeadline,
   parseLoadOptions,
+  pollDiagnosticValue,
   requireFreshFinalDiagnostics,
   routeForRequestIndex,
   scheduledOffsets,
@@ -328,16 +329,11 @@ async function fixtureControl(target, action) {
 }
 
 async function pollDiagnostics(target, predicate, timeoutMs) {
-  const deadline = performance.now() + timeoutMs;
-  let latest = -1;
-  let peak = 0;
-  while (performance.now() < deadline) {
-    latest = await fixtureDiagnostics(target);
-    peak = Math.max(peak, latest);
-    if (predicate(latest)) return { matched: true, value: latest, peak };
-    await delay(25);
-  }
-  return { matched: false, value: latest, peak };
+  return pollDiagnosticValue(
+    () => fixtureDiagnostics(target),
+    predicate,
+    { timeoutMs, intervalMs: 25, wait: delay },
+  );
 }
 
 async function fixtureDiagnostics(target) {

@@ -83,6 +83,16 @@ export function requireFreshFinalDiagnostics(
   observations: readonly Readonly<{ stage: string; activeReservations: number }>[],
   finalInjectedStage: string,
 ): number;
+export function pollDiagnosticValue(
+  read: () => Promise<number>,
+  predicate: (value: number) => boolean,
+  options: Readonly<{
+    timeoutMs: number;
+    intervalMs?: number;
+    now?: () => number;
+    wait?: (milliseconds: number) => Promise<void>;
+  }>,
+): Promise<Readonly<{ matched: boolean; value: number; peak: number }>>;
 export function routeForRequestIndex(index: number): '/v1/analyses' | '/v1/responses';
 export function exactRouteMix(routeCounts: Readonly<Record<string, number>>, total: number): boolean;
 export function abusiveRateLimitObserved(samples: readonly LoadSample[]): boolean;

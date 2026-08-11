@@ -179,6 +179,39 @@ export function requireFreshFinalDiagnostics(observations, finalInjectedStage) {
   return last.activeReservations;
 }
 
+export async function pollDiagnosticValue(read, predicate, {
+  timeoutMs,
+  intervalMs = 25,
+  now = () => performance.now(),
+  wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+}) {
+  if (typeof read !== 'function' || typeof predicate !== 'function'
+    || !Number.isFinite(timeoutMs) || timeoutMs <= 0
+    || !Number.isFinite(intervalMs) || intervalMs <= 0
+    || typeof now !== 'function' || typeof wait !== 'function') {
+    throw new Error('Invalid diagnostics poll input');
+  }
+  const deadline = now() + timeoutMs;
+  let latest = -1;
+  let peak = 0;
+  while (now() < deadline) {
+    try {
+      const observed = await read();
+      if (!Number.isSafeInteger(observed) || observed < 0) {
+        throw new Error('Invalid diagnostics observation');
+      }
+      latest = observed;
+      peak = Math.max(peak, observed);
+      if (predicate(observed)) return Object.freeze({ matched: true, value: latest, peak });
+    } catch {
+      // A busy local Worker can transiently delay diagnostics; the outer deadline remains authoritative.
+    }
+    const remaining = deadline - now();
+    if (remaining > 0) await wait(Math.min(intervalMs, remaining));
+  }
+  return Object.freeze({ matched: false, value: latest, peak });
+}
+
 export function routeForRequestIndex(index) {
   if (!Number.isSafeInteger(index) || index < 0) throw new Error('Invalid load request index');
   const cohortPosition = index % INSTALLATION_COHORT_SIZE;
