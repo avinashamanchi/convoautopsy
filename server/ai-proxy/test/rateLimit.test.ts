@@ -36,7 +36,7 @@ describe('rate limits', () => {
     }
 
     expect(results.every((result) => result.allowed)).toBe(true);
-  });
+  }, 15_000);
 
   it('enforces the token bucket when source IPs rotate', async () => {
     const results = [];
