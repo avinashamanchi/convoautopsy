@@ -27,6 +27,7 @@ import {
   routeForRequestIndex,
   scheduledOffsets,
   settleWithConcurrency,
+  scrubProviderSecrets,
 } from './load-gate-core.mjs';
 
 const PUBLIC_CODES = new Set([
@@ -448,14 +449,6 @@ async function writeFixtureEnv(path, secret) {
     'GROQ_API_KEY=fixture-unused',
     '',
   ].join('\n'), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
-}
-
-function scrubProviderSecrets(environment) {
-  const result = { ...environment };
-  for (const key of Object.keys(result)) {
-    if (/GROQ|REVENUECAT|LOAD_FIXTURE|RATE_LIMIT_HMAC/i.test(key)) delete result[key];
-  }
-  return result;
 }
 
 async function terminateChild(subprocess) {

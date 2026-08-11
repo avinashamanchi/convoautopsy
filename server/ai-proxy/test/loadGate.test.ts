@@ -125,8 +125,29 @@ const settleWithConcurrency = (loadGateCore as unknown as {
     operation: (value: T, index: number) => Promise<R>,
   ) => Promise<PromiseSettledResult<R>[]>;
 }).settleWithConcurrency!;
+const scrubProviderSecrets = (loadGateCore as unknown as {
+  scrubProviderSecrets?: (environment: Record<string, string>) => Record<string, string>;
+}).scrubProviderSecrets!;
 
 describe('load gate runner contract', () => {
+  it('removes provider credentials without allowing prototype mutation', () => {
+    const environment = Object.create(null) as Record<string, string>;
+    Object.defineProperty(environment, '__proto__', { enumerable: true, value: 'literal-value' });
+    environment.PATH = '/usr/bin';
+    environment.GROQ_API_KEY = 'private';
+    environment.REVENUECAT_SECRET_API_KEY = 'private';
+    environment.RATE_LIMIT_HMAC_SECRET = 'private';
+
+    const scrubbed = scrubProviderSecrets(environment);
+
+    expect(scrubbed.PATH).toBe('/usr/bin');
+    expect(Object.hasOwn(scrubbed, '__proto__')).toBe(true);
+    expect(scrubbed.__proto__).toBe('literal-value');
+    expect(scrubbed).not.toHaveProperty('GROQ_API_KEY');
+    expect(Object.getPrototypeOf(scrubbed)).toBe(Object.prototype);
+    expect(Object.prototype).not.toHaveProperty('literal-value');
+  });
+
   it('uses the exact full and CI phase durations and bounded deadlines', () => {
     expect(parseLoadOptions([])).toMatchObject({
       sustainedRps: 5,
