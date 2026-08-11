@@ -26,6 +26,7 @@ import {
   requireFreshFinalDiagnostics,
   routeForRequestIndex,
   scheduledOffsets,
+  settleWithConcurrency,
 } from './load-gate-core.mjs';
 
 const PUBLIC_CODES = new Set([
@@ -61,11 +62,12 @@ const workloadRequestCount = plannedWorkload.totalRequests;
 const fixedShortCohort = workloadRequestCount <= 100;
 const quotaSafeWorkloadPlan = fixedShortCohort ? undefined : createQuotaSafeWorkloadPlan(workloadRequestCount);
 const capacityCohort = createCapacityCohort(1_000, 100);
+const capacityTransportConcurrency = 32;
 const cohorts = Object.freeze({
   workload: fixedShortCohort
     ? createFixedWorkloadCohort(workloadRequestCount)
     : Object.freeze({ strategy: 'quota-safe', ...quotaSafeWorkloadPlan }),
-  capacity: capacityCohort,
+  capacity: Object.freeze({ ...capacityCohort, transportConcurrency: capacityTransportConcurrency }),
   tokenAbuseInstallations: 1,
 });
 const timers = new Set();
@@ -231,15 +233,15 @@ async function runCapacityPhase(target) {
     if (!heldDiagnostic.matched) failures.push('CAPACITY_DIAGNOSTICS');
     else {
       currentStage = 'CAPACITY_OVERLOAD';
-      const overflowOperations = Array.from(
+      const overflowIdentities = Array.from(
         { length: capacityCohort.overloadInstallations },
-        (_, offset) => sendApiRequest(
-          target,
-          capacityIdentity(capacityCohort.admittedInstallations + offset),
-          true,
-        ),
+        (_, offset) => capacityIdentity(capacityCohort.admittedInstallations + offset),
       );
-      overload = settledSamples(await Promise.allSettled(overflowOperations));
+      overload = settledSamples(await settleWithConcurrency(
+        overflowIdentities,
+        capacityTransportConcurrency,
+        (identity) => sendApiRequest(target, identity, true),
+      ));
       if (overload.length !== capacityCohort.overloadInstallations
         || overload.some((sample) => sample.status !== 503 || sample.code !== 'SERVICE_BUSY')) {
         failures.push('CAPACITY_OVERLOAD');

@@ -118,6 +118,13 @@ const pollDiagnosticValue = (loadGateCore as unknown as {
     }>,
   ) => Promise<Readonly<{ matched: boolean; value: number; peak: number }>>;
 }).pollDiagnosticValue!;
+const settleWithConcurrency = (loadGateCore as unknown as {
+  settleWithConcurrency?: <T, R>(
+    values: readonly T[],
+    maxConcurrency: number,
+    operation: (value: T, index: number) => Promise<R>,
+  ) => Promise<PromiseSettledResult<R>[]>;
+}).settleWithConcurrency!;
 
 describe('load gate runner contract', () => {
   it('uses the exact full and CI phase durations and bounded deadlines', () => {
@@ -173,6 +180,30 @@ describe('load gate runner contract', () => {
       ])),
       1_000,
     )).toBe(true);
+  });
+
+  it('settles every overload probe while bounding local transport concurrency', async () => {
+    let active = 0;
+    let peak = 0;
+    const results = await settleWithConcurrency(
+      Array.from({ length: 37 }, (_, index) => index),
+      4,
+      async (value) => {
+        active += 1;
+        peak = Math.max(peak, active);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        active -= 1;
+        if (value === 19) throw new Error('synthetic failure');
+        return value * 2;
+      },
+    );
+
+    expect(peak).toBe(4);
+    expect(active).toBe(0);
+    expect(results).toHaveLength(37);
+    expect(results[0]).toEqual({ status: 'fulfilled', value: 0 });
+    expect(results[19]?.status).toBe('rejected');
+    expect(results[36]).toEqual({ status: 'fulfilled', value: 72 });
   });
 
   it('requires separate provider authorization and synthetic-content acknowledgement for non-loopback targets', () => {
@@ -368,6 +399,17 @@ describe('load gate runner contract', () => {
       routeCounts: { '/v1/analyses': 1, '/v1/responses': 1 },
       latencyMs: { p50: 100, p95: 300, p99: 300 },
       activeReservations: 'not-measured',
+    });
+  });
+
+  it('keeps capacity substages visible in content-free fatal summaries', () => {
+    expect(createFatalSummary({
+      stage: 'CAPACITY_RELEASE',
+      samples: [],
+      activeReservations: 100,
+    })).toMatchObject({
+      failureCodes: ['LOAD_GATE_CAPACITY_RELEASE'],
+      activeReservations: 100,
     });
   });
 

@@ -75,6 +75,11 @@ export function createCapacityIdentity(
   syntheticIp: string;
   route: '/v1/analyses' | '/v1/responses';
 }>;
+export function settleWithConcurrency<T, R>(
+  values: readonly T[],
+  maxConcurrency: number,
+  operation: (value: T, index: number) => Promise<R>,
+): Promise<PromiseSettledResult<R>[]>;
 export type QuotaSafeWorkloadPlan = Readonly<{
   totalRequests: number;
   analysisRequests: number;

@@ -151,6 +151,31 @@ export function createCapacityIdentity(runId, index, simultaneousClients) {
   });
 }
 
+export async function settleWithConcurrency(values, maxConcurrency, operation) {
+  if (!Array.isArray(values)
+    || !Number.isSafeInteger(maxConcurrency)
+    || maxConcurrency <= 0
+    || typeof operation !== 'function') {
+    throw new Error('Invalid bounded concurrency input');
+  }
+  const results = new Array(values.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(maxConcurrency, values.length);
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (nextIndex < values.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      try {
+        results[index] = { status: 'fulfilled', value: await operation(values[index], index) };
+      } catch (reason) {
+        results[index] = { status: 'rejected', reason };
+      }
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 export function createQuotaSafeWorkloadPlan(totalRequests) {
   if (!Number.isSafeInteger(totalRequests) || totalRequests <= 0 || totalRequests % 10 !== 0) {
     throw new Error('Quota-safe workload count must be a positive multiple of ten');
@@ -472,7 +497,20 @@ function lexicalKeyOrder(left, right) {
 }
 
 function safeStage(stage) {
-  return ['STARTUP', 'SUSTAINED', 'BURST', 'MIX', 'CAPACITY', 'TOKEN_LIMIT', 'EVALUATION'].includes(stage) ? stage : 'INTERNAL';
+  return [
+    'STARTUP',
+    'SUSTAINED',
+    'BURST',
+    'MIX',
+    'CAPACITY',
+    'CAPACITY_HOLD',
+    'CAPACITY_WAIT',
+    'CAPACITY_OVERLOAD',
+    'CAPACITY_RELEASE',
+    'CAPACITY_DRAIN',
+    'TOKEN_LIMIT',
+    'EVALUATION',
+  ].includes(stage) ? stage : 'INTERNAL';
 }
 
 function settleBeforeAbort(operation, signal) {
