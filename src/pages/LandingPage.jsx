@@ -1,21 +1,14 @@
-import React, { useCallback, useRef, useEffect, useState } from 'react'
-import { Canvas } from '@react-three/fiber'
+import { useCallback, useRef, useEffect, useState } from 'react'
 import { gsap } from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
-import PhoneScene from '../components/PhoneScene'
+import HeroLiveDemo from '../components/HeroLiveDemo'
 import { analyzeConversation, DEMO_TEXT, DEMO_RESULT } from '../utils/analyzeConversation'
 import './LandingPage.css'
 
 gsap.registerPlugin(ScrollTrigger)
 
 const GITHUB_URL = 'https://github.com/avinashamanchi/convoautopsy'
-
-class CanvasErrorBoundary extends React.Component {
-  state = { hasError: false }
-  static getDerivedStateFromError() { return { hasError: true } }
-  componentDidCatch(e) { console.error('3D Canvas error:', e) }
-  render() { if (this.state.hasError) return null; return this.props.children }
-}
+const LEGAL_BASE = 'https://avinashamanchi.github.io/convoautopsy'
 
 const TAG_COLORS = {
   Stonewalling: '#f87171', Criticism: '#fbbf24',
@@ -25,100 +18,83 @@ const scoreColor = (s) => s >= 70 ? '#f87171' : s >= 45 ? '#fbbf24' : '#34d399'
 
 // ── NavBar ─────────────────────────────────────────────────────────
 function NavBar({ user, onGetStarted, onGoToDashboard }) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const openSample = user ? onGoToDashboard : onGetStarted
+  const destinations = [
+    ['Demo', '#demo'],
+    ['Method', '#method'],
+    ['Privacy', '#privacy'],
+    ['Support', `${LEGAL_BASE}/support.html`],
+  ]
+
   return (
-    <nav className="lp-nav">
+    <nav className="lp-nav" aria-label="Primary navigation">
       <div className="lp-nav-bg" />
       <div className="lp-nav-inner">
-        <div className="lp-logo">Convo<span>Autopsy</span></div>
-        <div className="lp-nav-links">
-          <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="lp-nav-gh">
-            GitHub ↗
-          </a>
-          <button className="lp-nav-cta" onClick={user ? onGoToDashboard : onGetStarted}>
-            {user ? 'My Analyses' : 'Get started'}
+        <a className="lp-logo" href="#top">Convo<span>Autopsy</span><small>REFLECTION LAB</small></a>
+        <div className="lp-nav-destinations">
+          {destinations.map(([label, href]) => <a key={label} href={href}>{label}</a>)}
+        </div>
+        <div className="lp-nav-actions">
+          <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="lp-nav-gh">Source ↗</a>
+          <button className="lp-nav-cta" onClick={openSample}>Analyze a sample</button>
+          <button
+            type="button"
+            className="lp-menu-toggle"
+            aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+            aria-expanded={menuOpen}
+            aria-controls="landing-mobile-menu"
+            onClick={() => setMenuOpen((current) => !current)}
+          >
+            <span aria-hidden="true" />
+            <span aria-hidden="true" />
           </button>
         </div>
       </div>
+      {menuOpen && (
+        <div className="lp-mobile-menu" id="landing-mobile-menu">
+          {destinations.map(([label, href]) => <a key={label} href={href} onClick={() => setMenuOpen(false)}>{label}</a>)}
+        </div>
+      )}
     </nav>
   )
 }
 
 // ── Hero ───────────────────────────────────────────────────────────
 function HeroSection({ user, onGetStarted }) {
-  const headRef = useRef()
-  const subRef = useRef()
-  const ctaRef = useRef()
-  const statsRef = useRef()
-
-  useEffect(() => {
-    const tl = gsap.timeline({ delay: 0.2 })
-    tl.fromTo(headRef.current,
-        { opacity: 0, y: 50, filter: 'blur(12px)' },
-        { opacity: 1, y: 0, filter: 'blur(0px)', duration: 1.1, ease: 'power3.out' })
-      .fromTo(subRef.current,
-        { opacity: 0, y: 24 },
-        { opacity: 1, y: 0, duration: 0.85, ease: 'power2.out' }, '-=0.55')
-      .fromTo(ctaRef.current,
-        { opacity: 0, y: 18 },
-        { opacity: 1, y: 0, duration: 0.7, ease: 'power2.out' }, '-=0.45')
-      .fromTo(statsRef.current,
-        { opacity: 0, y: 14 },
-        { opacity: 1, y: 0, duration: 0.6, ease: 'power2.out' }, '-=0.35')
-  }, [])
-
   return (
-    <div className="lp-hero">
+    <section className="lp-hero" id="top" aria-labelledby="landing-title">
       <div className="lp-hero-left">
         <div className="lp-eyebrow">
           <span className="lp-eyebrow-dot" />
-          Educational conversation reflection
+          Words first · interpretations second
         </div>
 
-        <h1 ref={headRef} className="lp-h1">
-          See wording patterns.<br />
-          <span className="lp-gradient-text">Reflect before replying.</span>
+        <h1 className="lp-h1" id="landing-title">
+          Read the exchange.<br />
+          <span className="lp-gradient-text">Question the pattern.</span>
         </h1>
 
-        <p ref={subRef} className="lp-hero-sub">
-          ConvoAutopsy offers educational estimates of conversation patterns,
-          then helps you draft options to review and edit before sending.
+        <p className="lp-hero-sub">
+          ConvoAutopsy turns message wording into an educational estimate you can inspect, challenge, and use to draft a calmer option. It cannot determine intent, diagnose a person, or replace professional advice.
         </p>
 
-        <div ref={ctaRef} className="lp-hero-ctas">
+        <div className="lp-hero-ctas">
           <button className="lp-btn-primary" onClick={onGetStarted}>
-            {user ? 'Go to dashboard' : 'Try Demo — Free'}
+            {user ? 'Open my analyses' : 'Analyze a sample'}
           </button>
-          <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="lp-btn-ghost">
-            View GitHub ↗
-          </a>
+          <a href="#method" className="lp-btn-ghost">See the method ↓</a>
         </div>
 
-        <div ref={statsRef} className="lp-hero-stats">
-          <div className="lp-stat">
-            <span className="lp-stat-num">4</span>
-            <span className="lp-stat-label">Pattern lenses</span>
-          </div>
-          <div className="lp-stat-divider" />
-          <div className="lp-stat">
-            <span className="lp-stat-num">100</span>
-            <span className="lp-stat-label">Estimate scale</span>
-          </div>
-          <div className="lp-stat-divider" />
-          <div className="lp-stat">
-            <span className="lp-stat-num">Local</span>
-            <span className="lp-stat-label">Private mode</span>
-          </div>
-          <div className="lp-stat-divider" />
-          <div className="lp-stat">
-            <span className="lp-stat-num">3×</span>
-            <span className="lp-stat-label">Editable drafts</span>
-          </div>
+        <div className="lp-hero-boundaries" aria-label="Sample boundaries">
+          <span>Reviewed fictional sample</span>
+          <span>No network request</span>
+          <span>Editable response option</span>
         </div>
       </div>
 
-      {/* Right side is empty — 3D canvas shows through transparent hero */}
-      <div className="lp-hero-right" />
-    </div>
+      <div className="lp-hero-right" id="demo"><HeroLiveDemo /></div>
+    </section>
   )
 }
 
@@ -144,7 +120,7 @@ function HowItWorksSection() {
   }, [])
 
   return (
-    <section className="lp-section" ref={ref}>
+    <section className="lp-section" id="method" ref={ref}>
       <div className="lp-container">
         <div className="lp-section-header">
           <span className="lp-eyebrow">how it works</span>
@@ -258,7 +234,7 @@ function LiveDemoSection({ onGetStarted }) {
             live demo
           </span>
           <h2 className="lp-h2">See it work in real time.</h2>
-          <p className="lp-section-sub">Watch the AI analyze a real conversation — or paste your own.</p>
+          <p className="lp-section-sub">Run the reviewed sample or paste your own. The result identifies whether it used the on-device estimate or optional AI-assisted analysis.</p>
         </div>
 
         <div className="demo-grid">
@@ -805,6 +781,34 @@ function TechStackSection() {
   )
 }
 
+// ── Privacy boundary ──────────────────────────────────────────────
+function PrivacySection() {
+  return (
+    <section className="lp-privacy-section" id="privacy" aria-labelledby="privacy-title">
+      <div className="lp-container lp-privacy-layout">
+        <div className="lp-privacy-index" aria-hidden="true"><span>PRIVATE</span><strong>BY<br />DECISION</strong></div>
+        <div className="lp-privacy-copy">
+          <span className="lp-eyebrow">privacy and consent</span>
+          <h2 className="lp-h2" id="privacy-title">Know what stays local.<br />Review what leaves.</h2>
+          <p>
+            ConvoAutopsy provides an on-device estimate. Optional AI-assisted analysis is separated by a consent and exact-data review step so you can inspect the message fields before choosing to send them.
+          </p>
+          <div className="lp-privacy-points">
+            <div><span>01</span><strong>Local option</strong><p>Use the educational on-device estimate without a remote analysis request.</p></div>
+            <div><span>02</span><strong>Explicit review</strong><p>See the outbound fields before optional AI-assisted processing.</p></div>
+            <div><span>03</span><strong>Your decision</strong><p>Edit drafts yourself and use only what fits your situation.</p></div>
+          </div>
+          <div className="lp-privacy-links">
+            <a href={`${LEGAL_BASE}/privacy.html`}>Privacy Policy ↗</a>
+            <a href={`${LEGAL_BASE}/terms.html`}>Terms of Use ↗</a>
+            <a href={`${LEGAL_BASE}/support.html`}>Support ↗</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 // ── CTA Banner ─────────────────────────────────────────────────────
 function CTABanner({ user, onGetStarted }) {
   return (
@@ -835,9 +839,9 @@ function Footer() {
       <div className="lp-footer-inner">
         <div className="lp-footer-logo">Convo<span>Autopsy</span></div>
         <div className="lp-footer-links">
-          <a href="privacy.html">Privacy</a>
-          <a href="terms.html">Terms</a>
-          <a href="support.html">Support</a>
+          <a href={`${LEGAL_BASE}/privacy.html`}>Privacy Policy</a>
+          <a href={`${LEGAL_BASE}/terms.html`}>Terms of Use</a>
+          <a href={`${LEGAL_BASE}/support.html`}>Support</a>
           <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
           <a href="https://github.com/avinashamanchi" target="_blank" rel="noopener noreferrer">Built by Avi Amanchi</a>
         </div>
@@ -849,43 +853,8 @@ function Footer() {
 
 // ── MAIN EXPORT ────────────────────────────────────────────────────
 export default function LandingPage({ user, onGetStarted, onGoToDashboard }) {
-  const scrollProgressRef = useRef(0)
-
-  useEffect(() => {
-    const ctx = gsap.context(() => {
-      ScrollTrigger.create({
-        trigger: '.lp-hero',
-        start: 'top top',
-        end: 'bottom top',
-        onUpdate: (self) => {
-          scrollProgressRef.current = self.progress
-        }
-      })
-    })
-    return () => ctx.revert()
-  }, [])
-
   return (
     <div className="lp-root">
-      {/* Fixed 3D canvas — visible through hero transparent bg */}
-      <div className="lp-canvas-fixed">
-        <CanvasErrorBoundary>
-          <Canvas
-            camera={{ position: [0, 0, 6.5], fov: 42 }}
-            gl={{ antialias: true, alpha: true }}
-            style={{ background: 'transparent' }}
-          >
-            <ambientLight intensity={0.6} />
-            <hemisphereLight color="#c4b5fd" groundColor="#0a001f" intensity={0.5} />
-            <directionalLight position={[5, 6, 5]}  intensity={1.4} color="#ffffff" />
-            <directionalLight position={[-4,-2,-3]} intensity={0.5} color="#8b5cf6" />
-            <pointLight position={[0, 3, 3]} intensity={0.9} color="#c4b5fd" />
-            <pointLight position={[2,-2, 2]} intensity={0.4} color="#f472b6" />
-            <PhoneScene scrollProgressRef={scrollProgressRef} />
-          </Canvas>
-        </CanvasErrorBoundary>
-      </div>
-
       <NavBar user={user} onGetStarted={onGetStarted} onGoToDashboard={onGoToDashboard} />
 
       {/* Hero — transparent so 3D canvas shows through */}
@@ -899,6 +868,7 @@ export default function LandingPage({ user, onGetStarted, onGoToDashboard }) {
       <ResponseCrafterShowcase onGetStarted={onGetStarted} />
       <FrameworksSection />
       <TechStackSection />
+      <PrivacySection />
       <CTABanner user={user} onGetStarted={onGetStarted} />
       <Footer />
     </div>
