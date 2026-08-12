@@ -9,6 +9,9 @@ Initial fields, reviewed 2026-08-11 against Apple's current metadata limits (rev
 - Support URL: `https://avinashamanchi.github.io/convoautopsy/support.html`
 - Privacy URL: `https://avinashamanchi.github.io/convoautopsy/privacy.html`
 - Terms of Use URL: `https://avinashamanchi.github.io/convoautopsy/terms.html`
+- Marketing URL: `https://avinashamanchi.github.io/convoautopsy/`
+
+Promotional text: `Reflect on difficult conversations with private on-device pattern estimates, optional AI coaching, and response drafts you control.`
 
 App Store record draft:
 
