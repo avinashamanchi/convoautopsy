@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="ConvoAutopsy">
+  <rect width="64" height="64" rx="16" fill="#070708"/>
+  <path d="M44 18a22 22 0 1 0 0 28" fill="none" stroke="#9b6cff" stroke-linecap="round" stroke-width="9"/>
+  <circle cx="44" cy="18" r="4.5" fill="#f2eff5"/>
+  <circle cx="44" cy="46" r="4.5" fill="#f2eff5"/>
+</svg>

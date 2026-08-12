@@ -31,7 +31,7 @@ Current audit date: 2026-08-11.
 
 Do not reuse an earlier commit’s results for a later candidate. Record fresh evidence here only after all commands complete.
 
-- [x] Full root: 15 test files / 119 tests, zero-warning source lint, and production build passed locally under Node 22. The documented large-chunk warning remains visible.
+- [x] Full root: 18 test files / 130 tests, zero-warning source lint, and production build passed locally under Node 22. The Pages artifact test verifies that the base-relative favicon is emitted as a real file. The documented large-chunk warning remains visible.
 - [x] Full mobile: 38 suites / 412 tests, TypeScript, declared lint, Expo Doctor 18/18 in the release checkout, and iOS Expo export passed locally under Node 22. The exact staged-snapshot typecheck also passed without relying on ignored generated declarations.
 - [x] Full Worker: 11 files / 198 tests, TypeScript, zero-warning lint, production dry build, and local-fixture dry build passed locally under Node 22.
 - [x] Redacted scan of tracked files plus web, mobile, production Worker, and fixture Worker outputs passed.

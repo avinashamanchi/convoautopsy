@@ -1,10 +1,30 @@
-import { readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { cwd } from 'node:process'
 import { describe, expect, it } from 'vitest'
+import { build } from 'vite'
 
 const fromRoot = (path) => readFile(new URL(`../../${path}`, import.meta.url), 'utf8')
 const fromRootBytes = (path) => readFile(new URL(`../../${path}`, import.meta.url))
 
 describe('publication gate', () => {
+  it('emits a base-relative favicon inside the GitHub Pages artifact', async () => {
+    const output = await mkdtemp(join(tmpdir(), 'convoautopsy-pages-'))
+    try {
+      await build({
+        root: cwd(),
+        logLevel: 'silent',
+        build: { outDir: output, emptyOutDir: true },
+      })
+      const html = await readFile(join(output, 'index.html'), 'utf8')
+      expect(html).toContain('href="/convoautopsy/favicon.svg"')
+      expect((await stat(join(output, 'favicon.svg'))).isFile()).toBe(true)
+    } finally {
+      await rm(output, { force: true, recursive: true })
+    }
+  })
+
   it('runs every web, mobile, and Worker release gate before upload', async () => {
     const workflow = await fromRoot('.github/workflows/deploy.yml')
     const upload = workflow.indexOf('actions/upload-pages-artifact')
