@@ -1080,6 +1080,7 @@
 
 /* ── Reworked public entry composition ──────────────────────── */
 .lp-root { background: #08070c; }
+.lp-hero { overflow: clip; }
 .lp-root a:focus-visible, .lp-root button:focus-visible { outline: 3px solid #f26fa8; outline-offset: 3px; }
 .lp-canvas-fixed { opacity: .12; filter: saturate(.7); }
 .lp-nav { height: 72px; border-bottom: 1px solid rgba(242,239,245,.1); }
@@ -1158,6 +1159,7 @@
   .lp-privacy-points > div, .lp-privacy-points > div:first-child { min-height: auto; padding: 18px 0; border-right: 0; border-bottom: 1px solid rgba(17,16,23,.18); }
   .lp-privacy-points > div:last-child { border-bottom: 0; }
   .lp-privacy-points strong { margin-top: 22px; }
+  .lp-footer-links { flex-wrap: wrap; gap: 10px 14px; max-width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) {
   .lp-canvas-fixed { display: none; }

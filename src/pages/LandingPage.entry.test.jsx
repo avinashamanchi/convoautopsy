@@ -2,6 +2,9 @@
 
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { cwd } from 'node:process'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const animation = vi.hoisted(() => {
@@ -116,5 +119,12 @@ describe('ConvoAutopsy public entry', () => {
 
     act(() => { findButton(/analyze a sample/i).click() })
     expect(onGetStarted).toHaveBeenCalledTimes(1)
+  })
+
+  it('wraps the complete footer navigation on narrow phones', () => {
+    const styles = readFileSync(resolve(cwd(), 'src/pages/LandingPage.css'), 'utf8')
+
+    expect(styles).toContain('.lp-footer-links { flex-wrap: wrap;')
+    expect(styles).toContain('.lp-hero { overflow: clip; }')
   })
 })
