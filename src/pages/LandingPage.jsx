@@ -76,7 +76,7 @@ function HeroSection({ user, onGetStarted }) {
         </h1>
 
         <p className="lp-hero-sub">
-          ConvoAutopsy turns message wording into an educational estimate you can inspect, challenge, and use to draft a calmer option. It cannot determine intent, diagnose a person, or replace professional advice.
+          ConvoAutopsy turns message wording into an educational estimate you can inspect, challenge, and use to draft a calmer option. It cannot determine intent, establish facts about a person, or replace professional advice.
         </p>
 
         <div className="lp-hero-ctas">
