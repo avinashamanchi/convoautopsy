@@ -2,10 +2,12 @@
 
 This checklist separates repository state from credentialed and externally observed state. A checked code item is not evidence of a signed build, TestFlight result, App Store acceptance, or publication.
 
-Current audit date: 2026-08-11.
+Current audit date: 2026-08-14.
 
 ## Code-complete repository gates
 
+- [x] Apple's June 2026 review changes were rechecked. ConvoAutopsy's prepared age-rating answer for social-media capabilities is `No`: it has no social feed/discovery or many-user redistribution of user content. The account holder must enter that answer in App Store Connect, and any future community feature reopens the review.
+- [x] Expo SDK 54 is deliberately retained for the tested iOS 15.1+ surface. Expo's current `sdk-54` EAS image uses Xcode 26.0 and can meet Apple's iOS 26 SDK upload floor; the exact EAS build log and processed archive remain required proof. Expo Go is not production validation.
 - [x] Bundle and Maestro app ID are `com.avinashamanchi.convoautopsy`; the app is iPhone-only and declares `ios.usesAppleSignIn: false` because it offers no account or Apple sign-in.
 - [x] The Expo app under `mobile/` is the only supported iOS release target. Root `ios`, `sync`, and `build:app` commands deterministically reject the historical Capacitor path; its old target ID remains historical rather than being presented as a second candidate.
 - [x] Production Expo config fails closed unless the AI proxy is a credential-free HTTPS production DNS origin and the RevenueCat value is a non-placeholder Apple public SDK key. It rejects trailing-dot/single-label hosts, example and special-use suffixes including `.alt`, local/private/reserved/documentation addresses, and literal IPv6. Error messages name only the variable; neither value is copied into Expo `extra`.
@@ -26,19 +28,21 @@ Current audit date: 2026-08-11.
 - [x] Screenshot planning targets a valid 6.9-inch iPhone size with synthetic scenes, short customer-language overlays, native-pixel/alpha/clarity checks, and reviewed wording. It does not claim screenshots exist.
 - [x] `apple-review-guideline-applicability.md` records every Apple Safety, Performance, Business, Design, and Legal family as implemented, externally gated, or not applicable.
 - [x] A production-only Expo config plugin strips unused Bonjour/local-network declarations, disables arbitrary ATS loads, and removes localhost transport exceptions from the generated release Info.plist; a sanitized production prebuild was inspected and contained none of those development declarations.
+- [x] The app target generates a valid source privacy manifest with tracking disabled, no tracking domains, and conservative unlinked user-content, pseudonymous-identifier, purchase, interaction, performance, and diagnostics declarations matching the privacy draft. The exact archive privacy report and every CocoaPods SDK manifest remain signed-build gates.
 
 ## Local verification for the current candidate
 
 Do not reuse an earlier commit’s results for a later candidate. Record fresh evidence here only after all commands complete.
 
 - [x] Full root: 18 test files / 130 tests, zero-warning source lint, and production build passed locally under Node 22. The Pages artifact test verifies that the base-relative favicon is emitted as a real file. The documented large-chunk warning remains visible.
-- [x] Full mobile: 38 suites / 412 tests, TypeScript, declared lint, Expo Doctor 18/18 in the release checkout, and iOS Expo export passed locally under Node 22. The exact staged-snapshot typecheck also passed without relying on ignored generated declarations.
+- [x] Full mobile: 38 suites / 413 tests, TypeScript, declared lint, Expo Doctor 18/18 in the release checkout, and iOS Expo export passed locally under Node 22. The exact staged-snapshot typecheck also passed without relying on ignored generated declarations.
 - [x] Full Worker: 11 files / 198 tests, TypeScript, zero-warning lint, production dry build, and local-fixture dry build passed locally under Node 22.
 - [x] Redacted scan of tracked files plus web, mobile, production Worker, and fixture Worker outputs passed.
-- [x] Root and Worker production dependency audits with `--omit=dev --audit-level=high` returned 0 vulnerabilities at the current audit. Mobile CI now fails closed on any high/critical advisory except the two explicitly reviewed `image-size` parser advisories (GitHub sources `1138808` and `1138809`) through Expo/Metro; the current report has 12 transitive findings, and npm offers only a forced breaking Expo downgrade.
+- [x] Root and Worker full dependency audits with `--audit-level=high` returned 0 vulnerabilities at the current audit, including development/build tooling. Mobile CI now fails closed on any high/critical advisory except the two explicitly reviewed `image-size` parser advisories (GitHub sources `1138808` and `1138809`) through Expo/Metro; the current report has 12 transitive findings, and npm offers only a forced breaking Expo downgrade. The separate 2026-08-14 `nanoid` advisory was remediated to `3.3.18` rather than allowlisted.
 - [x] GitHub Dependabot alerts and automated security fixes are enabled. CodeQL default setup uses the extended query suite for Actions and JavaScript/TypeScript, the current PR scan passed, workflow actions are pinned to immutable commit SHAs, and the historical phase-one package lock now audits at zero vulnerabilities.
 - [x] Missing and sanitized-example production Expo configs exited nonzero; a synthetic valid config passed with the authoritative bundle ID and neither public value in `extra`.
 - [x] The first exact short local fixture run stopped at `LOAD_GATE_CAPACITY` after 65 successful scheduled samples. Four identical subsequent runs passed 100/101 with zero leaks. The independent controller then ran three more consecutive identical 100/101 gates successfully, and the review-fix candidate added another successful 100/101 run. The original anomaly remains preserved verbatim in the Task 8B report rather than being erased.
+- [x] The 2026-08-14 current-candidate short fixture gate passed a 1,000-simultaneous-client overload contract: 100 admissions, 900 bounded `SERVICE_BUSY` responses, one rate-limited abuse probe, 70/70 non-injected workload requests successful, p95 85.269 ms, and zero active reservation leaks. This is local provider-stub evidence, not a live Cloudflare or 1,000-successful-request claim.
 - [x] Workflow/publication tests, YAML structure checks, `git diff --check`, and explicit exclusion checks are part of the final candidate verification. The ignored report preserves commands and results.
 
 Historical note: commit `d2a02edbced8d3984058ebc0814b97612824ac22` had a separate clean baseline, but it predates the paid allowance, current legal/configuration work, and new load gates. It is not evidence for this candidate. The web build historically emitted a non-blocking large-chunk warning; do not suppress or misrepresent it.
@@ -63,7 +67,7 @@ Historical note: commit `d2a02edbced8d3984058ebc0814b97612824ac22` had a separat
 - [ ] Enter `GROQ_API_KEY`, `REVENUECAT_SECRET_API_KEY`, and `RATE_LIMIT_HMAC_SECRET` only in the Cloudflare secret store; deploy and verify the production Worker.
 - [ ] Revoke any historical exposed provider/GitHub token and complete an authorized history purge if required. Scanner output must remain redacted.
 - [ ] Configure the EAS project and production environment variables, log in, and create a signed development/production build with the required current Xcode/iOS SDK toolchain.
-- [x] Privacy, Terms, and Support returned HTTPS 200 anonymously on 2026-08-11 and matched the tracked `public/` release files byte for byte; recheck immediately before submission.
+- [x] Privacy, Terms, and Support returned HTTPS 200 anonymously on 2026-08-14 and matched the tracked `public/` release files byte for byte; recheck immediately before submission.
 
 ## Signed device and TestFlight pending — all unchecked
 
@@ -78,6 +82,7 @@ Historical note: commit `d2a02edbced8d3984058ebc0814b97612824ac22` had a separat
 
 - [ ] Reconcile App Privacy answers with the exact release binary, RevenueCat/Apple SDK privacy manifests, server behavior, and Apple’s current definitions.
 - [ ] Complete Apple's updated age-rating questionnaire, export compliance, subscription review details, localization, screenshots, support/privacy/terms URLs, and review notes.
+- [ ] Enter `No` for the age-rating form's social-media-capability response, matching the submitted binary; change it only after a fresh capability/policy review.
 - [ ] Review Notes state no credentials are required and include the exact local, consented remote, save/trends/draft, Delete All, subscription, restore, and support paths.
 - [ ] Complete the Accessibility Nutrition Label from signed-device VoiceOver, Voice Control, Larger Text, contrast, and Reduce Motion evidence; do not claim unverified support.
 - [ ] Complete the product page name, icon, subtitle, description, promotional text, keywords, and 1–10 screenshots with accurate reviewed wording, no placeholders, and no private conversation data.
@@ -91,7 +96,7 @@ Historical note: commit `d2a02edbced8d3984058ebc0814b97612824ac22` had a separat
 ## Current environment limitations
 
 - [ ] The local machine has only Command Line Tools selected and no usable full Xcode archive proof. CocoaPods 1.17.0 is now installed, but CocoaPods alone cannot compile or sign the candidate.
-- [ ] EAS was observed as `Not logged in` again on 2026-08-11; no EAS build or submission is inferred.
+- [ ] EAS was observed as `Not logged in` again on 2026-08-14; no EAS build or submission is inferred.
 - [ ] The AI proxy is not deployed and no Cloudflare, Groq, RevenueCat secret, Expo, Apple, or signing credential has been entered into this repository.
 - [ ] GitHub secret-scanning alert 1 records a historical GitHub OAuth token with unknown validity. Authorized revocation and provider-side confirmation remain required; no token value is reproduced in this checklist.
 

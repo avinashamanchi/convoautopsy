@@ -119,6 +119,14 @@ describe('AI proxy routes', () => {
     expect(failure.headers.get('x-request-id')).toBe(failureBody.error.requestId);
     expect(success.headers.get('access-control-expose-headers')).toContain('x-request-id');
     expect(failure.headers.get('access-control-expose-headers')).toContain('x-request-id');
+    for (const response of [success, failure]) {
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+      expect(response.headers.get('strict-transport-security')).toBe('max-age=31536000');
+      expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+      expect(response.headers.get('permissions-policy')).toBe('camera=(), microphone=(), geolocation=(), payment=()');
+      expect(response.headers.get('content-security-policy')).toBe("default-src 'none'; frame-ancestors 'none'");
+    }
   });
 
   it('rejects non-POST methods and unknown routes without echoing request content', async () => {

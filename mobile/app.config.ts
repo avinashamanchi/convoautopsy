@@ -61,7 +61,7 @@ function isRevenueCatApplePublicKey(value: string | undefined): boolean {
   return Boolean(value
     && value === value.trim()
     && /^appl_[A-Za-z0-9_-]{12,}$/.test(value)
-    && !/(?:example|placeholder|your|test)/i.test(value));
+    && !/(?:example|placeholder|replace|your|test)/i.test(value));
 }
 
 export function createAppConfig(environment: Environment = process.env): ExpoConfig {
@@ -94,6 +94,29 @@ export function createAppConfig(environment: Environment = process.env): ExpoCon
       buildNumber: '1',
       supportsTablet: false,
       usesAppleSignIn: false,
+      privacyManifests: {
+        NSPrivacyTracking: false,
+        NSPrivacyTrackingDomains: [],
+        NSPrivacyAccessedAPITypes: [],
+        NSPrivacyCollectedDataTypes: ([
+          'NSPrivacyCollectedDataTypeOtherUserContent',
+          'NSPrivacyCollectedDataTypeDeviceID',
+          'NSPrivacyCollectedDataTypePurchaseHistory',
+          'NSPrivacyCollectedDataTypeProductInteraction',
+          'NSPrivacyCollectedDataTypePerformanceData',
+          'NSPrivacyCollectedDataTypeOtherDiagnosticData',
+        ] as const).map((NSPrivacyCollectedDataType) => ({
+          NSPrivacyCollectedDataType,
+          NSPrivacyCollectedDataTypeLinked: false,
+          NSPrivacyCollectedDataTypeTracking: false,
+          NSPrivacyCollectedDataTypePurposes: NSPrivacyCollectedDataType === 'NSPrivacyCollectedDataTypePurchaseHistory'
+            ? [
+              'NSPrivacyCollectedDataTypePurposeAppFunctionality',
+              'NSPrivacyCollectedDataTypePurposeAnalytics',
+            ]
+            : ['NSPrivacyCollectedDataTypePurposeAppFunctionality'],
+        })),
+      },
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
         NSPhotoLibraryUsageDescription: 'Choose a conversation screenshot for private on-device text extraction.'

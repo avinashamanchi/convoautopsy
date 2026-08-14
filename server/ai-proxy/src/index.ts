@@ -447,7 +447,15 @@ function corsResponse(origin: string | null): Response {
 }
 
 function corsHeaders(origin: string | null): Headers {
-  const headers = new Headers({ Vary: 'Origin' });
+  const headers = new Headers({
+    Vary: 'Origin',
+    'cache-control': 'no-store',
+    'content-security-policy': "default-src 'none'; frame-ancestors 'none'",
+    'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=()',
+    'referrer-policy': 'no-referrer',
+    'strict-transport-security': 'max-age=31536000',
+    'x-content-type-options': 'nosniff',
+  });
   if (isAllowedOrigin(origin) && origin) {
     headers.set('access-control-allow-origin', origin);
     headers.set('access-control-expose-headers', 'x-request-id, retry-after, x-provider-budget-warning');

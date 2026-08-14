@@ -55,8 +55,11 @@ describe('publication gate', () => {
     const workerPackage = JSON.parse(await fromRoot('server/ai-proxy/package.json'))
     expect(workerPackage.scripts.build).toMatch(/wrangler deploy --dry-run --outdir dist/)
     const rootPackage = JSON.parse(await fromRoot('package.json'))
+    expect(rootPackage.overrides.nanoid).toBe('3.3.18')
+    expect(workerPackage.overrides.nanoid).toBe('3.3.18')
     expect(rootPackage.scripts['scan:secrets']).toContain('server/ai-proxy/dist server/ai-proxy/dist-load')
-    expect(workflow.match(/npm audit --omit=dev --audit-level=high/g)).toHaveLength(2)
+    expect(workflow.match(/npm audit --audit-level=high/g)).toHaveLength(2)
+    expect(workflow).not.toContain('npm audit --omit=dev')
     expect(workflow).toContain('node scripts/check-mobile-audit.mjs')
     expect(workflow.indexOf('node scripts/check-mobile-audit.mjs')).toBeLessThan(upload)
   })
@@ -83,14 +86,15 @@ describe('publication gate', () => {
     const workflow = await fromRoot('.github/workflows/release-readiness.yml')
     expect(workflow).toMatch(/on:\s*\n\s*workflow_dispatch:/)
     expect(workflow).not.toMatch(/\bpush:|pull_request:|deploy-pages|\beas(?:-cli)?\b[^\n]*submit|\bwrangler\b[^\n]*deploy(?! --dry-run)/i)
-    for (const command of ['npm test', 'npm run lint', 'npm run build', 'npm run typecheck', 'npm run expo:doctor', 'npm run export:ios', 'scan-secrets.mjs --tracked', 'npm audit --omit=dev --audit-level=high']) {
+    for (const command of ['npm test', 'npm run lint', 'npm run build', 'npm run typecheck', 'npm run expo:doctor', 'npm run export:ios', 'scan-secrets.mjs --tracked', 'npm audit --audit-level=high']) {
       expect(workflow).toContain(command)
     }
+    expect(workflow).not.toContain('npm audit --omit=dev')
     expect(workflow).toContain('deployed=false')
     expect(workflow).toContain('submitted=false')
   })
 
-  it('scans each isolated CI build, audits production dependencies, and runs the short Worker capacity gate', async () => {
+  it('scans each isolated CI build, audits all dependencies, and runs the short Worker capacity gate', async () => {
     const workflow = await fromRoot('.github/workflows/ios-ci.yml')
     expect(workflow).toContain('node scripts/scan-secrets.mjs --tracked --paths mobile/dist')
     expect(workflow).toContain('node scripts/scan-secrets.mjs --tracked --paths server/ai-proxy/dist server/ai-proxy/dist-load')
@@ -101,7 +105,8 @@ describe('publication gate', () => {
     }
     expect(workflow).toContain('npm run test:load:ci')
     expect(workflow).toContain('wrangler.load.jsonc')
-    expect(workflow.match(/npm audit --omit=dev --audit-level=high/g)).toHaveLength(2)
+    expect(workflow.match(/npm audit --audit-level=high/g)).toHaveLength(2)
+    expect(workflow).not.toContain('npm audit --omit=dev')
     expect(workflow).toContain('node scripts/check-mobile-audit.mjs')
   })
 
@@ -110,7 +115,8 @@ describe('publication gate', () => {
     expect(workflow).toContain('npm run test:load -- --sustained-seconds 3600 --burst-seconds 300')
     expect(workflow).toContain('wrangler.load.jsonc')
     expect(workflow).toContain('timeout-minutes: 90')
-    expect(workflow.match(/npm audit --omit=dev --audit-level=high/g)).toHaveLength(2)
+    expect(workflow.match(/npm audit --audit-level=high/g)).toHaveLength(2)
+    expect(workflow).not.toContain('npm audit --omit=dev')
     expect(workflow).toContain('node ../scripts/check-mobile-audit.mjs')
     expect(workflow).toContain('deployed=false')
     expect(workflow).toContain('submitted=false')

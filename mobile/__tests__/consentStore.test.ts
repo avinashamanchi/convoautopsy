@@ -1,4 +1,5 @@
 jest.mock('expo-secure-store', () => ({
+  WHEN_UNLOCKED_THIS_DEVICE_ONLY: 'when-unlocked-device-only',
   getItemAsync: jest.fn(),
   setItemAsync: jest.fn(),
   deleteItemAsync: jest.fn(),
@@ -114,6 +115,7 @@ it('uses the SDK 54 native UUID provider when no test token factory is injected'
   expect(secureStore.setItemAsync).toHaveBeenCalledWith(
     'convoautopsy.installation-token.v1',
     'd35af7b0-1a44-47c7-a63c-71071fd4ed4d',
+    { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY },
   );
 });
 
