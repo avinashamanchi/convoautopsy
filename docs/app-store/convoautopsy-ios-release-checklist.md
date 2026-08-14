@@ -65,7 +65,7 @@ Historical note: commit `d2a02edbced8d3984058ebc0814b97612824ac22` had a separat
 - [ ] Connect the App Store app to RevenueCat; import both products; attach entitlement `convo_pro`; configure the current offering/packages; verify the actual restore-transfer setting; and verify that no unreviewed webhook is configured.
 - [ ] Create/bind Cloudflare production Durable Objects and migrations, `ENTITLEMENT_CACHE` KV, reviewed daily budget, Worker route/domain, and observability destination.
 - [ ] Enter `GROQ_API_KEY`, `REVENUECAT_SECRET_API_KEY`, and `RATE_LIMIT_HMAC_SECRET` only in the Cloudflare secret store; deploy and verify the production Worker.
-- [ ] Revoke any historical exposed provider/GitHub token and complete an authorized history purge if required. Scanner output must remain redacted.
+- [x] The historical GitHub OAuth credential from secret-scanning alert 1 is absent from `main`, differs from current CLI authentication, returned HTTP 401, and is recorded by GitHub as resolved/revoked on 2026-08-12. No token value is reproduced.
 - [ ] Configure the EAS project and production environment variables, log in, and create a signed development/production build with the required current Xcode/iOS SDK toolchain.
 - [x] Privacy, Terms, and Support returned HTTPS 200 anonymously on 2026-08-14 and matched the tracked `public/` release files byte for byte; recheck immediately before submission.
 
@@ -98,6 +98,6 @@ Historical note: commit `d2a02edbced8d3984058ebc0814b97612824ac22` had a separat
 - [ ] The local machine has only Command Line Tools selected and no usable full Xcode archive proof. CocoaPods 1.17.0 is now installed, but CocoaPods alone cannot compile or sign the candidate.
 - [ ] EAS was observed as `Not logged in` again on 2026-08-14; no EAS build or submission is inferred.
 - [ ] The AI proxy is not deployed and no Cloudflare, Groq, RevenueCat secret, Expo, Apple, or signing credential has been entered into this repository.
-- [ ] GitHub secret-scanning alert 1 records a historical GitHub OAuth token with unknown validity. Authorized revocation and provider-side confirmation remain required; no token value is reproduced in this checklist.
+- [x] GitHub's API reported zero open secret-scanning alerts on 2026-08-14. The resolved alert remains documented above; this does not infer the state of any provider credential that is not recorded by GitHub.
 
 No App Store acceptance, publication, external provider configuration, or signed-device result is claimed by this checklist. Legal-page availability is independently verified above.
