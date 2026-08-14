@@ -99,7 +99,9 @@ export function createConsentStore({
         const current = await secureStore.getItemAsync(INSTALLATION_TOKEN_KEY);
         if (current) return current;
         const token = createToken();
-        await secureStore.setItemAsync(INSTALLATION_TOKEN_KEY, token);
+        await secureStore.setItemAsync(INSTALLATION_TOKEN_KEY, token, {
+          keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+        });
         return token;
       } catch {
         throw new SecureStorageUnavailableError();

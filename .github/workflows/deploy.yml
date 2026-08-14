@@ -41,7 +41,7 @@ jobs:
         run: npm run lint
 
       - name: Audit web
-        run: npm audit --omit=dev --audit-level=high
+        run: npm audit --audit-level=high
 
       - name: Build web
         env:
@@ -104,7 +104,7 @@ jobs:
         working-directory: server/ai-proxy
 
       - name: Audit Worker
-        run: npm audit --omit=dev --audit-level=high
+        run: npm audit --audit-level=high
         working-directory: server/ai-proxy
 
       - name: Scan tracked tree and built bundles for secrets

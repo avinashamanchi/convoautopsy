@@ -59,7 +59,7 @@ jobs:
         working-directory: server/ai-proxy
       - run: node scripts/scan-secrets.mjs --tracked --paths server/ai-proxy/dist server/ai-proxy/dist-load
         working-directory: .
-      - run: npm audit --omit=dev --audit-level=high
+      - run: npm audit --audit-level=high
         working-directory: server/ai-proxy
 
   web:
@@ -76,4 +76,4 @@ jobs:
       - run: npm run build
       - run: node scripts/scan-secrets.mjs --tracked --paths dist
         working-directory: .
-      - run: npm audit --omit=dev --audit-level=high
+      - run: npm audit --audit-level=high

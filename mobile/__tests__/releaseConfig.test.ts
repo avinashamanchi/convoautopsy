@@ -22,6 +22,21 @@ describe('App Store release configuration', () => {
     expect(appConfig.ios?.supportsTablet).toBe(false);
     expect(appConfig.ios?.usesAppleSignIn).toBe(false);
     expect(appConfig.ios?.infoPlist?.ITSAppUsesNonExemptEncryption).toBe(false);
+    expect(appConfig.ios?.privacyManifests?.NSPrivacyTracking).toBe(false);
+    expect(appConfig.ios?.privacyManifests?.NSPrivacyTrackingDomains).toEqual([]);
+    expect(appConfig.ios?.privacyManifests?.NSPrivacyCollectedDataTypes?.map(
+      (entry) => entry.NSPrivacyCollectedDataType,
+    )).toEqual([
+      'NSPrivacyCollectedDataTypeOtherUserContent',
+      'NSPrivacyCollectedDataTypeDeviceID',
+      'NSPrivacyCollectedDataTypePurchaseHistory',
+      'NSPrivacyCollectedDataTypeProductInteraction',
+      'NSPrivacyCollectedDataTypePerformanceData',
+      'NSPrivacyCollectedDataTypeOtherDiagnosticData',
+    ]);
+    expect(appConfig.ios?.privacyManifests?.NSPrivacyCollectedDataTypes?.every(
+      (entry) => entry.NSPrivacyCollectedDataTypeTracking === false,
+    )).toBe(true);
     expect(appConfig.extra).toMatchObject({
       privacyPolicyUrl: 'https://avinashamanchi.github.io/convoautopsy/privacy.html',
       supportUrl: 'https://avinashamanchi.github.io/convoautopsy/support.html',
@@ -95,7 +110,7 @@ describe('App Store release configuration', () => {
     }
   });
 
-  it.each([undefined, '', 'appl_', 'appl_example_public_sdk_key', 'goog_Q7mP2xR9kL4vN8sT6yW3'])('rejects an invalid production RevenueCat Apple public key without exposing it', (apiKey) => {
+  it.each([undefined, '', 'appl_', 'appl_example_public_sdk_key', 'appl_replace_with_public_sdk_key', 'goog_Q7mP2xR9kL4vN8sT6yW3'])('rejects an invalid production RevenueCat Apple public key without exposing it', (apiKey) => {
     const environment = {
       EAS_BUILD_PROFILE: 'production',
       EXPO_PUBLIC_AI_PROXY_URL: 'https://api.convoautopsy.com',

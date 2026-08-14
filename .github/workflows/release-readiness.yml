@@ -26,7 +26,7 @@ jobs:
           npm test
           npm run lint
           npm run build
-          npm audit --omit=dev --audit-level=high
+          npm audit --audit-level=high
 
       - name: Mobile gates
         working-directory: mobile
@@ -48,7 +48,7 @@ jobs:
           npm run lint
           npm run build
           npx wrangler deploy --dry-run --config wrangler.load.jsonc --outdir dist-load
-          npm audit --omit=dev --audit-level=high
+          npm audit --audit-level=high
 
       - name: Full local provider-stub capacity and cost gate
         timeout-minutes: 90
