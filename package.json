@@ -48,7 +48,7 @@
     "jsdom": "^26.1.0",
     "typescript": "^6.0.2",
     "vite": "^8.0.1",
-    "vitest": "^4.0.18"
+    "vitest": "^4.1.11"
   },
   "overrides": {
     "nanoid": "3.3.18"
